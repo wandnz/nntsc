@@ -70,8 +70,8 @@ class Database:
                 except:
                     raise   # XXX
 
-        self.commit_transaction()
         self.metadata.create_all()
+        self.commit_transaction()
 
     def __delete_everything(self, engine):
         self.meta.drop_all(bind=engine)
@@ -87,7 +87,7 @@ class Database:
     
     def __build_data_table(self, name, columns):
         id_col = Column('stream_id', Integer, ForeignKey("streams.id"), \
-                    nullable = False, primary_key=True)
+                    nullable = False)
         ts_col = Column('timestamp', Integer, nullable=False)
         columns = [id_col, ts_col] + columns
         t = Table(name, self.metadata, *columns)
@@ -246,11 +246,12 @@ class Database:
         self.commit_transaction()
         return stream_id
 
-    def insert_data(self, stream_id, timestamp, data):
-        table = self.meta.tables['data']
+    def insert_data(self, mod, modsubtype, stream_id, timestamp, **kwargs):
+        table = self.meta.tables['data_' + mod + "_" + modsubtype]
         result = self.conn.execute(table.insert(), stream_id = stream_id, \
-                timestamp=timestamp, data=data)
+                timestamp=timestamp, **kwargs)
                 
+        # TODO check result for errors
         result.close()
         
         self.pending += 1
