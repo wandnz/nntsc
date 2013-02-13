@@ -11,6 +11,7 @@ def icmp_stream_table():
         Column('source', String, nullable=False),
         Column('destination', String, nullable=False),
         Column('packetsize', String, nullable=False),
+        Column('datastyle', String, nullable=False),
         Column('lasttimestamp', Integer, nullable=False, default=0)
     ]
 
@@ -26,9 +27,10 @@ def icmp_data_table():
         Column('errorcode', Integer, nullable=False)
     ]
 
-def icmp_insert_stream(db, source, dest, size, start, name):
-    db.insert_stream(mod="amp", modsubtype="icmp", name=name, source=source,
-            destination=dest, packetsize=size, lasttimestamp=start)
+def icmp_insert_stream(db, source, dest, size, name):
+    db.insert_stream(mod="amp", modsubtype="icmp", name=name, 
+            source=source, destination=dest, packetsize=size, 
+            datastyle="rtt_ms", lasttimestamp=0)
 
 def icmp_stream_constraints():
     return ['source', 'destination', 'packetsize']
@@ -43,14 +45,6 @@ class AmpModule:
         self.icmp_tests = {}
 
         for i in tests:
-            if i['lasttimestamp'] == 0:
-                start = ts - 120
-                start = start - (start % 60)
-                start -= 30
-                i['lasttimestamp'] = start
-            elif (i['lasttimestamp'] % 60) != 30:
-                i['lasttimestamp'] -= (i['lasttimestamp'] % 60)
-                i['lasttimestamp'] -= 30
 
             if i['modsubtype'] == 'icmp':
                 self.icmp_tests[i['stream_id']] = i
@@ -85,7 +79,6 @@ def insert_amp_streams(db, conf):
     target = None
     test = None
     subtype = None
-    start = None
 
     for line in f:
         if line[0] == '#':
@@ -104,49 +97,23 @@ def insert_amp_streams(db, conf):
             source = x[1]
         if x[0] == 'target':
             target = x[1]
-        if x[0] == 'startts':
-            start = x[1]
         if x[0] == 'test':
             test = x[1]
         if x[0] == 'subtype':
             subtype = x[1]
         if name == None or source == None or target == None:
             continue
-        if subtype == None or start == None or test == None:
+        if subtype == None or test == None:
             continue
 
-        if start[0] == '-':
-            period = start[-1]
-            num = int(start[1:-1])
-
-            if period == 's':
-                subtract = num
-            elif period == 'm':
-                subtract = num * 60
-            elif period == 'h':
-                subtract = num * 60 * 60
-            elif period == 'd':
-                subtract = num * 60 * 60 * 24
-            elif period == 'w':
-                subtract = num * 60 * 60 * 24 * 7
-            else:
-                print >> sys.stderr, "Invalid period for startts: %s" % (period)
-                continue
-
-            now = int(time.mktime(time.gmtime()))
-            startts = now - subtract
-        else:
-            startts = start
-
         if test == "icmp":
-            icmp_insert_stream(db, source, target, subtype, startts, name)
+            icmp_insert_stream(db, source, target, subtype, name)
 
         name = None
         source = None
         target = None
         test = None
         subtype = None
-        start = None
 
 
 def run_module(tests, config):
