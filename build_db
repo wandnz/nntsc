@@ -5,6 +5,7 @@ import sys, getopt, socket, time, os, imp
 sys.path.append('dataparsers/')
 from database import Database
 from amp import insert_amp_streams
+from rrd import insert_rrd_streams
 
 def import_modules(path):
     modules = {}
@@ -20,5 +21,6 @@ db = Database("ntsc2", "salcock", "", "", debug=False)
 db.build_databases(modules, new=True)
 
 insert_amp_streams(db, "amp.conf")
+insert_rrd_streams(db, "rrd.conf")
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
