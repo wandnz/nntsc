@@ -4,6 +4,7 @@ import sys, time, getopt, string, os, imp, select
 from multiprocessing import *
 
 from database import Database
+from configurator import *
 
 def import_modules(path):
     modules = {}
@@ -26,7 +27,16 @@ class DataCollector:
     def __init__(self, config):
         self.modules = import_modules('dataparsers/')
 
-        self.db = Database("ntsc2", "salcock", "", "")
+        nntsc_conf = load_nntsc_config(conf_fname)
+        if nntsc_conf == 0:
+            return 0
+
+        dbconf = get_nntsc_db_config(nntsc_conf)
+        if dbconf == {}:
+            sys.exit(1)
+
+        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 
+                dbconf["host"])
         self.db.build_databases(self.modules)
 
         self.processes = []
@@ -51,9 +61,30 @@ class DataCollector:
     def get_processes(self):
         return self.processes
 
+def print_usage(prog):
+    print "Usage for %s" % (prog)
+    print
+    print "Available options:"
+    print "   -C <filename> "
+    print "          Specifies the location of the configuration file"
+    print "   -h "
+    print "          Display this usage test"
+    print
+    sys.exit(0)
+
+
 if __name__ == '__main__':
-    
-    dc = DataCollector("")
+   
+    opts, rest = getopt.getopt(sys.argv[1:],'C:h')
+
+    for o,a in opts:
+        if o == '-C':
+            conf_fname = a
+        if o == '-h':
+            print_usage(sys.argv[0])
+
+ 
+    dc = DataCollector(conf_fname)
     
     if dc == 0:
         exit(1)

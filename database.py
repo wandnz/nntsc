@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.sql import and_, or_, not_
 from sqlalchemy.sql.expression import select, outerjoin, func
 from sqlalchemy.engine.url import URL
@@ -26,18 +26,27 @@ class Database:
         if debug:
             print 'Connecting to db using "%s"' % connect_string
 
+        self.init_error = False
+
         self.engine = create_engine(connect_string, echo=debug)
 
         self.meta = MetaData(self.engine)
-        self.meta.reflect(bind=self.engine)
+        try:
+            self.meta.reflect(bind=self.engine)
+        except OperationalError, e:
+            print >> sys.stderr, "Error binding to database %s" % (dbname)
+            print >> sys.stderr, "Are you sure you've specified the right database name?"
+            self.init_error = True
+            sys.exit(1)
 
         self.conn = self.engine.connect()
         self.trans = self.conn.begin()
         self.pending = 0
 
     def __del__(self):
-        self.commit_transaction()
-        self.conn.close()
+        if not self.init_error:
+            self.commit_transaction()
+            self.conn.close()
 
     def build_databases(self, modules, new=False):
         if new:

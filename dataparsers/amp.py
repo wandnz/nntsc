@@ -52,7 +52,6 @@ class AmpModule:
         # TODO: Connect to rabbitmq
 
     def run(self):
-        print self.icmp_tests[0]
         while True:
             pass
             # Get result from our message queue

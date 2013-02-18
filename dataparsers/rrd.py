@@ -1,4 +1,5 @@
 from database import Database
+from configurator import *
 import sys, rrdtool, socket, time
 
 def smokeping_stream_table():
@@ -102,6 +103,18 @@ def smokeping_insert_data(db, stream, ts, line):
 
 class RRDModule:
     def __init__(self, rrds, config):
+
+        nntsc_conf = load_nntsc_config(config)
+        if nntsc_conf == 0:
+            return 0
+
+        dbconf = get_nntsc_db_config(nntsc_conf)
+        if dbconf == {}:
+            sys.exit(1)
+
+        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 
+                dbconf["host"])
+
         
         self.smokepings = {}
         self.rrds = {}
@@ -115,7 +128,7 @@ class RRDModule:
             else:
                 self.rrds[filename] = [r]
 
-        self.db = Database("ntsc2", "salcock", "", "", debug=False)
+
 
     def rejig_ts(self, endts, r):
         # Doing dumbass stuff that I shouldn't have to do to ensure

@@ -4,6 +4,7 @@ import sys, getopt, socket, time, os, imp
 
 sys.path.append('dataparsers/')
 from database import Database
+from configurator import *
 from amp import insert_amp_streams
 from rrd import insert_rrd_streams
 
@@ -14,13 +15,55 @@ def import_modules(path):
             name = i[:-3]
             modules[name] = imp.load_source(name, os.path.join(path,i))
     return modules       
- 
+
+def print_usage(prog):
+    print "Usage for %s" % (prog)
+    print
+    print "Available options:"
+    print "   -C <filename> "
+    print "          Specifies the location of the configuration file"
+    print "   -F "
+    print "          Wipe and rebuild the database"
+    print "          WARNING: all time series data will be lost"
+    print "   -h "
+    print "          Display this usage test"
+    print
+    sys.exit(0)
+
+clean_db = False
+
+opts, rest = getopt.getopt(sys.argv[1:],'C:Fh')
+
+for o,a in opts:
+    if o == '-C':
+        conf_fname = a
+    if o == '-F':
+        clean_db = True
+    if o == '-h':
+        print_usage(sys.argv[0])
+
+nntsc_conf = load_nntsc_config(conf_fname)
+if nntsc_conf == 0:
+    sys.exit(1)
+
+dbconf = get_nntsc_db_config(nntsc_conf)
+if dbconf == {}:
+    sys.exit(1)
+
 modules = import_modules('dataparsers/')
 
-db = Database("ntsc2", "salcock", "", "", debug=False)
+db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
 db.build_databases(modules, new=True)
 
-insert_amp_streams(db, "amp.conf")
-insert_rrd_streams(db, "rrd.conf")
+rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
+if rrd_conf == "NNTSCConfigError":
+    sys.exit(1)
+
+amp_conf = get_nntsc_config(nntsc_conf, 'amp', 'testlist')
+if amp_conf == "NNTSCConfigError":
+    sys.exit(1)
+
+insert_amp_streams(db, amp_conf)
+insert_rrd_streams(db, rrd_conf)
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
