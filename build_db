@@ -46,7 +46,7 @@ if dbconf == {}:
 modules = import_parsers()
 
 db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
-db.build_databases(modules, new=True)
+db.build_databases(modules, new=clean_db)
 
 rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
 if rrd_conf == "NNTSCConfigError":
