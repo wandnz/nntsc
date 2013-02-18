@@ -3,16 +3,9 @@
 import sys, time, getopt, string, os, imp, select
 from multiprocessing import *
 
-from database import Database
-from configurator import *
-
-def import_modules(path):
-    modules = {}
-    for i in os.listdir(path):
-        if i.endswith('.py'):
-            name = i[:-3]
-            modules[name] = imp.load_source(name, os.path.join(path,i))
-    return modules
+from libnntsc.database import Database
+from libnntsc.configurator import *
+from libnntsc.importer import import_parsers
 
 
 class DataCollector:
@@ -25,7 +18,7 @@ class DataCollector:
             raise
 
     def __init__(self, config):
-        self.modules = import_modules('dataparsers/')
+        self.modules = import_parsers()
 
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:

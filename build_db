@@ -2,19 +2,12 @@
 
 import sys, getopt, socket, time, os, imp
 
-sys.path.append('dataparsers/')
-from database import Database
-from configurator import *
-from amp import insert_amp_streams
-from rrd import insert_rrd_streams
+from libnntsc.database import Database
+from libnntsc.configurator import *
+from libnntsc.importer import import_parsers
+from libnntsc.parsers.amp import insert_amp_streams
+from libnntsc.parsers.rrd import insert_rrd_streams
 
-def import_modules(path):
-    modules = {}
-    for i in os.listdir(path):
-        if i.endswith('.py'):
-            name = i[:-3]
-            modules[name] = imp.load_source(name, os.path.join(path,i))
-    return modules       
 
 def print_usage(prog):
     print "Usage for %s" % (prog)
@@ -50,7 +43,7 @@ dbconf = get_nntsc_db_config(nntsc_conf)
 if dbconf == {}:
     sys.exit(1)
 
-modules = import_modules('dataparsers/')
+modules = import_parsers()
 
 db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
 db.build_databases(modules, new=True)

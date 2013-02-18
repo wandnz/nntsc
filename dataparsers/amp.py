@@ -1,7 +1,7 @@
 import sys, time
 
-sys.path.append("..")
-from database import Database 
+from libnntsc.database import Database 
+from libnntsc.configurator import *
 
 def icmp_stream_table():
     from sqlalchemy import Column
@@ -54,6 +54,7 @@ class AmpModule:
     def run(self):
  
         while True:
+            time.sleep(120)
             pass
             # Get result from our message queue
 

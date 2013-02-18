@@ -7,8 +7,6 @@ from sqlalchemy.engine.url import URL
 
 import time, sys
 
-sys.path.append('dataparsers')
-
 class Database:
     def __init__(self, dbname, dbuser, dbpass=None, dbhost=None, \
             new=False, debug=False):

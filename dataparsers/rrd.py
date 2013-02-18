@@ -1,5 +1,5 @@
-from database import Database
-from configurator import *
+from libnntsc.database import Database
+from libnntsc.configurator import *
 import sys, rrdtool, socket, time
 
 def smokeping_stream_table():
