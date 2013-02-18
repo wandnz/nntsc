@@ -52,6 +52,7 @@ class AmpModule:
         # TODO: Connect to rabbitmq
 
     def run(self):
+ 
         while True:
             pass
             # Get result from our message queue

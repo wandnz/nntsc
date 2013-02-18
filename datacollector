@@ -47,14 +47,10 @@ class DataCollector:
             p.start()
 
     def run(self):
-        cli = select.poll()
-        cli.register(sys.stdin, select.POLLIN)
 
-        while True:
+        for p in self.processes:
             try:
-                if cli.poll(0):
-                    command = sys.stdin.readline()[:-1].strip()
-                    print command
+                p.join()
             except:
                 raise
 
