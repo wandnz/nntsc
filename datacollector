@@ -17,12 +17,14 @@ class DataCollector:
         except Exception, e:
             raise
 
-    def __init__(self, config):
+    def __init__(self):
         self.modules = import_parsers()
+
+    def configure(self, config):
 
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:
-            return 0
+            sys.exit(0)
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
@@ -33,13 +35,13 @@ class DataCollector:
         self.db.build_databases(self.modules)
 
         self.processes = []
-
-        for m in self.modules.items():
-            self.start_module(m[0], m[1], config)
-        for p in self.processes:
-            p.start()
+        self.config = config
 
     def run(self):
+        for m in self.modules.items():
+            self.start_module(m[0], m[1], self.config)
+        for p in self.processes:
+            p.start()
 
         for p in self.processes:
             try:
@@ -73,10 +75,9 @@ if __name__ == '__main__':
             print_usage(sys.argv[0])
 
  
-    dc = DataCollector(conf_fname)
+    dc = DataCollector()
+    dc.configure(conf_fname)
     
-    if dc == 0:
-        exit(1)
     try:
         dc.run()
     except KeyboardInterrupt:
