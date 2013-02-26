@@ -6,21 +6,29 @@ from multiprocessing import *
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
+from libnntsc.exporter import NNTSCExporter
 
 
 class DataCollector:
     def start_module(self, name, mod, conf):
         try:
             streams = self.db.select_streams_by_module(name)
-            p = Process(name=name, target=mod.run_module, args=(streams, conf))
+            
+            pipe_recv, pipe_send = Pipe(False)
+            
+            p = Process(name=name, target=mod.run_module, args=(streams, conf,
+                    pipe_send))
+
+            self.exporter.register_source(pipe_recv)
             self.processes.append(p)
         except Exception, e:
             raise
 
-    def __init__(self):
+    def __init__(self, listen_port):
         self.modules = import_parsers()
+        self.exporter = NNTSCExporter(listen_port);
 
-    def configure(self, config):
+    def configure(self, conf_fname):
 
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:
@@ -32,16 +40,20 @@ class DataCollector:
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 
                 dbconf["host"])
-        self.db.build_databases(self.modules)
+
+        self.exporter.configure(conf_fname)
 
         self.processes = []
-        self.config = config
+        self.config =nntsc_conf 
 
     def run(self):
+
         for m in self.modules.items():
             self.start_module(m[0], m[1], self.config)
         for p in self.processes:
             p.start()
+       
+        self.exporter.run()
 
         for p in self.processes:
             try:
@@ -65,17 +77,19 @@ def print_usage(prog):
 
 
 if __name__ == '__main__':
-   
-    opts, rest = getopt.getopt(sys.argv[1:],'C:h')
+    listen_port = 61234
+
+    opts, rest = getopt.getopt(sys.argv[1:],'C:hP:')
 
     for o,a in opts:
         if o == '-C':
             conf_fname = a
         if o == '-h':
             print_usage(sys.argv[0])
+        if o  == '-P':
+            listen_port = int(a)
 
- 
-    dc = DataCollector()
+    dc = DataCollector(listen_port)
     dc.configure(conf_fname)
     
     try:

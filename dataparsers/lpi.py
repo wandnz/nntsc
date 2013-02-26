@@ -199,10 +199,9 @@ def read_lpicp(s):
 
 
 class LPIModule:
-    def __init__(self, existing, config):
-        nntsc_conf = load_nntsc_config(config)
-        if nntsc_conf == 0:
-            return 0
+    def __init__(self, existing, nntsc_conf, exp):
+
+        self.exporter = exp
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
@@ -299,8 +298,8 @@ class LPIModule:
 
         self.server_fd.close()
 
-def run_module(existing, config):
-    lpi = LPIModule(existing, config)
+def run_module(existing, config, exp):
+    lpi = LPIModule(existing, config, exp)
     lpi.run()
 
 def tables():

@@ -36,8 +36,17 @@ class Database:
             print >> sys.stderr, "Are you sure you've specified the right database name?"
             self.init_error = True
             sys.exit(1)
-
         self.conn = self.engine.connect()
+        
+        self.stream_tables = {}
+        self.data_tables = {}
+
+        for name, tab in self.meta.tables.items():
+            if name[0:5] == "data_":
+                self.data_tables[name] = tab
+            if name[0:8] == "streams_":
+                self.stream_tables[name] = tab
+
         self.trans = self.conn.begin()
         self.pending = 0
 
@@ -59,8 +68,6 @@ class Database:
             Column('name', String, nullable=False, unique=True),
         )
 
-        self.stream_tables = {}
-        self.data_tables = {}
         for base,mod in modules.items():
             table_dict = mod.tables()
             for name, tables in table_dict.items():
@@ -122,6 +129,35 @@ class Database:
                 if result.rowcount == 1:
                     return mod
 
+    def list_collections(self):
+        collections = []
+
+        for i in self.meta.tables.keys():
+            if i[0:5] == 'data_':
+                collections.append(i[5:])
+        return collections
+
+    def get_stream_schema(self, name):
+        key = 'streams_' + name
+
+        if not self.stream_tables.has_key(key):
+            return []
+
+        schema = []
+        table = self.stream_tables[key]
+
+        return table.columns
+    
+    def get_data_schema(self, name):
+        key = 'data_' + name
+        if not self.data_tables.has_key(key):
+            return []
+
+        schema = []
+        table = self.data_tables[key]
+
+        return table.columns
+
     def select_streams_by_module(self, mod):
 
         # Find all streams matching a given module type
@@ -150,6 +186,30 @@ class Database:
             result.close()
         return streams
 
+    def select_streams_by_collection(self, coll):
+        key = 'streams_' + coll
+        
+        if not self.stream_tables.has_key(key):
+            return []
+
+        table = self.stream_tables[key]
+        streams_t = self.meta.tables['streams']
+
+        streams = []
+
+        sql = table.join(streams_t, streams_t.c.id == table.c.stream_id).select()
+        result = sql.execute()
+
+        for row in result:
+            row_dict = {}
+            for k,v in row.items():
+                if k == 'id':
+                    continue
+                row_dict[k] = v
+            streams.append(row_dict)
+        result.close()
+
+        return streams
 
     def select_stream_by_id(self, stream_id):
         # find the mod table this id is in
@@ -276,8 +336,17 @@ class Database:
 
         Both start_time and stop_time are inclusive values
     """
-    def select_data(self, stream_ids, start_time=None, stop_time=None):
-        table = self.meta.tables['data']
+    def select_data(self, mod, modsubtype, stream_ids, columns, 
+            start_time=None, stop_time=None):
+
+        tablekey = 'data_' + mod + '_' + modsubtype
+
+        if not self.data_tables.has_key(tablekey):
+            return []
+
+        table = self.data_tables[tablekey]
+
+        tablecols = filter(lambda a: a.name in columns, table.columns)
 
         # Create the start time clause for our query
         if start_time:
@@ -324,7 +393,7 @@ class Database:
             query += stream_str
 
         # Run the query and convert the results into something we can use
-        result = table.select().where(query).order_by(
+        result = select(tablecols).where(query).order_by(
                 table.c.timestamp).execute()
 
         data = list(result)

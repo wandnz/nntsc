@@ -39,15 +39,17 @@ def icmp_parse_db_row(row):
     pass
 
 class AmpModule:
-    def __init__(self, tests, config):
+    def __init__(self, tests, nntsc_config, exp):
         ts = int(time.mktime(time.localtime()))
 
+        self.exporter = exp
         self.icmp_tests = {}
 
         for i in tests:
 
             if i['modsubtype'] == 'icmp':
                 self.icmp_tests[i['stream_id']] = i
+
 
         # TODO: Connect to rabbitmq
 
@@ -117,9 +119,9 @@ def insert_amp_streams(db, conf):
         subtype = None
 
 
-def run_module(tests, config):
+def run_module(tests, config, exp):
 
-	amp = AmpModule(tests, config)
+	amp = AmpModule(tests, config, exp)
 	amp.run()
 
 def tables():

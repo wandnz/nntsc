@@ -62,7 +62,7 @@ def smokeping_insert_stream(db, name, fname, source, host, minres, rows):
             filename=fname, source=source, host=host, minres=minres,
             highrows=rows, lasttimestamp=0)
 
-def smokeping_insert_data(db, stream, ts, line):
+def smokeping_insert_data(db, exp, stream, ts, line):
     
     # This is terrible :(
 
@@ -87,6 +87,11 @@ def smokeping_insert_data(db, stream, ts, line):
     db.insert_data(mod="rrd", modsubtype="smokeping", stream_id=stream, \
             timestamp=ts, **kwargs)
 
+    exp.send(("rrd_smokeping", stream, ts, kwargs))
+
+    #exp.export_data(collect="rrd_smokeping", stream_id=stream, timestamp=ts,
+    #        **kwargs)
+
 """
     db.insert_data(mod="rrd", modsubtype="smokeping", stream_id=stream, \
             timestamp=ts, uptime=float(line[0]), loss=int(float(line[1])),
@@ -102,11 +107,7 @@ def smokeping_insert_data(db, stream, ts, line):
   """  
 
 class RRDModule:
-    def __init__(self, rrds, config):
-
-        nntsc_conf = load_nntsc_config(config)
-        if nntsc_conf == 0:
-            return 0
+    def __init__(self, rrds, nntsc_conf, exp):
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
@@ -115,7 +116,7 @@ class RRDModule:
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 
                 dbconf["host"])
 
-        
+        self.exporter = exp
         self.smokepings = {}
         self.rrds = {}
         for r in rrds:
@@ -154,6 +155,7 @@ class RRDModule:
         return startts, endts
 
     def run(self):
+        print "Running rrd"
         while True:
             for fname,rrds in self.rrds.items():
                 for r in rrds:
@@ -165,6 +167,7 @@ class RRDModule:
 
                     fetchres = rrdtool.fetch(fname, "AVERAGE", "-s",
                             str(startts), "-e", str(endts))
+
 
                     current = int(fetchres[0][0])
                     last = int(fetchres[0][1])
@@ -178,8 +181,8 @@ class RRDModule:
                         if current == last:
                             break
                         if r['modsubtype'] == "smokeping":
-                            smokeping_insert_data(self.db, r['stream_id'],
-                                    current, line)
+                            smokeping_insert_data(self.db, self.exporter,
+                                    r['stream_id'], current, line)
                         
                         if current > r['lasttimestamp']:
                             r['lasttimestamp'] = current
@@ -248,8 +251,8 @@ def insert_rrd_streams(db, conf):
 
     f.close()
 
-def run_module(rrds, config):
-    rrd = RRDModule(rrds, config)
+def run_module(rrds, config, exp):
+    rrd = RRDModule(rrds, config, exp)
     rrd.run()
     
 
