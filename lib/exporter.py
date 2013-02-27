@@ -16,6 +16,7 @@ class NNTSCExporter:
 
         self.listen_port = port
         self.db = None
+        self.collections = {}
         self.subscribers = {}
         self.client_sockets = []
 
@@ -46,7 +47,59 @@ class NNTSCExporter:
 
         return results
 
-    def export_data(self, collect, stream_id, timestamp, values):
+    def export_new_stream(self, received, fd):
+
+        try:
+            collect, stream_id, properties = received
+        except ValueError:
+            print >> sys.stderr, "Incorrect data format from source %d" % (fd)
+            print >> sys.stderr, "Format should be (collection, streamid, values dict)"
+            return -1
+        
+        if not isinstance(properties, dict):
+            print >> sys.stderr, "Values should expressed as a dictionary"
+            return -1
+
+        # XXX UNTESTED!!
+
+        if collect not in self.collections.keys():
+            return 0
+
+        properties['stream_id'] = stream_id
+
+        ns_data = pickle.dumps((collect, 0, [properties]))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
+                len(ns_data))
+
+        active = []
+        for sock in self.collections[collect]:
+            if sock not in self.client_sockets:
+                continue
+    
+            try:
+                sock.send(header + ns_data)
+            except error, msg:
+                print >> sys.stderr, "Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1])
+                self.drop_client(sock)
+            else:
+                active.append(sock)
+        self.collections[collect] = active
+
+        return 0
+
+    def export_data(self, received, fd):
+
+        try:
+            name, stream_id, timestamp, values = received
+        except ValueError:
+            print >> sys.stderr, "Incorrect data format from source %d" % (fd)
+            print >> sys.stderr, "Format should be (name, streamid, timestamp, values dict)"
+            return -1
+        
+        if not isinstance(values, dict):
+            print >> sys.stderr, "Values should expressed as a dictionary"
+            return -1
+        
         if stream_id in self.subscribers.keys():
             active = []
 
@@ -60,7 +113,6 @@ class NNTSCExporter:
 
                 results = self.filter_columns(cols, values, stream_id, 
                         timestamp)
-                print stream_id, results
                 
                 contents = pickle.dumps((name, stream_id, [results]))
                 header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_DATA, 
@@ -76,6 +128,8 @@ class NNTSCExporter:
                     else:
                         active.append((sock, cols, start, end, name))
             self.subscribers[stream_id] = active
+
+        return 0
 
     def send_collections(self, sock, cols):
 
@@ -110,6 +164,12 @@ class NNTSCExporter:
             self.drop_client(sock)
 
     def send_streams(self, sock, name):
+       
+        if self.collections.has_key(name):
+            if sock not in self.collections[name]:
+                self.collections[name].append(sock)
+        else:
+            self.collections[name] = [sock]
         
         streams = self.db.select_streams_by_collection(name)
       
@@ -163,7 +223,9 @@ class NNTSCExporter:
             print >> sys.stderr, "Error sending data to client fd %d: %s" % (sock.fileno(), msg[1])
             self.drop_client(sock)
 
-        return
+            return -1
+
+        return 0
 
     def subscribe(self, sock, submsg):
         name, start, end, cols, streams = pickle.loads(submsg)
@@ -184,7 +246,8 @@ class NNTSCExporter:
 
             # Send any historical data that we've been asked for
             if start < now:
-                self.send_history(s, sock, cols, start, end, name)
+                if self.send_history(s, sock, cols, start, end, name) == -1:
+                    return -1
 
 
     def request_message(self, sock, reqmsg):
@@ -196,32 +259,38 @@ class NNTSCExporter:
             # Requesting the collection list
             cols = self.db.list_collections()
 
-            self.send_collections(sock, cols)
+            return self.send_collections(sock, cols)
 
         if req_hdr[0] == NNTSC_REQ_SCHEMA:
             name = reqmsg[struct.calcsize(nntsc_req_fmt):]
-            self.send_schema(sock,name)
+            return self.send_schema(sock,name)
 
 
         if req_hdr[0] == NNTSC_REQ_STREAMS:
             name = reqmsg[struct.calcsize(nntsc_req_fmt):]
-            self.send_streams(sock, name)
+            return self.send_streams(sock, name)
+
+        return 0
 
     def client_message(self, sock, msg):
 
+        error = 0
         header = struct.unpack(nntsc_hdr_fmt, msg[0:struct.calcsize(nntsc_hdr_fmt)])
         total_len = header[2] + struct.calcsize(nntsc_hdr_fmt)
+        body = msg[struct.calcsize(nntsc_hdr_fmt):total_len]
 
         if len(msg) < total_len:
-            return msg, 1
+            return msg, 1, error
 
         if header[1] == NNTSC_REQUEST:
-            self.request_message(sock, msg[struct.calcsize(nntsc_hdr_fmt):total_len])
+            if self.request_message(sock, body) == -1:
+                error = 1
 
         if header[1] == NNTSC_SUBSCRIBE:
-            self.subscribe(sock, msg[struct.calcsize(nntsc_hdr_fmt):total_len])
+            if self.subscribe(sock, body) == -1:
+                error = 1
 
-        return msg[total_len:], 0
+        return msg[total_len:], 0, error
 
     def receive_client(self, fd, evtype, sock, data):
 
@@ -242,14 +311,16 @@ class NNTSCExporter:
             return
 
         buf = buf + received
+        error = 0
 
         while len(buf) > struct.calcsize(nntsc_hdr_fmt):
-            buf, halt = self.client_message(sock, buf)
+            buf, halt, error = self.client_message(sock, buf)
 
-            if halt:
+            if halt or error == -1:
                 break
-        
-        self.pwe.update_fd_data(sock,buf)
+       
+        if error == -1:
+            self.pwe.update_fd_data(sock,buf)
 
     def receive_source(self, fd, evtype, sock, data):
 
@@ -260,9 +331,18 @@ class NNTSCExporter:
             self.drop_source(sock)
             return
 
-        name, stream, ts, values = obj
-        self.export_data(name, stream, ts, values)
+        msgtype, contents = obj
         
+        ret = 0
+
+        if msgtype == 0:
+            ret = self.export_data(contents, sock.fileno())
+        if msgtype == 1:
+            ret = self.export_new_stream(contents, sock.fileno())
+
+        if ret < 0:
+            self.drop_source(sock)
+
 
     def accept_connection(self, fd, evtype, sock, data):
 

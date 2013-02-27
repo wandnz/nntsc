@@ -58,15 +58,23 @@ def smokeping_data_table():
 
 def smokeping_insert_stream(db, name, fname, source, host, minres, rows):
     
-    db.insert_stream(mod="rrd", modsubtype="smokeping", name=name, 
+    props = {"name":name, "filename":fname, "source":source, "host":host,
+            "minres":minres, "highrows":rows, "lasttimestamp":0}
+
+    id = db.insert_stream(mod="rrd", modsubtype="smokeping", name=name, 
             filename=fname, source=source, host=host, minres=minres,
             highrows=rows, lasttimestamp=0)
+
+    if id >= 0:
+        exp.send((1, ("rrd_smokeping", id, props)))
+    
 
 def smokeping_insert_data(db, exp, stream, ts, line):
     
     # This is terrible :(
 
     kwargs = {}
+    exportdict = {}
     line_map = {0:"uptime", 1:"loss", 2:"median", 3:"ping1", 4:"ping2",
         5:"ping3", 6:"ping4", 7:"ping5", 8:"ping6", 9:"ping7", 10:"ping8",
         11:"ping9", 12:"ping10", 13:"ping11", 14:"ping12", 15:"ping13", 
@@ -75,19 +83,23 @@ def smokeping_insert_data(db, exp, stream, ts, line):
 
     for i in range(0, len(line)):
         if line[i] == None:
-            continue
-        
-        if i == 1:
-            kwargs[line_map[i]] = int(float(line[i]))
+            val = None
+        elif i == 1:
+            val = int(float(line[i]))
         elif i > 1:
-            kwargs[line_map[i]] = round(float(line[i]) * 1000.0, 6)
+            val = round(float(line[i]) * 1000.0, 6)
         else:
-            kwargs[line_map[i]] = round(float(line[i]), 6)
+            val = round(float(line[i]), 6)
+
+        if val != None:
+            kwargs[line_map[i]] = val
+
+        exportdict[line_map[i]] = val
     
     db.insert_data(mod="rrd", modsubtype="smokeping", stream_id=stream, \
             timestamp=ts, **kwargs)
 
-    exp.send(("rrd_smokeping", stream, ts, kwargs))
+    exp.send((0, ("rrd_smokeping", stream, ts, exportdict)))
 
     #exp.export_data(collect="rrd_smokeping", stream_id=stream, timestamp=ts,
     #        **kwargs)
@@ -146,12 +158,11 @@ class RRDModule:
             endts -= (endts % r['minres'])
             #endts -= 1
 
-        if (r["lasttimestamp"] == 0):
-            startts = endts - (r['highrows'] * r['minres'])
-
-        else:
+        startts = endts - (r['highrows'] * r['minres'])
+        
+        if (r["lasttimestamp"] > startts):
             startts = r["lasttimestamp"]
-
+            
         return startts, endts
 
     def run(self):
