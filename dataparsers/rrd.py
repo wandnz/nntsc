@@ -56,7 +56,7 @@ def smokeping_data_table():
         Column('ping20', Float, nullable=True)
     ]
 
-def smokeping_insert_stream(db, name, fname, source, host, minres, rows):
+def smokeping_insert_stream(db, exp, name, fname, source, host, minres, rows):
     
     props = {"name":name, "filename":fname, "source":source, "host":host,
             "minres":minres, "highrows":rows, "lasttimestamp":0}
@@ -65,7 +65,7 @@ def smokeping_insert_stream(db, name, fname, source, host, minres, rows):
             filename=fname, source=source, host=host, minres=minres,
             highrows=rows, lasttimestamp=0)
 
-    if id >= 0:
+    if id >= 0 and exp != None:
         exp.send((1, ("rrd_smokeping", id, props)))
     
 
@@ -253,7 +253,8 @@ def insert_rrd_streams(db, conf):
         print "Creating stream for RRD-%s %s: %s" % (subtype, rrd, name)
         
         if subtype == "smokeping":
-            smokeping_insert_stream(db, name, rrd, source, host, minres, rows)
+            smokeping_insert_stream(db, None, name, rrd, source, host, 
+                    minres, rows)
         
         name = None
         rrd = None
