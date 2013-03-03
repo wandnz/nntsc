@@ -195,26 +195,10 @@ class NNTSCExporter:
                 self.drop_client(sock)
 
             i = end
+    
+    def export_hist_block(self, sock, name, streamid, block):        
 
-    def send_history(self, streamid, sock, columns, start, end, name):
-        splitname = name.split('_')
-        
-        columns = ['stream_id', 'timestamp'] + columns
-
-        hist = self.db.select_data(splitname[0], splitname[1], [streamid], 
-                columns, start, end)
-
-        nicehist = []
-
-        for h in hist:
-            result = {}
-            for i in range(0, len(columns)):
-                val = h[i]
-                result[columns[i]] = val
-
-            nicehist.append(result)
-
-        contents = pickle.dumps((name, streamid, nicehist))
+        contents = pickle.dumps((name, streamid, block))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_DATA, len(contents))
 
         try:
@@ -227,6 +211,38 @@ class NNTSCExporter:
 
         return 0
 
+
+    def send_history(self, streamid, sock, columns, start, end, name):
+        splitname = name.split('_')
+        
+        columns = ['stream_id', 'timestamp'] + columns
+
+        hist = self.db.select_data(splitname[0], splitname[1], [streamid], 
+                columns, start, end)
+
+        nicehist = []
+        c = 0
+
+        for h in hist:
+            
+            result = {}
+            for i in range(0, len(columns)):
+                val = h[i]
+                result[columns[i]] = val
+
+            nicehist.append(result)
+            c += 1
+
+            if (c >= 200):
+                if self.export_hist_block(sock, name, streamid, nicehist) == -1:
+                    return -1
+                c = 0
+                nicehist = []
+
+        if c != 0:
+            return self.export_hist_block(sock, name, streamid, nicehist)
+        return 0
+                    
     def subscribe(self, sock, submsg):
         name, start, end, cols, streams = pickle.loads(submsg)
         now = int(time.mktime(time.gmtime()))
