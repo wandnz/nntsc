@@ -40,7 +40,13 @@ def icmp_parse_db_row(row):
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, exp):
-        ts = int(time.mktime(time.localtime()))
+    
+        dbconf = get_nntsc_db_config(nntsc_conf)
+        if dbconf == {}:
+            sys.exit(1)
+
+        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
+                dbconf["host"])
 
         self.exporter = exp
         self.icmp_tests = {}
