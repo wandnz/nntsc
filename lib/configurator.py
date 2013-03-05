@@ -35,7 +35,7 @@ def get_nntsc_config_bool(nntsc_config, section, option):
     except ConfigParser.ValueError:
         print >> sys.stderr, "The option '%s' in section '%s' does not have a boolean value" % (option, section)
         print >> sys.stderr, "Suitable values are 'true', '1', 'on', 'yes', 'false', 0, 'off', or 'no'"
-    return "NNTSCConfigError"
+        return "NNTSCConfigError"
 
     return result
 
