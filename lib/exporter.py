@@ -67,7 +67,7 @@ class NNTSCExporter:
 
         properties['stream_id'] = stream_id
 
-        ns_data = pickle.dumps((collect, 0, [properties]))
+        ns_data = pickle.dumps((collect, False, [properties]))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
                 len(ns_data))
 
@@ -87,7 +87,7 @@ class NNTSCExporter:
 
         return 0
 
-    def export_data(self, received, fd):
+    def export_live_data(self, received, fd):
 
         try:
             name, stream_id, timestamp, values = received
@@ -115,7 +115,7 @@ class NNTSCExporter:
                         timestamp)
                 
                 contents = pickle.dumps((name, stream_id, [results]))
-                header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_DATA, 
+                header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE, 
                         len(contents))
 
                 if sock in self.client_sockets:
@@ -123,7 +123,7 @@ class NNTSCExporter:
                     try:
                         sock.send(header + contents)
                     except error, msg:
-                        print >> sys.stderr, "Error sending live data to client fd %d" % (sock.fileno(), msg[1])
+                        print >> sys.stderr, "Error sending live data to client fd %d: %s" % (sock.fileno(), msg[1])
                         self.drop_client(sock)
                     else:
                         active.append((sock, cols, start, end, name))
@@ -196,10 +196,10 @@ class NNTSCExporter:
 
             i = end
     
-    def export_hist_block(self, sock, name, streamid, block):        
+    def export_hist_block(self, sock, name, streamid, block, more):        
 
-        contents = pickle.dumps((name, streamid, block))
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_DATA, len(contents))
+        contents = pickle.dumps((name, streamid, block, more))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
         try:
             sock.send(header + contents)
@@ -234,13 +234,19 @@ class NNTSCExporter:
             c += 1
 
             if (c >= 200):
-                if self.export_hist_block(sock, name, streamid, nicehist) == -1:
+                if h != hist[-1]:
+                    more = True
+                else:
+                    more = False
+
+                if self.export_hist_block(sock, name, streamid, nicehist, 
+                            more) == -1:
                     return -1
                 c = 0
                 nicehist = []
 
         if c != 0:
-            return self.export_hist_block(sock, name, streamid, nicehist)
+            return self.export_hist_block(sock, name, streamid, nicehist, False)
         return 0
                     
     def subscribe(self, sock, submsg):
@@ -352,7 +358,7 @@ class NNTSCExporter:
         ret = 0
 
         if msgtype == 0:
-            ret = self.export_data(contents, sock.fileno())
+            ret = self.export_live_data(contents, sock.fileno())
         if msgtype == 1:
             ret = self.export_new_stream(contents, sock.fileno())
 

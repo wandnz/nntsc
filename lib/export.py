@@ -12,6 +12,7 @@ NNTSC_COLLECTIONS = 1
 NNTSC_SCHEMAS = 2
 NNTSC_STREAMS = 3
 NNTSC_SUBSCRIBE = 4
-NNTSC_DATA = 5
+NNTSC_HISTORY = 5
+NNTSC_LIVE = 6
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
