@@ -146,6 +146,7 @@ class AmpModule:
 
                 amp_insert_data(self.db, d["test"], stream_id,
                         properties.timestamp, d)
+                self.db.update_timestamp(stream_id, properties.timestamp)
         else:
             print >> sys.stderr, "unknown test: '%s'" % (
                     properties.headers["x-amp-test-type"])
