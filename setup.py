@@ -21,12 +21,14 @@ setup(name="NNTSC",
         author_email='contact@wand.net.nz',
         url='http://www.wand.net.nz',
 	scripts=['build_db', 'datacollector'],
-	packages=['libnntsc', 'libnntsc.parsers', 'pywandevent'],
+	packages=['libnntsc', 'libnntsc.parsers', 'pywandevent', \
+		'libnntsc.client'],
 	install_requires = requires,
 	package_dir = { \
 		'libnntsc':'lib', \
 		'libnntsc.parsers':'dataparsers', \
 		'pywandevent':'pywandevent',
+		'libnntsc.client':'clientapi'
 	},
 	include_package_data=True,
 	package_data = {
