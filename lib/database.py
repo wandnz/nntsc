@@ -1,11 +1,34 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.sql import and_, or_, not_
-from sqlalchemy.sql.expression import select, outerjoin, func
+from sqlalchemy.sql import and_, or_, not_, text
+from sqlalchemy.sql.expression import select, outerjoin, func, label
 from sqlalchemy.engine.url import URL
+from sqlalchemy.engine import reflection
 
 import time, sys
+
+from sqlalchemy.schema import DDLElement, DropTable, ForeignKeyConstraint, \
+        DropConstraint, Table
+from sqlalchemy.sql import table
+from sqlalchemy.ext import compiler
+
+class CreateView(DDLElement):
+    def __init__(self, name, selectable):
+        self.name=name
+        self.selectable=selectable
+
+class DropView(DDLElement):
+    def __init__(self, name):
+        self.name=name
+
+@compiler.compiles(CreateView)
+def compile(element, compiler, **kw):
+    return "CREATE VIEW %s AS %s" % (element.name, compiler.sql_compiler.process(element.selectable)) 
+
+@compiler.compiles(DropView)
+def compile(element, compiler, **kw):
+    return "DROP VIEW %s" % (element.name)
 
 class Database:
     def __init__(self, dbname, dbuser, dbpass=None, dbhost=None, \
@@ -28,92 +51,185 @@ class Database:
 
         self.engine = create_engine(connect_string, echo=debug)
 
-        self.meta = MetaData(self.engine)
+        self.inspector = reflection.Inspector.from_engine(self.engine)
+        self.__reflect_db()
+
+        self.conn = self.engine.connect()
+        
+        #self.stream_tables = {}
+        #self.data_tables = {}
+
+        #for name, tab in self.meta.tables.items():
+        #    if name[0:5] == "data_":
+        #        self.data_tables[name] = tab
+        #    if name[0:8] == "streams_":
+        #        self.stream_tables[name] = tab
+
+        self.trans = self.conn.begin()
+        self.pending = 0
+
+    def __reflect_db(self):
+        self.metadata = MetaData(self.engine)
         try:
-            self.meta.reflect(bind=self.engine)
+            self.metadata.reflect(bind=self.engine)
         except OperationalError, e:
             print >> sys.stderr, "Error binding to database %s" % (dbname)
             print >> sys.stderr, "Are you sure you've specified the right database name?"
             self.init_error = True
             sys.exit(1)
-        self.conn = self.engine.connect()
-        
-        self.stream_tables = {}
-        self.data_tables = {}
 
-        for name, tab in self.meta.tables.items():
-            if name[0:5] == "data_":
-                self.data_tables[name] = tab
-            if name[0:8] == "streams_":
-                self.stream_tables[name] = tab
+        # reflect() is supposed to take a 'views' argument which will 
+        # force it to reflects views as well as tables, but our version of
+        # sqlalchemy didn't like that. So fuck it, I'll just reflect the
+        # views manually
+        views = self.inspector.get_view_names()
+        for v in views:
+            view_table = Table(v, self.metadata, autoload=True)
 
-        self.trans = self.conn.begin()
-        self.pending = 0
 
     def __del__(self):
         if not self.init_error:
             self.commit_transaction()
             self.conn.close()
 
+    def create_view(self, name, query):
+       
+        t = table(name)
+
+        for c in query.c:
+            c._make_proxy(t)
+
+        CreateView(name, query).execute_at('after-create', self.metadata)
+        DropView(name).execute_at('before-drop', self.metadata)
+
+        return t
+        
+
     def build_databases(self, modules, new=False):
         if new:
             self.__delete_everything(self.engine)
-
-        self.metadata = MetaData(self.engine)
-
-        self.streams = Table('streams', self.metadata,
+            self.__reflect_db()
+        
+        collections = Table('collections', self.metadata,
             Column('id', Integer, primary_key=True),
             Column('module', String, nullable=False),
             Column('modsubtype', String, nullable=True),
-            Column('name', String, nullable=False, unique=True),
+            Column('streamtable', String, nullable=False),
+            Column('datatable', String, nullable=False),
         )
 
+        streams = Table('streams', self.metadata,
+            Column('id', Integer, primary_key=True),
+            Column('collection', Integer, ForeignKey('collections.id'), 
+                    nullable=False),
+            Column('name', String, nullable=False, unique=True),
+            Column('lasttimestamp', Integer, nullable=False)
+        )
+      
+        collections.create()
+        streams.create()
+       
+        #self.metadata.create_all()
+        #self.commit_transaction()
+
+        #print self.meta.tables.keys()
+
         for base,mod in modules.items():
-            table_dict = mod.tables()
-            for name, tables in table_dict.items():
-                try:
-                    t = self.__build_mod_table("streams_" + name, \
-                            tables[0], tables[1])
-                    self.stream_tables[name] = t
-                except:
-                    raise   # XXX
-
-                try:
-                    t = self.__build_data_table("data_" + name, tables[2])
-                    self.data_tables[name] = t
-                except:
-                    raise   # XXX
-
+            mod.tables(self)
+        
         self.metadata.create_all()
         self.commit_transaction()
 
-    def __delete_everything(self, engine):
-        self.meta.drop_all(bind=engine)
+    def register_collection(self, mod, subtype, stable, dtable):
+        table = self.metadata.tables['collections']
+        
+        try:
+            self.conn.execute(table.insert(), module=mod, modsubtype=subtype,
+                    streamtable=stable, datatable=dtable)
+        except IntegrityError, e:
+            self.rollback_transaction()
+            print >> sys.stderr, e
+            return -1
 
-    def __build_mod_table(self, name, columns, constraint):
-        id_col = Column('stream_id', Integer, ForeignKey("streams.id"), \
-                    nullable = False, primary_key=True)
-        constraint = UniqueConstraint(*(constraint))
-        columns = [id_col] + columns + [constraint]
-        t = Table(name, self.metadata, *columns)
+        self.commit_transaction()
+
+    def register_new_stream(self, mod, subtype, name):
+
+        # Find the appropriate collection id
+        coltable = self.metadata.tables['collections']
+
+        sql = coltable.select().where(and_(coltable.c.module==mod,
+                coltable.c.modsubtype==subtype))
+        result = sql.execute()
         
-        return t
-    
-    def __build_data_table(self, name, columns):
-        id_col = Column('stream_id', Integer, ForeignKey("streams.id"), \
-                    nullable = False)
-        ts_col = Column('timestamp', Integer, nullable=False)
-        columns = [id_col, ts_col] + columns
-        t = Table(name, self.metadata, *columns)
-        
-        return t
+        if result.rowcount == 0:
+            print sys.stderr, "Database Error: no collection for %s:%s" % (mod, subtype)
+            return -1, -1
+
+        if result.rowcount > 1:
+            print sys.stderr, "Database Error: duplicate collections for %s:%s" % (mod, subtype)
+            return -1, -1
+
+        col = result.fetchone()
+        col_id = col['id']
+        result.close()
+
+        # Insert entry into the stream table
+        sttable = self.metadata.tables['streams']
+
+        try:
+            result = self.conn.execute(sttable.insert(), collection=col_id,
+                    name=name, lasttimestamp=0)
+        except IntegrityError, e:
+            self.rollback_transaction()
+            print >> sys.stderr, e
+            return -1, -1
+
+        # Return the new stream id
+        newid = result.inserted_primary_key
+        result.close()
+
+        return col_id, newid[0]
+
+    def __delete_everything(self, engine):
+        #self.meta.drop_all(bind=engine)
+
+        newmeta = MetaData()
+
+        tbs = []
+        all_fks = []
+        views = []
+
+        for table_name in self.inspector.get_table_names():
+            fks = []
+            for fk in self.inspector.get_foreign_keys(table_name):
+                if not fk['name']:
+                    continue
+                fks.append(
+                    ForeignKeyConstraint((),(),name=fk['name'])
+                    )
+            t = Table(table_name,newmeta,*fks)
+            tbs.append(t)
+            all_fks.extend(fks)
+
+        for v in self.inspector.get_view_names():
+            self.conn.execute(DropView(v))
+
+        for fkc in all_fks:
+            self.conn.execute(DropConstraint(fkc))
+
+        for table in tbs:
+            self.conn.execute(DropTable(table))
+
+        self.commit_transaction()
+
 
     """ Find the correct module table for the specified stream_id """
     def __get_mod_table(self, stream_id):
         # XXX This seems kinda slow....
-        for i in self.meta.tables.keys():
+        for i in self.metadata.tables.keys():
             if i.find('streams_') != -1:
-                mod = self.meta.tables[i]
+                mod = self.metadata.tables[i]
                 sql = mod.select().where(mod.c.stream_id==stream_id)
                 result = sql.execute()
                 if result.rowcount == 1:
@@ -121,9 +237,9 @@ class Database:
     
     def __get_data_table(self, stream_id):
         # XXX This seems kinda slow....
-        for i in self.meta.tables.keys():
+        for i in self.metadata.tables.keys():
             if i.find('data_') != -1:
-                mod = self.meta.tables[i]
+                mod = self.metadata.tables[i]
                 sql = mod.select().where(mod.c.stream_id==stream_id)
                 result = sql.execute()
                 if result.rowcount == 1:
@@ -131,33 +247,29 @@ class Database:
 
     def list_collections(self):
         collections = []
+        
+        table = self.metadata.tables['collections']
 
-        for i in self.meta.tables.keys():
-            if i[0:5] == 'data_':
-                collections.append(i[5:])
+        result = table.select().execute()
+        for row in result:
+            
+            col = {}
+            for k,v in row.items():
+                col[k] = v
+            collections.append(col)
+
         return collections
 
-    def get_stream_schema(self, name):
-        key = 'streams_' + name
-
-        if not self.stream_tables.has_key(key):
-            return []
-
-        schema = []
-        table = self.stream_tables[key]
-
-        return table.columns
-    
-    def get_data_schema(self, name):
-        key = 'data_' + name
-        if not self.data_tables.has_key(key):
-            return []
-
-        schema = []
-        table = self.data_tables[key]
-
-        return table.columns
-
+    def get_collection_schema(self, col_id):
+        
+        table = self.metadata.tables['collections']
+       
+        result = select([table.c.streamtable, table.c.datatable]).where(table.c.id ==col_id).execute()
+        for row in result:
+            stream_table = self.metadata.tables[row[0]]
+            data_table = self.metadata.tables[row[1]]
+            return stream_table.columns, data_table.columns
+            
     def select_streams_by_module(self, mod):
 
         # Find all streams matching a given module type
@@ -169,15 +281,27 @@ class Database:
 
         # Put all the dictionaries into a list
 
-        streams_t = self.meta.tables['streams']
-        streams = []
+        col_t = self.metadata.tables['collections']
+        streams_t = self.metadata.tables['streams']
 
-        for name, table in self.stream_tables.items():
-            sql = table.join(streams_t, streams_t.c.id == table.c.stream_id).select().where(streams_t.c.module==mod)
+        # Find the collection matching the given module
+        sql = col_t.select().where(col_t.c.module == mod)
+        result = sql.execute()
+        
+        stream_tables = {}
+
+        for row in result:
+            stream_tables[row['id']] = (row['streamtable'], row['modsubtype'])
+        result.close()
+
+        streams = []
+        for cid, (tname, sub) in stream_tables.items():
+            t = self.metadata.tables[tname]
+            sql = t.join(streams_t, streams_t.c.id == t.c.stream_id).select().where(streams_t.c.collection==cid)
             result = sql.execute()
 
             for row in result:
-                row_dict = {}
+                row_dict = {"modsubtype":sub}
                 for k,v in row.items():
                     if k == 'id':
                         continue
@@ -187,35 +311,38 @@ class Database:
         return streams
 
     def select_streams_by_collection(self, coll):
-        key = 'streams_' + coll
-        
-        if not self.stream_tables.has_key(key):
-            return []
 
-        table = self.stream_tables[key]
-        streams_t = self.meta.tables['streams']
+        coll_t = self.metadata.tables['collections']
+        streams_t = self.metadata.tables['streams']
 
-        streams = []
+        selected = []
 
-        sql = table.join(streams_t, streams_t.c.id == table.c.stream_id).select()
+        sql = select([streams_t.c.id, coll_t.c.streamtable]).select_from(coll_t.join(streams_t, streams_t.c.collection == coll_t.c.id)).where(coll_t.c.id == coll)
         result = sql.execute()
 
         for row in result:
-            row_dict = {}
-            for k,v in row.items():
-                if k == 'id':
-                    continue
-                row_dict[k] = v
-            streams.append(row_dict)
-        result.close()
+            s_id = row[0]
+            table = self.metadata.tables[row[1]]
+            
+            stream_data = table.select().where(table.c.stream_id == s_id).execute()
 
-        return streams
+            assert(stream_data.rowcount == 1)
+            stream = stream_data.fetchone()
+
+            stream_dict = {}
+            for k,v in stream.items():
+                stream_dict[k] = v
+            stream_data.close()
+            selected.append(stream_dict)
+        result.close()
+            
+        return selected
 
     def select_stream_by_id(self, stream_id):
         # find the mod table this id is in
         mod = self.__get_stream_table(stream_id)
 
-        result = outerjoin(self.meta.tables['streams'], mod).select( \
+        result = outerjoin(self.metadata.tables['streams'], mod).select( \
                 mod.c.stream_id==stream_id).execute()
 
         stream = dict(result.fetchone())
@@ -227,9 +354,6 @@ class Database:
     def commit_transaction(self):
         # TODO: Better error handling!
 
-        if self.pending == 0:
-            return
-       
         #print "Committing %d statements (%s)" % (self.pending, \
         #        time.strftime("%d %b %Y %H:%M:%S", time.localtime())) 
         try:
@@ -238,115 +362,39 @@ class Database:
             self.trans.rollback()
             raise
         self.trans = self.conn.begin()
-        self.pending = 0
 
     def rollback_transaction(self):
         #if self.pending == 0:
         #    return
         self.trans.rollback()
         self.trans = self.conn.begin()
-        self.pending = 0
-
-    """
-        This function inserts an entry into both the global streams table and
-        the streams table for the specific module.
-
-        stream_id - unique id for this stream
-        mod - module name (e.g. rrd)
-        name - give this stream a human readable name
-
-        additional arguments must be those specified by the module.
-        See the modules documentation for this.
-
-        An example line for the rrd module is shown below.
-
-        insert_stream( \
-                stream_id=1, \
-                mod='rrd', \
-                name='Lightwire Gateway Traffic', \
-                filename='/tmp/smokeping/Lightwire/lwgateway.rrd', \
-                substream=0, \
-                lasttimestamp=0)
-
-    """
-    def insert_stream(self, mod, modsubtype, name, **kwargs):
-        self.commit_transaction()
-        table = self.meta.tables['streams']
-        
-        result = select([func.max(table.c.id)]).execute()
-        assert(result.rowcount == 1)
-        
-        max_tuple = result.fetchone()
-        if max_tuple == (None,):
-            next_stream_id = 0
-        else:
-            next_stream_id = max_tuple[0] + 1
-        result.close()
-       
-        try: 
-            result = self.conn.execute(table.insert(), \
-                    id=next_stream_id, module=mod, modsubtype=modsubtype, \
-                    name=name)
-        except IntegrityError, e:
-            self.rollback_transaction()
-            print >> sys.stderr, e
-            return -1
-
-        stream_id = next_stream_id
-        result.close()
-        self.pending += 1
-
-        # Don't insert duplicate streams! If we are a duplicate, we need
-        # to rollback the previous insert as well
-        table = self.meta.tables['streams_'+mod+"_"+modsubtype]
-        try:
-            result = self.conn.execute(table.insert(), stream_id=stream_id, \
-                    **kwargs)
-        except IntegrityError, e:
-            self.rollback_transaction()
-            print >> sys.stderr, e
-            return -1
-        else:
-            result.close()
-
-        self.pending += 1
-        self.commit_transaction()
-        return stream_id
-
-    def insert_data(self, mod, modsubtype, stream_id, timestamp, **kwargs):
-        table = self.meta.tables['data_' + mod + "_" + modsubtype]
-        result = self.conn.execute(table.insert(), stream_id = stream_id, \
-                timestamp=timestamp, **kwargs)
-                
-        # TODO check result for errors
-        result.close()
-        
-        self.pending += 1
 
     def update_timestamp(self, stream_id, lasttimestamp):
-        table = self.__get_mod_table(stream_id)
+        table = self.metadata.tables['streams']
         result = self.conn.execute(table.update().where( \
-                table.c.stream_id==stream_id).values( \
+                table.c.id==stream_id).values( \
                 lasttimestamp=lasttimestamp))
         result.close()
         self.pending += 1
+    
+    def _get_aggregator(self, agg):
 
-    """
-        Get data from the database
+        if agg == "max":
+            return func.max
+        elif agg == "min":
+            return func.min
+        elif agg == "sum":
+            return func.sum
+        elif agg == "avg" or agg == "average":
+            return func.avg
+        elif agg == "count":
+            return func.count
+        else:
+            print >> sys.stderr, "Unsupported aggregator function: %s" % (aggregator)
+            return None
 
-        Both start_time and stop_time are inclusive values
-    """
-    def select_data(self, mod, modsubtype, stream_ids, columns, 
-            start_time=None, stop_time=None):
-
-        tablekey = 'data_' + mod + '_' + modsubtype
-
-        if not self.data_tables.has_key(tablekey):
-            return []
-
-        table = self.data_tables[tablekey]
-
-        tablecols = filter(lambda a: a.name in columns, table.columns)
+    
+    def _where_clause(self, table, start_time, stop_time, stream_ids):
 
         # Create the start time clause for our query
         if start_time:
@@ -392,13 +440,140 @@ class Database:
             query += " AND "
             query += stream_str
 
+        return query
+
+    def _select_unmodified(self, table, wherecl, columns):
+
+        if 'stream_id' not in columns:
+            columns.append('stream_id')
+        if 'timestamp' not in columns:
+            columns.append('timestamp')
+        tablecols = filter(lambda a: a.name in columns, table.columns)
+
         # Run the query and convert the results into something we can use
-        result = select(tablecols).where(query).order_by(
+        result = select(tablecols).where(wherecl).order_by(
                 table.c.timestamp).execute()
 
-        data = list(result)
+        data = []
+        for r in result:
+            foo = {}
+            for i in range(0, len(tablecols)):
+                foo[tablecols[i].name] = r[i]
+            data.append(foo)
+
         result.close()
 
         return data
+
+
+    def _group_columns(self, table, selectors, groups, aggregator, bts=None):
+        aggfunc = self._get_aggregator(aggregator)
+        if aggfunc == None:
+            return []
+
+        if groups == None:
+            groups = []
+
+        aggcols = []
+        groupcols = []
+
+        for col in table.columns:
+            if col.name in selectors:
+                labelstr = aggregator + "_" + col.name
+                newcol = label(labelstr, aggfunc(col))
+                aggcols.append(newcol)
+            if col.name in groups:
+                groupcols.append(col)
+
+        if bts is not None:
+            groupcols.append(bts)
+        selectcols = aggcols + groupcols
+
+        return selectcols, groupcols
+    
+    def _group_select(self, selectcols, wherecl, groupcols, tscol):
+        result = select(selectcols).where(wherecl).group_by(*groupcols).order_by(tscol).execute()
+                
+        data = []
+        for r in result:
+            foo = {}
+            for i in range(0, len(selectcols)):
+                foo[selectcols[i].name] = r[i]
+            data.append(foo)
+        
+        result.close()
+        return data 
+       
+    def _select_binned(self, table, wherecl, selectors, groups, size, aggre):
+        bts = label('bintimestamp', table.c.timestamp / size * size)
+        selectcols, groupcols = self._group_columns(table, selectors, groups, 
+                aggre, bts)
+        return self._group_select(selectcols, wherecl, groupcols, bts)
+
+
+    def _select_unbinned(self, table, wherecl, selectors, groups, 
+            aggregator):
+
+        selectcols, groupcols = self._group_columns(table, selectors, groups, 
+                aggregator)
+
+        mints = label("min_timestamp", func.min(table.c.timestamp))
+        selectcols.append(mints)
+        selectcols.append(label("max_timestamp", func.max(table.c.timestamp)))
+
+
+        return self._group_select(selectcols, wherecl, groupcols, mints)
+        
+        
+
+    """
+        Get data from the database
+
+        Both start_time and stop_time are inclusive values
+    """
+    def select_data(self, col, stream_ids, selectcols, start_time=None,
+            stop_time=None):
+        
+        coll_t = self.metadata.tables['collections']
+        res = select([coll_t.c.datatable]).select_from(coll_t).where(coll_t.c.id == col).execute()
+
+        assert(res.rowcount == 1)
+
+        datatable = res.fetchone()[0]
+        table = self.metadata.tables[datatable]
+
+        wherecl = self._where_clause(table, start_time, stop_time, stream_ids)
+        
+        return self._select_unmodified(table, wherecl, selectcols)
+       
+
+    def select_aggregated_data(self, mod, modsubtype, stream_ids, aggcols,  
+            start_time=None, stop_time=None, groupcols=None, binsize=0, 
+            aggregator="avg"):
+
+        tablekey = 'data_' + mod + '_' + modsubtype
+
+        if not self.data_tables.has_key(tablekey):
+            return []
+
+        table = self.data_tables[tablekey]
+        wherecl = self._where_clause(table, start_time, stop_time, stream_ids)
+       
+        
+        if binsize == 0 and groupcols == None:
+            return self._select_unmodified(table, wherecl, aggcols)
+
+        if groupcols == None:
+            groupcols = ['stream_id']
+        elif 'stream_id' not in groupcols:
+            groupcols.append('stream_id')
+
+        if binsize == 0:
+            return self._select_unbinned(table, wherecl, aggcols, groupcols,
+                    aggregator)
+
+        return self._select_binned(table, wherecl, aggcols, groupcols,
+                binsize, aggregator)
+
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

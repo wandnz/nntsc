@@ -50,10 +50,10 @@ class NNTSCExporter:
     def export_new_stream(self, received, fd):
 
         try:
-            collect, stream_id, properties = received
+            coll_id, coll_name, stream_id, properties = received
         except ValueError:
             print >> sys.stderr, "Incorrect data format from source %d" % (fd)
-            print >> sys.stderr, "Format should be (collection, streamid, values dict)"
+            print >> sys.stderr, "Format should be (collection id, collection name, streamid, values dict)"
             return -1
         
         if not isinstance(properties, dict):
@@ -62,17 +62,17 @@ class NNTSCExporter:
 
         # XXX UNTESTED!!
 
-        if collect not in self.collections.keys():
+        if coll_name not in self.collections.keys():
             return 0
 
         properties['stream_id'] = stream_id
 
-        ns_data = pickle.dumps((collect, False, [properties]))
+        ns_data = pickle.dumps((coll_id, coll_name, False, [properties]))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
                 len(ns_data))
 
         active = []
-        for sock in self.collections[collect]:
+        for sock in self.collections[coll_name]:
             if sock not in self.client_sockets:
                 continue
     
@@ -83,7 +83,7 @@ class NNTSCExporter:
                 self.drop_client(sock)
             else:
                 active.append(sock)
-        self.collections[collect] = active
+        self.collections[coll_name] = active
 
         return 0
 
@@ -103,18 +103,18 @@ class NNTSCExporter:
         if stream_id in self.subscribers.keys():
             active = []
 
-            for sock, cols, start, end, name in self.subscribers[stream_id]:
+            for sock, columns, start, end, col in self.subscribers[stream_id]:
 
                 if timestamp < start:
                     continue
 
                 if end != None and timestamp > end:
-                    continue
-
-                results = self.filter_columns(cols, values, stream_id, 
-                        timestamp)
+                    results = {}
+                else:
+                    results = self.filter_columns(columns, values, stream_id, 
+                            timestamp)
                 
-                contents = pickle.dumps((name, stream_id, [results]))
+                contents = pickle.dumps((col, stream_id, results))
                 header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE, 
                         len(contents))
 
@@ -126,7 +126,8 @@ class NNTSCExporter:
                         print >> sys.stderr, "Error sending live data to client fd %d: %s" % (sock.fileno(), msg[1])
                         self.drop_client(sock)
                     else:
-                        active.append((sock, cols, start, end, name))
+                        if results != {}:
+                            active.append((sock, columns, start, end, col))
             self.subscribers[stream_id] = active
 
         return 0
@@ -143,17 +144,18 @@ class NNTSCExporter:
         except error, msg:
             print >> sys.stderr, "Error sending collections to client fd %d" % (sock.fileno(), msg[1])
             self.drop_client(sock)
+            return -1
+        return 0
 
-    def send_schema(self, sock, name):
+    def send_schema(self, sock, col_id):
         
-        stream_schema = self.db.get_stream_schema(name)
-        data_schema = self.db.get_data_schema(name)
-        
+        stream_schema, data_schema = self.db.get_collection_schema(col_id)
+
         # We just want the column names
         stream_schema = map(lambda a: a.name, stream_schema)
         data_schema = map(lambda a: a.name, data_schema)
 
-        schema_pick = pickle.dumps((name, stream_schema, data_schema))
+        schema_pick = pickle.dumps((col_id, stream_schema, data_schema))
 
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(schema_pick))
 
@@ -162,17 +164,19 @@ class NNTSCExporter:
         except error, msg:
             print >> sys.stderr, "Error sending schemas to client fd %d" % (sock.fileno(), msg[1])
             self.drop_client(sock)
+            return -1
+        return 0
 
-    def send_streams(self, sock, name):
+    def send_streams(self, sock, col):
        
-        if self.collections.has_key(name):
-            if sock not in self.collections[name]:
-                self.collections[name].append(sock)
+        if self.collections.has_key(col):
+            if sock not in self.collections[col]:
+                self.collections[col].append(sock)
         else:
-            self.collections[name] = [sock]
-        
-        streams = self.db.select_streams_by_collection(name)
-      
+            self.collections[col] = [sock]
+       
+        streams = self.db.select_streams_by_collection(col)
+     
         i = 0
         while (i < len(streams)):
 
@@ -184,7 +188,7 @@ class NNTSCExporter:
                 end = i + 100
                 more = True
 
-            stream_data = pickle.dumps((name, more, streams[start:end]))
+            stream_data = pickle.dumps((col, more, streams[start:end]))
         
             header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
                     len(stream_data))
@@ -193,8 +197,10 @@ class NNTSCExporter:
             except error, msg:
                 print >> sys.stderr, "Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1])
                 self.drop_client(sock)
+                return -1
 
             i = end
+        return 0
     
     def export_hist_block(self, sock, name, streamid, block, more):        
 
@@ -212,25 +218,15 @@ class NNTSCExporter:
         return 0
 
 
-    def send_history(self, streamid, sock, columns, start, end, name):
-        splitname = name.split('_')
-        
-        columns = ['stream_id', 'timestamp'] + columns
-
-        hist = self.db.select_data(splitname[0], splitname[1], [streamid], 
-                columns, start, end)
-
-        nicehist = []
+    def send_full_history(self, streamid, sock, columns, start, end, name):
+       
+        hist = self.db.select_data(name, [streamid], columns, start, end)
+        tosend = []
         c = 0
 
         for h in hist:
             
-            result = {}
-            for i in range(0, len(columns)):
-                val = h[i]
-                result[columns[i]] = val
-
-            nicehist.append(result)
+            tosend.append(h)
             c += 1
 
             if (c >= 200):
@@ -239,14 +235,13 @@ class NNTSCExporter:
                 else:
                     more = False
 
-                if self.export_hist_block(sock, name, streamid, nicehist, 
-                            more) == -1:
+                if self.export_hist_block(sock, name, streamid, tosend, more) == -1:
                     return -1
                 c = 0
-                nicehist = []
+                tosend = []
 
         if c != 0:
-            return self.export_hist_block(sock, name, streamid, nicehist, False)
+            return self.export_hist_block(sock, name, streamid, tosend, False)
         return 0
                     
     def subscribe(self, sock, submsg):
@@ -260,7 +255,7 @@ class NNTSCExporter:
         for s in streams:
 
             # If live data is going to be required, add to the sub list
-            if end == None or end > now:
+            if (end == None or end > now):
                 if self.subscribers.has_key(s):
                     self.subscribers[s].append((sock, cols, start, end, name))
                 else:
@@ -268,8 +263,14 @@ class NNTSCExporter:
 
             # Send any historical data that we've been asked for
             if start < now:
-                if self.send_history(s, sock, cols, start, end, name) == -1:
+                if self.send_full_history(s, sock, cols, start, end, name) == -1:
                     return -1
+
+    def aggregate(self, sock, aggmsg):
+        tup = pickle.loads(aggmsg)
+        name, start, end, streams, aggcols, groupcols, binsize, funcname = tup
+
+
 
 
     def request_message(self, sock, reqmsg):
@@ -280,17 +281,21 @@ class NNTSCExporter:
         if req_hdr[0] == NNTSC_REQ_COLLECTION:
             # Requesting the collection list
             cols = self.db.list_collections()
+            
+            shrink = []
+            for c in cols:
+                shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
 
-            return self.send_collections(sock, cols)
+            return self.send_collections(sock, shrink)
 
         if req_hdr[0] == NNTSC_REQ_SCHEMA:
-            name = reqmsg[struct.calcsize(nntsc_req_fmt):]
-            return self.send_schema(sock,name)
+            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
+            return self.send_schema(sock,col_id)
 
 
         if req_hdr[0] == NNTSC_REQ_STREAMS:
-            name = reqmsg[struct.calcsize(nntsc_req_fmt):]
-            return self.send_streams(sock, name)
+            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
+            return self.send_streams(sock, col_id)
 
         return 0
 
@@ -306,6 +311,10 @@ class NNTSCExporter:
 
         if header[1] == NNTSC_REQUEST:
             if self.request_message(sock, body) == -1:
+                error = 1
+
+        if header[1] == NNTSC_AGGREGATE:
+            if self.aggregate(sock, body) == -1:
                 error = 1
 
         if header[1] == NNTSC_SUBSCRIBE:

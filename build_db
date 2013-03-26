@@ -5,7 +5,6 @@ import sys, getopt, socket, time, os, imp
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
-from libnntsc.parsers.amp import insert_amp_streams
 from libnntsc.parsers.rrd import insert_rrd_streams
 
 
@@ -52,11 +51,7 @@ rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
 if rrd_conf == "NNTSCConfigError":
     sys.exit(1)
 
-amp_conf = get_nntsc_config(nntsc_conf, 'amp', 'testlist')
-if amp_conf == "NNTSCConfigError":
-    sys.exit(1)
-
-insert_amp_streams(db, amp_conf)
+#insert_amp_streams(db, amp_conf)
 insert_rrd_streams(db, rrd_conf)
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

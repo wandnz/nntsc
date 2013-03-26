@@ -12,24 +12,24 @@ class NNTSCClient:
     def send_request(self, reqtype, col):
         request = struct.pack(nntsc_req_fmt, reqtype)
         if reqtype == NNTSC_REQ_COLLECTION:
-            col = ""
+            col = -1
+
+        col_pick = pickle.dumps(col)
 
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_REQUEST,
-                struct.calcsize(nntsc_req_fmt) + len(col))
+                struct.calcsize(nntsc_req_fmt) + len(col_pick))
 
         try:
-            self.sock.sendall(header + request + col)
+            self.sock.sendall(header + request + col_pick)
         except error, msg:
-            print >> sys.stderr, "Error sending NNTSC_REQUEST for the schema for collection %s: %s" % (col, msg[1])
+            print >> sys.stderr, "Error sending NNTSC_REQUEST %d for collection %d: %s" % (reqtype, col, msg[1])
             return -1
 
         return 0
  
-    def subscribe_streams(self, name, columns, streams, start, end, binsize,
-            aggregator):
+    def subscribe_streams(self, name, columns, streams, start, end):
 
-        contents = pickle.dumps((name, start, end, columns, streams, binsize, 
-                aggregator))
+        contents = pickle.dumps((name, start, end, columns, streams))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SUBSCRIBE, len(contents))
 
         try:
@@ -60,7 +60,7 @@ class NNTSCClient:
             return -1, {}
 
         header_end = struct.calcsize(nntsc_hdr_fmt)
-        header = struct.unpack(nntsc_hdr_fmt, msg[0:header_end])
+        header = struct.unpack(nntsc_hdr_fmt, self.buf[0:header_end])
 
         total_len = header[2] + header_end
 
@@ -70,30 +70,30 @@ class NNTSCClient:
         msgdict = {}
 
         if header[1] == NNTSC_COLLECTIONS:
-            col_list = pickle.loads(msg[header_end:total_len])
+            col_list = pickle.loads(self.buf[header_end:total_len])
             msgdict['collections'] = col_list
 
         if header[1] == NNTSC_SCHEMAS:
-            name, ss, ds = pickle.loads(msg[header_end:total_len])
+            name, ss, ds = pickle.loads(self.buf[header_end:total_len])
             msgdict['collection'] = name
             msgdict['streamschema'] = ss
             msgdict['dataschema'] = ds
 
         if header[1] == NNTSC_STREAMS:
-            name, more, arrived = pickle.loads(msg[header_end:total_len])
+            name, more, arrived = pickle.loads(self.buf[header_end:total_len])
             msgdict['collection'] = name
             msgdict['more'] = more
             msgdict['streams'] = arrived
 
         if header[1] == NNTSC_HISTORY:
-            name, stream_id, data, more = pickle.loads(msg[header_end:total_len])
+            name, stream_id, data, more = pickle.loads(self.buf[header_end:total_len])
             msgdict['collection'] = name
             msgdict['streamid'] = stream_id
             msgdict['data'] = data
             msgdict['more'] = more
 
         if header[1] == NNTSC_LIVE:
-            name, stream_id, data, more = pickle.loads(msg[header_end:total_len])
+            name, stream_id, data = pickle.loads(self.buf[header_end:total_len])
             msgdict['collection'] = name
             msgdict['streamid'] = stream_id
             msgdict['data'] = data

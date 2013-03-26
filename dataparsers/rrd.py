@@ -1,122 +1,10 @@
+from sqlalchemy import create_engine, Table, Column, Integer, \
+        String, MetaData, ForeignKey, UniqueConstraint
+from sqlalchemy.types import Integer, String, Float
 from libnntsc.database import Database
 from libnntsc.configurator import *
+from libnntsc.parsers import rrd_smokeping
 import sys, rrdtool, socket, time
-
-def smokeping_stream_table():
-    from sqlalchemy import Column
-    from sqlalchemy.types import Integer, String
-
-    return [
-        # rrd filename
-            Column('filename', String, nullable=False),
-            Column('source', String, nullable=False),
-            # host (fqdn or ip address)
-            Column('host', String, nullable=False),
-            # stream inside rrd
-            #Column('substream', Integer, nullable = False),
-            Column('minres', Integer, nullable=False, default=300),
-            Column('highrows', Integer, nullable=False, default=1008),           
-            # required so we don't miss any data from the rrd
-            Column('lasttimestamp', Integer, nullable=False, default=0),
-        ]
-
-def smokeping_stream_constraints():
-    return ['filename', 'source', 'host']
-
-def smokeping_parse_db_row(row):
-    pass
-    
-def smokeping_data_table():
-    from sqlalchemy import Column
-    from sqlalchemy.types import Integer, String, Float
-
-    return [
-        Column('uptime', Float, nullable=True),
-        Column('loss', Integer, nullable=True),
-        Column('median', Float, nullable=True),
-        Column('ping1', Float, nullable=True),
-        Column('ping2', Float, nullable=True),
-        Column('ping3', Float, nullable=True),
-        Column('ping4', Float, nullable=True),
-        Column('ping5', Float, nullable=True),
-        Column('ping6', Float, nullable=True),
-        Column('ping7', Float, nullable=True),
-        Column('ping8', Float, nullable=True),
-        Column('ping9', Float, nullable=True),
-        Column('ping10', Float, nullable=True),
-        Column('ping11', Float, nullable=True),
-        Column('ping12', Float, nullable=True),
-        Column('ping13', Float, nullable=True),
-        Column('ping14', Float, nullable=True),
-        Column('ping15', Float, nullable=True),
-        Column('ping16', Float, nullable=True),
-        Column('ping17', Float, nullable=True),
-        Column('ping18', Float, nullable=True),
-        Column('ping19', Float, nullable=True),
-        Column('ping20', Float, nullable=True)
-    ]
-
-def smokeping_insert_stream(db, exp, name, fname, source, host, minres, rows):
-    
-    props = {"name":name, "filename":fname, "source":source, "host":host,
-            "minres":minres, "highrows":rows, "lasttimestamp":0}
-
-    id = db.insert_stream(mod="rrd", modsubtype="smokeping", name=name, 
-            filename=fname, source=source, host=host, minres=minres,
-            highrows=rows, lasttimestamp=0)
-
-    if id >= 0 and exp != None:
-        exp.send((1, ("rrd_smokeping", id, props)))
-    
-
-def smokeping_insert_data(db, exp, stream, ts, line):
-    
-    # This is terrible :(
-
-    kwargs = {}
-    exportdict = {}
-    line_map = {0:"uptime", 1:"loss", 2:"median", 3:"ping1", 4:"ping2",
-        5:"ping3", 6:"ping4", 7:"ping5", 8:"ping6", 9:"ping7", 10:"ping8",
-        11:"ping9", 12:"ping10", 13:"ping11", 14:"ping12", 15:"ping13", 
-        16:"ping14", 17:"ping15", 18:"ping16", 19:"ping17", 20:"ping18",
-        21:"ping19", 22:"ping20"}
-
-    for i in range(0, len(line)):
-        if line[i] == None:
-            val = None
-        elif i == 1:
-            val = int(float(line[i]))
-        elif i > 1:
-            val = round(float(line[i]) * 1000.0, 6)
-        else:
-            val = round(float(line[i]), 6)
-
-        if val != None:
-            kwargs[line_map[i]] = val
-
-        exportdict[line_map[i]] = val
-    
-    db.insert_data(mod="rrd", modsubtype="smokeping", stream_id=stream, \
-            timestamp=ts, **kwargs)
-
-    exp.send((0, ("rrd_smokeping", stream, ts, exportdict)))
-
-    #exp.export_data(collect="rrd_smokeping", stream_id=stream, timestamp=ts,
-    #        **kwargs)
-
-"""
-    db.insert_data(mod="rrd", modsubtype="smokeping", stream_id=stream, \
-            timestamp=ts, uptime=float(line[0]), loss=int(float(line[1])),
-            median=float(line[2]), ping1=float(line[3]), ping2=float(line[4]),
-            ping3=float(line[5]), ping4=float(line[6]), ping5=float(line[7]),
-            ping6=float(line[8]), ping7=float(line[9]), ping8=float(line[10]),
-            ping9=float(line[11]), ping10=float(line[12]), 
-            ping11=float(line[13]),ping12=float(line[14]), 
-            ping13=float(line[15]), ping14=float(line[16]),
-            ping15=float(line[17]), ping16=float(line[18]), 
-            ping17=float(line[19]), ping18=float(line[20]), 
-            ping19=float(line[21]), ping20=float(line[22]))
-  """  
 
 class RRDModule:
     def __init__(self, rrds, nntsc_conf, exp):
@@ -192,16 +80,14 @@ class RRDModule:
                         if current == last:
                             break
                         if r['modsubtype'] == "smokeping":
-                            smokeping_insert_data(self.db, self.exporter,
+                            rrd_smokeping.insert_data(self.db, self.exporter,
                                     r['stream_id'], current, line)
                         
                         if current > r['lasttimestamp']:
                             r['lasttimestamp'] = current
                         current += step
                     
-                    # TODO: Update the lasttimestamp in the db
                     self.db.update_timestamp(r['stream_id'], r['lasttimestamp']) 
-            # TODO: COMMIT!
             self.db.commit_transaction()
 
             time.sleep(30)
@@ -253,7 +139,7 @@ def insert_rrd_streams(db, conf):
         print "Creating stream for RRD-%s %s: %s" % (subtype, rrd, name)
         
         if subtype == "smokeping":
-            smokeping_insert_stream(db, None, name, rrd, source, host, 
+            rrd_smokeping.insert_stream(db, None, name, rrd, source, host, 
                     minres, rows)
         
         name = None
@@ -268,10 +154,16 @@ def run_module(rrds, config, exp):
     rrd.run()
     
 
-def tables():
-    res = {}
-    res["rrd_smokeping"] = (smokeping_stream_table(), smokeping_stream_constraints(), smokeping_data_table())
+def tables(db):
+    
+    st_name = rrd_smokeping.stream_table(db)
+    dt_name = rrd_smokeping.data_table(db)
 
-    return res
+    db.register_collection("rrd", "smokeping", st_name, dt_name)
+        
+    #res = {}
+    #res["rrd_smokeping"] = (smokeping_stream_table(), smokeping_stream_constraints(), smokeping_data_table())
+
+    #return res
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -8,6 +8,8 @@ def import_parsers():
 
 	for i in libnntsc.parsers.__all__:
 		name = i
+		if name == "lpi" or name == "tunnelusers":
+			continue
 		modules[name] = sys.modules['libnntsc.parsers.' + name]
 	return modules
 
