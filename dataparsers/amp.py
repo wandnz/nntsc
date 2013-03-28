@@ -4,7 +4,7 @@ from libnntsc.database import Database
 from libnntsc.configurator import *
 import pika
 from ampsave.importer import import_data_functions
-from libnntsc.parsers import amp_icmp, amp_traceroute, amp_http2
+from libnntsc.parsers import amp_icmp, amp_traceroute, amp_http2, amp_udpstream
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, exp):
@@ -104,5 +104,6 @@ def tables(db):
     amp_icmp.register(db)
     amp_traceroute.register(db)
     amp_http2.register(db)
+    amp_udpstream.register(db)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

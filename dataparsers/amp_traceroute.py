@@ -19,7 +19,7 @@ def stream_table(db):
         Column('source', String, nullable=False),
         Column('destination', String, nullable=False),
         UniqueConstraint('source', 'destination'),
-        useexisting=True,
+        extend_existing=True,
     )
 
     Index('index_amp_traceroute_source', st.c.source)
@@ -37,7 +37,7 @@ def data_tables(db):
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
         Column('traceroute_test_id', Integer, primary_key=True),
-        useexisting=True,
+        extend_existing=True,
     )
 
     Index('index_amp_traceroute_timestamp', testtable.c.timestamp)
@@ -45,7 +45,7 @@ def data_tables(db):
     hoptable = Table("internal_amp_traceroute_hop", db.metadata,
         Column('hop_id', Integer, primary_key=True),
         Column('hop_address', postgresql.INET, nullable=False),
-        useexisting=True,
+        extend_existing=True,
     )
     
     Index('index_amp_traceroute_hop_address', hoptable.c.hop_address)
@@ -58,7 +58,7 @@ def data_tables(db):
                 ForeignKey("internal_amp_traceroute_hop.hop_id",
                     ondelete="CASCADE")),
         Column('path_ttl', Integer, nullable=False),
-        useexisting=True,
+        extend_existing=True,
     )
 
     Index('index_amp_traceroute_path_test_id', pathtable.c.test_id)
