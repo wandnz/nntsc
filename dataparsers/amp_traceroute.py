@@ -9,13 +9,17 @@ STREAM_TABLE_NAME="streams_amp_traceroute"
 DATA_VIEW_NAME="data_amp_traceroute"
 
 def stream_table(db):
+   
+    if STREAM_TABLE_NAME in db.metadata.tables:
+        return STREAM_TABLE_NAME
     
     st = Table(STREAM_TABLE_NAME, db.metadata,
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 primary_key=True),
         Column('source', String, nullable=False),
         Column('destination', String, nullable=False),
-        UniqueConstraint('source', 'destination')
+        UniqueConstraint('source', 'destination'),
+        useexisting=True,
     )
 
     Index('index_amp_traceroute_source', st.c.source)
@@ -24,19 +28,24 @@ def stream_table(db):
     return STREAM_TABLE_NAME
 
 def data_tables(db):
+    if DATA_VIEW_NAME in db.metadata.tables:
+        return DATA_VIEW_NAME
+
 
     testtable = Table("internal_amp_traceroute_test", db.metadata,
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
-        Column('traceroute_test_id', Integer, primary_key=True)
+        Column('traceroute_test_id', Integer, primary_key=True),
+        useexisting=True,
     )
 
     Index('index_amp_traceroute_timestamp', testtable.c.timestamp)
 
     hoptable = Table("internal_amp_traceroute_hop", db.metadata,
         Column('hop_id', Integer, primary_key=True),
-        Column('hop_address', postgresql.INET, nullable=False)
+        Column('hop_address', postgresql.INET, nullable=False),
+        useexisting=True,
     )
     
     Index('index_amp_traceroute_hop_address', hoptable.c.hop_address)
@@ -48,7 +57,8 @@ def data_tables(db):
         Column('hop_id', Integer, 
                 ForeignKey("internal_amp_traceroute_hop.hop_id",
                     ondelete="CASCADE")),
-        Column('path_ttl', Integer, nullable=False)
+        Column('path_ttl', Integer, nullable=False),
+        useexisting=True,
     )
 
     Index('index_amp_traceroute_path_test_id', pathtable.c.test_id)

@@ -23,10 +23,13 @@ def print_usage(prog):
     sys.exit(0)
 
 clean_db = False
+disabled = []
 
-opts, rest = getopt.getopt(sys.argv[1:],'C:Fh')
+opts, rest = getopt.getopt(sys.argv[1:],'D:C:Fh')
 
 for o,a in opts:
+    if o == "-D":
+        disabled.append(a)
     if o == '-C':
         conf_fname = a
     if o == '-F':
@@ -42,16 +45,18 @@ dbconf = get_nntsc_db_config(nntsc_conf)
 if dbconf == {}:
     sys.exit(1)
 
-modules = import_parsers()
+modules = import_parsers(disabled)
 
 db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
 db.build_databases(modules, new=clean_db)
 
-rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
-if rrd_conf == "NNTSCConfigError":
-    sys.exit(1)
+if 'rrd' not in disabled:
 
-#insert_amp_streams(db, amp_conf)
-insert_rrd_streams(db, rrd_conf)
+    rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
+    if rrd_conf == "NNTSCConfigError":
+        sys.exit(1)
+    insert_rrd_streams(db, rrd_conf)
+
+
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

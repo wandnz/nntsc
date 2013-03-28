@@ -8,6 +8,9 @@ DATA_TABLE_NAME="data_rrd_smokeping"
 
 def stream_table(db):
 
+    if STREAM_TABLE_NAME in db.metadata.tables:
+        return STREAM_TABLE_NAME
+
     st = Table(STREAM_TABLE_NAME, db.metadata,
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 primary_key=True),
@@ -22,12 +25,16 @@ def stream_table(db):
         # number of measurements stored at highest resolution
         Column('highrows', Integer, nullable=False, default=1008),         
 
-        UniqueConstraint('filename', 'source', 'host')
+        UniqueConstraint('filename', 'source', 'host'),
+        useexisting=True
     )
 
     return STREAM_TABLE_NAME
 
 def data_table(db):
+
+    if DATA_TABLE_NAME in db.metadata.tables:
+        return DATA_TABLE_NAME
 
     dt = Table(DATA_TABLE_NAME, db.metadata,
         Column('stream_id', Integer, ForeignKey("streams.id"),
@@ -55,7 +62,8 @@ def data_table(db):
         Column('ping17', Float, nullable=True),
         Column('ping18', Float, nullable=True),
         Column('ping19', Float, nullable=True),
-        Column('ping20', Float, nullable=True)
+        Column('ping20', Float, nullable=True),
+        useexisting=True
     )
 
     return DATA_TABLE_NAME

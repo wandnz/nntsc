@@ -1,5 +1,5 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint
+        String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
@@ -14,6 +14,9 @@ amp_icmp_streams = {}
 def stream_table(db):
     """ Specify the description of an icmp stream, used to create the table """
 
+    if STREAM_TABLE_NAME in db.metadata.tables:
+        return STREAM_TABLE_NAME
+
     st = Table(STREAM_TABLE_NAME, db.metadata,
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 primary_key=True),
@@ -21,13 +24,20 @@ def stream_table(db):
         Column('destination', String, nullable=False),
         Column('packet_size', String, nullable=False),
         Column('datastyle', String, nullable=False),
-        UniqueConstraint('destination', 'source', 'packet_size')
+        UniqueConstraint('destination', 'source', 'packet_size'),
+        useexisting=True,
     )
+
+    Index('index_amp_icmp_source', st.c.source)
+    Index('index_amp_icmp_destination', st.c.destination)
 
     return STREAM_TABLE_NAME
 
 def data_table(db):
     """ Specify the description of icmp data, used to create the table """
+
+    if DATA_TABLE_NAME in db.metadata.tables:
+        return DATA_TABLE_NAME
 
     dt = Table(DATA_TABLE_NAME, db.metadata,
         Column('stream_id', Integer, ForeignKey("streams.id"),
@@ -39,8 +49,12 @@ def data_table(db):
         Column('ttl', Integer, nullable=True),
         Column('loss', Boolean, nullable=False),
         Column('error_type', Integer, nullable=False),
-        Column('error_code', Integer, nullable=False)
+        Column('error_code', Integer, nullable=False),
+        useexisting=True,
     )
+
+    Index('index_amp_icmp_timestamp', dt.c.timestamp)
+    Index('index_amp_icmp_packet_size', dt.c.packet_size)
 
     return DATA_TABLE_NAME
 

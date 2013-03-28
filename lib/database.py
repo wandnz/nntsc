@@ -110,24 +110,24 @@ class Database:
             self.__delete_everything(self.engine)
             self.__reflect_db()
         
-        collections = Table('collections', self.metadata,
-            Column('id', Integer, primary_key=True),
-            Column('module', String, nullable=False),
-            Column('modsubtype', String, nullable=True),
-            Column('streamtable', String, nullable=False),
-            Column('datatable', String, nullable=False),
-        )
+            collections = Table('collections', self.metadata,
+                Column('id', Integer, primary_key=True),
+                Column('module', String, nullable=False),
+                Column('modsubtype', String, nullable=True),
+                Column('streamtable', String, nullable=False),
+                Column('datatable', String, nullable=False),
+            )
 
-        streams = Table('streams', self.metadata,
-            Column('id', Integer, primary_key=True),
-            Column('collection', Integer, ForeignKey('collections.id'), 
-                    nullable=False),
-            Column('name', String, nullable=False, unique=True),
-            Column('lasttimestamp', Integer, nullable=False)
-        )
+            streams = Table('streams', self.metadata,
+                Column('id', Integer, primary_key=True),
+                Column('collection', Integer, ForeignKey('collections.id'), 
+                        nullable=False),
+                Column('name', String, nullable=False, unique=True),
+                Column('lasttimestamp', Integer, nullable=False),
+            )
       
-        collections.create()
-        streams.create()
+            collections.create()
+            streams.create()
        
         #self.metadata.create_all()
         #self.commit_transaction()
