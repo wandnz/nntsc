@@ -1,5 +1,5 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint
+        String, MetaData, ForeignKey, UniqueConstraint, event, DDL
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.sql import and_, or_, not_, text
 from sqlalchemy.sql.expression import select, outerjoin, func, label
@@ -99,8 +99,14 @@ class Database:
         for c in query.c:
             c._make_proxy(t)
 
-        CreateView(name, query).execute_at('after-create', self.metadata)
-        DropView(name).execute_at('before-drop', self.metadata)
+        creator = DDL("CREATE VIEW %s AS %s" % (name, str(query.compile())))
+        event.listen(self.metadata, 'after_create', creator)
+
+        dropper = DDL("DROP VIEW %s" % (name))
+        event.listen(self.metadata, 'before_drop', dropper)
+
+        #CreateView(name, query).execute_at('after-create', self.metadata)
+        #DropView(name).execute_at('before-drop', self.metadata)
 
         return t
         
