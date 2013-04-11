@@ -3,7 +3,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
 from sqlalchemy.types import Integer, String, Float
 from libnntsc.database import Database
 from libnntsc.configurator import *
-from libnntsc.parsers import rrd_smokeping
+from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
 import sys, rrdtool, socket, time
 
 class RRDModule:
@@ -18,10 +18,13 @@ class RRDModule:
 
         self.exporter = exp
         self.smokepings = {}
+        self.muninbytes = {}
         self.rrds = {}
         for r in rrds:
             if r['modsubtype'] == 'smokeping':
                 self.smokepings[r['stream_id']] = r
+            if r['modsubtype'] == 'muninbytes':
+                self.muninbytes[r['stream_id']] = r
             
             filename = str(r['filename'])
             if filename in self.rrds:
@@ -83,6 +86,10 @@ class RRDModule:
                             rrd_smokeping.insert_data(self.db, self.exporter,
                                     r['stream_id'], current, line)
                         
+                        if r['modsubtype'] == "muninbytes":
+                            rrd_muninbytes.insert_data(self.db, self.exporter,
+                                    r['stream_id'], current, line)
+                        
                         if current > r['lasttimestamp']:
                             r['lasttimestamp'] = current
                         current += step
@@ -92,7 +99,69 @@ class RRDModule:
 
             time.sleep(30)
 
+def create_rrd_stream(db, rrdtype, params, index, existing):
+
+    if "name" not in params:
+        print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+        print >> sys.stderr, "All RRDs must have a 'name' parameter"
+        return
+    
+    if "file" not in params:
+        print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+        print >> sys.stderr, "All RRDs must have a 'file' parameter"
+        return
+    
+    if params['file'] in existing:
+        return
+
+    info = rrdtool.info(params['file'])
+    minres = info['step']
+    rows = info['rra[0].rows']
+    print "Creating stream for RRD-%s %s: %s" % (rrdtype, params['file'], params['name'])
+
+
+    if rrdtype == "smokeping":
+        if "host" not in params:
+            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+            print >> sys.stderr, "All Smokeping RRDs must have a 'host' parameter"
+            return
+
+        source = socket.gethostname()
+        
+        rrd_smokeping.insert_stream(db, None, params['name'], params['file'], 
+                source, params['host'], minres, rows)
+        
+    if rrdtype == "muninbytes":
+        if "switch" not in params:
+            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+            print >> sys.stderr, "All MuninBytes RRDs must have a 'switch' parameter"
+            return
+        if "interface" not in params:
+            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+            print >> sys.stderr, "All MuninBytes RRDs must have a 'interface' parameter"
+            return
+        if "direction" not in params:
+            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+            print >> sys.stderr, "All MuninBytes RRDs must have a 'direction' parameter"
+            return
+
+        if params["direction"] not in ["sent", "received"]:
+            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+            print >> sys.stderr, "'direction' parameter for MuninBytes RRDs must be either 'sent' or 'received'"
+            return
+
+        rrd_muninbytes.insert_stream(db, None, params['name'], params['file'], 
+                params['switch'], params['interface'], params['direction'],
+                minres, rows)
+
 def insert_rrd_streams(db, conf):
+
+    rrds = db.select_streams_by_module("rrd")
+
+    files = {}
+    for r in rrds:
+        files[r['filename']] = r['name']
+        
 
     if conf == "":
         return
@@ -100,13 +169,12 @@ def insert_rrd_streams(db, conf):
     try:
         f = open(conf, "r")
     except IOError, e:
-        print >> sys.stderr, "WARNING: %s does not exist - no smokeping streams will be added" % (conf)
+        print >> sys.stderr, "WARNING: %s does not exist - no RRD streams will be added" % (conf)
         return
 
-    name = None
-    rrd = None
-    host = None
+    index = 1
     subtype = None
+    parameters = {}
 
     for line in f:
         if line[0] == '#':
@@ -117,37 +185,19 @@ def insert_rrd_streams(db, conf):
         x = line.strip().split("=")
         if len(x) != 2:
             continue
-        if x[0] == "name":
-            name = x[1]
-        if x[0] == "host":
-            host = x[1]
-        if x[0] == "file" or x[0] == "rrd":
-            rrd = x[1]
+        
         if x[0] == "type":
+            if parameters != {}:
+                create_rrd_stream(db, subtype, parameters, index, files)
+            parameters = {}
             subtype = x[1]
+            index += 1
+        else:
+            parameters[x[0]] = x[1]
 
-        # Keep going until we get a full set of options
-        if name == None or rrd == None or host == None:
-            continue
-
-        info = rrdtool.info(rrd)
-        minres = info['step']
-        rows = info['rra[0].rows']
-
-        source = socket.gethostname()
-
-        print "Creating stream for RRD-%s %s: %s" % (subtype, rrd, name)
-        
-        if subtype == "smokeping":
-            rrd_smokeping.insert_stream(db, None, name, rrd, source, host, 
-                    minres, rows)
-        
-        name = None
-        rrd = None
-        host = None
-        subtype = None
-
+    db.commit_transaction()
     f.close()
+
 
 def run_module(rrds, config, exp):
     rrd = RRDModule(rrds, config, exp)
@@ -160,6 +210,11 @@ def tables(db):
     dt_name = rrd_smokeping.data_table(db)
 
     db.register_collection("rrd", "smokeping", st_name, dt_name)
+
+    st_name = rrd_muninbytes.stream_table(db)
+    dt_name = rrd_muninbytes.data_table(db)
+
+    db.register_collection("rrd", "muninbytes", st_name, dt_name)
         
     #res = {}
     #res["rrd_smokeping"] = (smokeping_stream_table(), smokeping_stream_constraints(), smokeping_data_table())
