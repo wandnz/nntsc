@@ -329,13 +329,7 @@ class NNTSCExporter:
 
         assert(evtype == 1)
 
-        try:
-            received = sock.recv(4096)
-        except error, msg:
-            print >> sys.stderr, "Error receiving data from client: %s" % (msg[1])
-            self.drop_client(sock)
-            return
-
+        received = sock.recv(4096)
         if len(received) == 0:
             # Client has disconnected
             self.drop_client(sock)
