@@ -25,7 +25,7 @@ class DataCollector:
             raise
 
     def __init__(self, listen_port):
-        self.modules = import_parsers()
+        self.modules = import_parsers([])
         self.exporter = NNTSCExporter(listen_port);
 
     def configure(self, conf_fname):
