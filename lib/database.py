@@ -115,7 +115,8 @@ class Database:
         if new:
             self.__delete_everything(self.engine)
             self.__reflect_db()
-        
+       
+        if 'collections' not in self.metadata.tables:
             collections = Table('collections', self.metadata,
                 Column('id', Integer, primary_key=True),
                 Column('module', String, nullable=False),
@@ -124,7 +125,9 @@ class Database:
                 Column('datatable', String, nullable=False),
                 UniqueConstraint('module', 'modsubtype')
             )
+            collections.create()
 
+        if 'streams' not in self.metadata.tables:
             streams = Table('streams', self.metadata,
                 Column('id', Integer, primary_key=True),
                 Column('collection', Integer, ForeignKey('collections.id'), 
@@ -133,7 +136,6 @@ class Database:
                 Column('lasttimestamp', Integer, nullable=False),
             )
       
-            collections.create()
             streams.create()
        
         #self.metadata.create_all()
