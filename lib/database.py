@@ -122,6 +122,7 @@ class Database:
                 Column('modsubtype', String, nullable=True),
                 Column('streamtable', String, nullable=False),
                 Column('datatable', String, nullable=False),
+                UniqueConstraint('module', 'modsubtype')
             )
 
             streams = Table('streams', self.metadata,
@@ -154,7 +155,8 @@ class Database:
                     streamtable=stable, datatable=dtable)
         except IntegrityError, e:
             self.rollback_transaction()
-            print >> sys.stderr, e
+            print >> sys.stderr, "Failed to register collection for %s:%s, probably already exists" % (mod, subtype)
+            #print >> sys.stderr, e
             return -1
 
         self.commit_transaction()
@@ -187,8 +189,8 @@ class Database:
             result = self.conn.execute(sttable.insert(), collection=col_id,
                     name=name, lasttimestamp=0)
         except IntegrityError, e:
-            self.rollback_transaction()
-            print >> sys.stderr, e
+            print >> sys.stderr, "Failed to register stream %s for %s:%s, probably already exists" % (name, mod, subtype)
+            #print >> sys.stderr, e
             return -1, -1
 
         # Return the new stream id
@@ -323,12 +325,13 @@ class Database:
 
         selected = []
 
-        sql = select([streams_t.c.id, coll_t.c.streamtable]).select_from(coll_t.join(streams_t, streams_t.c.collection == coll_t.c.id)).where(coll_t.c.id == coll)
+        sql = select([streams_t.c.id, coll_t.c.streamtable, streams_t.c.name]).select_from(coll_t.join(streams_t, streams_t.c.collection == coll_t.c.id)).where(coll_t.c.id == coll)
         result = sql.execute()
 
         for row in result:
             s_id = row[0]
             table = self.metadata.tables[row[1]]
+            name = row[2]
             
             stream_data = table.select().where(table.c.stream_id == s_id).execute()
 
@@ -339,6 +342,7 @@ class Database:
             for k,v in stream.items():
                 stream_dict[k] = v
             stream_data.close()
+            stream_dict['name'] = name
             selected.append(stream_dict)
         result.close()
             
