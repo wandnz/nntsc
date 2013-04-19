@@ -491,7 +491,7 @@ class Database:
 
         for col in table.columns:
             if col.name in selectors:
-                labelstr = aggregator + "_" + col.name
+                labelstr = col.name
                 newcol = label(labelstr, aggfunc(col))
                 aggcols.append(newcol)
             if col.name in groups:
@@ -517,7 +517,7 @@ class Database:
         return data 
        
     def _select_binned(self, table, wherecl, selectors, groups, size, aggre):
-        bts = label('bintimestamp', table.c.timestamp / size * size)
+        bts = label('timestamp', table.c.timestamp / size * size)
         selectcols, groupcols = self._group_columns(table, selectors, groups, 
                 aggre, bts)
         return self._group_select(selectcols, wherecl, groupcols, bts)
@@ -559,19 +559,20 @@ class Database:
         return self._select_unmodified(table, wherecl, selectcols)
        
 
-    def select_aggregated_data(self, mod, modsubtype, stream_ids, aggcols,  
+    def select_aggregated_data(self, collection, stream_ids, aggcols,  
             start_time=None, stop_time=None, groupcols=None, binsize=0, 
             aggregator="avg"):
 
-        tablekey = 'data_' + mod + '_' + modsubtype
+        coll_t = self.metadata.tables['collections']
+        res = select([coll_t.c.datatable]).select_from(coll_t).where(coll_t.c.id == collection).execute()
 
-        if not self.data_tables.has_key(tablekey):
-            return []
+        assert(res.rowcount == 1)
 
-        table = self.data_tables[tablekey]
+        datatable = res.fetchone()[0]
+        table = self.metadata.tables[datatable]
+
         wherecl = self._where_clause(table, start_time, stop_time, stream_ids)
        
-        
         if binsize == 0 and groupcols == None:
             return self._select_unmodified(table, wherecl, aggcols)
 

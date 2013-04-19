@@ -202,9 +202,10 @@ class NNTSCExporter:
             i = end
         return 0
     
-    def export_hist_block(self, sock, name, streamid, block, more):        
+    def export_hist_block(self, sock, name, streamid, block, more, binsize,
+            aggname):        
 
-        contents = pickle.dumps((name, streamid, block, more))
+        contents = pickle.dumps((name, streamid, block, more, binsize, aggname))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
         try:
@@ -218,9 +219,8 @@ class NNTSCExporter:
         return 0
 
 
-    def send_full_history(self, streamid, sock, columns, start, end, name):
+    def send_history(self, streamid, sock, name, hist, binsize, aggname):
        
-        hist = self.db.select_data(name, [streamid], columns, start, end)
         tosend = []
         c = 0
 
@@ -235,23 +235,27 @@ class NNTSCExporter:
                 else:
                     more = False
 
-                if self.export_hist_block(sock, name, streamid, tosend, more) == -1:
+                if self.export_hist_block(sock, name, streamid, tosend, 
+                            more, binsize, aggname) == -1:
                     return -1
                 c = 0
                 tosend = []
 
         if c != 0:
-            return self.export_hist_block(sock, name, streamid, tosend, False)
+            return self.export_hist_block(sock, name, streamid, tosend, False,
+                    binsize, aggname)
         return 0
                     
     def subscribe(self, sock, submsg):
         name, start, end, cols, streams = pickle.loads(submsg)
-        now = int(time.mktime(time.gmtime()))
+        now = int(time.time())
 
         if start == 0 or start == None:
             start = now
         if end == 0:
             end = None
+       
+        
         for s in streams:
 
             # If live data is going to be required, add to the sub list
@@ -263,14 +267,31 @@ class NNTSCExporter:
 
             # Send any historical data that we've been asked for
             if start < now:
-                if self.send_full_history(s, sock, cols, start, end, name) == -1:
+                hist = self.db.select_data(name, [s], cols, start, end)
+                if self.send_history(s, sock, name, hist, 0, "raw") == -1:
                     return -1
+        return 0
 
     def aggregate(self, sock, aggmsg):
         tup = pickle.loads(aggmsg)
-        name, start, end, streams, aggcols, groupcols, binsize, funcname = tup
+        name, start, end, streams, aggcols, groupcols, binsize, fname = tup
+        now = int(time.time())
 
+        if start == None:
+            return 0
+        if start > now:
+            return 0
+        if end == 0:
+            end = None
 
+        for s in streams:
+            
+            agghist = self.db.select_aggregated_data(name, [s], aggcols, 
+                    start, end, groupcols, binsize, fname)
+            if self.send_history(s, sock, name, agghist, binsize, fname) == -1:
+                return -1
+
+        return 0
 
 
     def request_message(self, sock, reqmsg):
@@ -329,7 +350,13 @@ class NNTSCExporter:
 
         assert(evtype == 1)
 
-        received = sock.recv(4096)
+        try:
+            received = sock.recv(4096)
+        except Exception, msg:
+            print >> sys.stderr, "Error receiving data from client %d: %s" % (fd, msg)
+            self.drop_client(sock)
+            return
+
         if len(received) == 0:
             # Client has disconnected
             self.drop_client(sock)
@@ -341,10 +368,10 @@ class NNTSCExporter:
         while len(buf) > struct.calcsize(nntsc_hdr_fmt):
             buf, halt, error = self.client_message(sock, buf)
 
-            if halt or error == -1:
+            if halt or error == 1:
                 break
        
-        if error == -1:
+        if error != 1:
             self.pwe.update_fd_data(sock,buf)
 
     def receive_source(self, fd, evtype, sock, data):
