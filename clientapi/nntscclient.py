@@ -9,7 +9,15 @@ class NNTSCClient:
         self.sock = sock
         self.buf = ""
 
+    def disconnect(self):
+        self.sock.close()
+        self.sock = None
+
     def send_request(self, reqtype, col):
+        if self.sock == None:
+            print >> sys.stderr, "Cannot send NNTSC_REQUEST on a closed socket!"
+            return -1;
+        
         request = struct.pack(nntsc_req_fmt, reqtype)
         if reqtype == NNTSC_REQ_COLLECTION:
             col = -1
@@ -28,6 +36,9 @@ class NNTSCClient:
         return 0
  
     def subscribe_streams(self, name, columns, streams, start, end):
+        if self.sock == None:
+            print >> sys.stderr, "Cannot send NNTSC_SUBSCRIBE on a closed socket!"
+            return -1;
 
         contents = pickle.dumps((name, start, end, columns, streams))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SUBSCRIBE, len(contents))
@@ -39,9 +50,31 @@ class NNTSCClient:
             return -1
 
         return 0
+    
+    def request_aggregate(self, col, streams, start, end, aggcolumns, binsize,
+            groupcolumns=[], aggfunc="avg"):
+        
+        if self.sock == None:
+            print >> sys.stderr, "Cannot send NNTSC_AGGREGATE on a closed socket!"
+            return -1;
+        contents = pickle.dumps((col, start, end, streams, aggcolumns, groupcolumns, 
+                binsize, aggfunc))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_AGGREGATE, len(contents))
+
+        try:
+            self.sock.sendall(header + contents)
+        except error, msg:
+            print >> sys.stderr, "Error sending NNTSC_AGGREGATE for %s: %s" % (col, msg[1])
+            return -1
+
+        return 0
 
  
     def receive_message(self):
+        if self.sock == None:
+            print >> sys.stderr, "Cannot receive messages on a closed socket!"
+            return -1;
+
         try:
             received = self.sock.recv(4096)
         except error, msg:
@@ -86,11 +119,13 @@ class NNTSCClient:
             msgdict['streams'] = arrived
 
         if header[1] == NNTSC_HISTORY:
-            name, stream_id, data, more = pickle.loads(self.buf[header_end:total_len])
+            name, stream_id, data, more, binsize, agg = pickle.loads(self.buf[header_end:total_len])
             msgdict['collection'] = name
             msgdict['streamid'] = stream_id
             msgdict['data'] = data
             msgdict['more'] = more
+            msgdict['binsize'] = binsize
+            msgdict['aggregator'] = agg
 
         if header[1] == NNTSC_LIVE:
             name, stream_id, data = pickle.loads(self.buf[header_end:total_len])
