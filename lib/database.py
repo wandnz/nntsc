@@ -497,8 +497,17 @@ class Database:
             if col.name in groups:
                 groupcols.append(col)
 
+        # If we are binning, put the timestamp column into the group list to
+        # ensure the bins are of appropriate size
+        # However, we also want to create a special aggregator column that
+        # contains the maximum timestamp from the bin -- this helps a lot
+        # when graphing ts data because the last data point will have the
+        # timestamp of the most recent data.
         if bts is not None:
+            aggts = label('timestamp', func.max(table.c.timestamp))
+            aggcols.append(aggts)
             groupcols.append(bts)
+
         selectcols = aggcols + groupcols
 
         return selectcols, groupcols
