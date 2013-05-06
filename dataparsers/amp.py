@@ -5,10 +5,13 @@ from libnntsc.configurator import *
 import pika
 from ampsave.importer import import_data_functions
 from libnntsc.parsers import amp_icmp, amp_traceroute, amp_http2, amp_udpstream
+import time
+import logging
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, exp):
 
+        logging.basicConfig()
         dbconf = get_nntsc_db_config(nntsc_config)
         if dbconf == {}:
             sys.exit(1)
@@ -39,36 +42,57 @@ class AmpModule:
         if password == "NNTSCConfigError":
             print >> sys.stderr, "invalid password: %s" % password
             sys.exit(1)
-        host = get_nntsc_config(nntsc_config, "amp", "host")
-        if host == "NNTSCConfigError":
-            print >> sys.stderr, "invalid host: %s" % host
+        self.host = get_nntsc_config(nntsc_config, "amp", "host")
+        if self.host == "NNTSCConfigError":
+            print >> sys.stderr, "invalid host: %s" % self.host
             sys.exit(1)
-        port = get_nntsc_config(nntsc_config, "amp", "port")
-        if port == "NNTSCConfigError":
-            print >> sys.stderr, "invalid port: %s" % port
+        self.port = get_nntsc_config(nntsc_config, "amp", "port")
+        if self.port == "NNTSCConfigError":
+            print >> sys.stderr, "invalid port: %s" % self.port
             sys.exit(1)
-        ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
-        if ssl == "NNTSCConfigError":
-            print >> sys.stderr, "invalid ssl: %s" % ssl
+        self.ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
+        if self.ssl == "NNTSCConfigError":
+            print >> sys.stderr, "invalid ssl: %s" % self.ssl
             sys.exit(1)
-        queue = get_nntsc_config(nntsc_config, "amp", "queue")
-        if queue == "NNTSCConfigError":
-            print >> sys.stderr, "invalid queue: %s" % queue
+        self.queue = get_nntsc_config(nntsc_config, "amp", "queue")
+        if self.queue == "NNTSCConfigError":
+            print >> sys.stderr, "invalid queue: %s" % self.queue
             sys.exit(1)
 
-        # Connect to rabbitmq
-        credentials = pika.PlainCredentials(username, password)
-        connection = pika.BlockingConnection(pika.ConnectionParameters(
-                    host=host,
-                    port=int(port),
-                    ssl=ssl,
-                    credentials=credentials)
-                )
+        self.credentials = pika.PlainCredentials(username, password)
+        self.connect_rabbit() 
+        
+    def connect_rabbit(self):
+        # Connect to rabbitmq -- try again if the connection fails
+        attempts = 1
+
+        while True:
+            try:
+                self.connection = pika.BlockingConnection(
+                        pika.ConnectionParameters(
+                                host=self.host,
+                                port=int(self.port),
+                                ssl=self.ssl,
+                                credentials=self.credentials)
+                        )
+                break
+            except Exception:
+                delay = attempts * 10.0
+                if delay > 120:
+                    delay = 120.0
+                print >> sys.stderr, "Failed to connect to RabbitMQ (attempt %d), trying again in %.0f seconds" % (attempts, delay)
+                time.sleep(delay)
+                attempts += 1
+                continue
+
         self.channel = connection.channel()
         self.channel.queue_declare(queue=queue, durable=True)
         # limit to only one outstanding message at a time
         self.channel.basic_qos(prefetch_count=1)
         self.channel.basic_consume(self.process_data, queue=queue)
+
+        # TODO: Add some sort of callback in the event of the server going
+        # away   
 
     def process_data(self, channel, method, properties, body):
         """ Process a single message from the queue.
@@ -92,8 +116,13 @@ class AmpModule:
     def run(self):
         """ Run forever, calling the process_data callback for each message """
         print "Running amp modules: %s" % " ".join(self.amp_modules)
-        self.channel.start_consuming()
-
+        
+        try:
+            self.channel.start_consuming()
+        except KeyboardInterrupt:
+            self.channel.stop_consuming()
+        print >> sys.stderr, "AMP: Closing connection to RabbitMQ"
+        self.connection.close()
 
 def run_module(tests, config, exp):
     amp = AmpModule(tests, config, exp)
