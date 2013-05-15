@@ -208,6 +208,7 @@ class NNTSCExporter:
         contents = pickle.dumps((name, streamid, block, more, binsize, aggname))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
+
         try:
             sock.send(header + contents)
         except error, msg:
@@ -229,7 +230,7 @@ class NNTSCExporter:
             tosend.append(h)
             c += 1
 
-            if (c >= 200):
+            if (c >= 100):
                 if h != hist[-1]:
                     more = True
                 else:
