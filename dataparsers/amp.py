@@ -85,11 +85,11 @@ class AmpModule:
                 attempts += 1
                 continue
 
-        self.channel = connection.channel()
-        self.channel.queue_declare(queue=queue, durable=True)
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=self.queue, durable=True)
         # limit to only one outstanding message at a time
         self.channel.basic_qos(prefetch_count=1)
-        self.channel.basic_consume(self.process_data, queue=queue)
+        self.channel.basic_consume(self.process_data, queue=self.queue)
 
         # TODO: Add some sort of callback in the event of the server going
         # away   

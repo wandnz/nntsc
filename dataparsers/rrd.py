@@ -195,6 +195,10 @@ def insert_rrd_streams(db, conf):
         else:
             parameters[x[0]] = x[1]
 
+   
+    if parameters != {}:
+        create_rrd_stream(db, subtype, parameters, index, files)
+
     db.commit_transaction()
     f.close()
 
