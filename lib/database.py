@@ -51,7 +51,6 @@ class Database:
 
         self.engine = create_engine(connect_string, echo=debug)
 
-        self.inspector = reflection.Inspector.from_engine(self.engine)
         self.__reflect_db()
 
         self.conn = self.engine.connect()
@@ -82,7 +81,8 @@ class Database:
         # force it to reflects views as well as tables, but our version of
         # sqlalchemy didn't like that. So fuck it, I'll just reflect the
         # views manually
-        views = self.inspector.get_view_names()
+        inspector = reflection.Inspector.from_engine(self.engine)
+        views = inspector.get_view_names()
         for v in views:
             view_table = Table(v, self.metadata, autoload=True)
 
@@ -210,9 +210,10 @@ class Database:
         all_fks = []
         views = []
 
-        for table_name in self.inspector.get_table_names():
+        inspector = reflection.Inspector.from_engine(self.engine)
+        for table_name in inspector.get_table_names():
             fks = []
-            for fk in self.inspector.get_foreign_keys(table_name):
+            for fk in inspector.get_foreign_keys(table_name):
                 if not fk['name']:
                     continue
                 fks.append(
@@ -222,7 +223,7 @@ class Database:
             tbs.append(t)
             all_fks.extend(fks)
 
-        for v in self.inspector.get_view_names():
+        for v in inspector.get_view_names():
             self.conn.execute(DropView(v))
 
         for fkc in all_fks:
