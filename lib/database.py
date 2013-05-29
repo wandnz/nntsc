@@ -506,9 +506,11 @@ class Database:
         if bts is not None:
             aggts = label('timestamp', func.max(table.c.timestamp))
             aggcols.append(aggts)
+            selectcols = aggcols + groupcols
             groupcols.append(bts)
+        else:
+            selectcols = aggcols + groupcols
 
-        selectcols = aggcols + groupcols
 
         return selectcols, groupcols
     
