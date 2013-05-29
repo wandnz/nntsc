@@ -32,7 +32,7 @@ setup(name="NNTSC",
 	},
 	include_package_data=True,
 	package_data = {
-		'libnntsc': ['conf/example.conf']
+		'libnntsc': ['conf/example.conf', 'conf/rrd.examples']
 	}
 )
 

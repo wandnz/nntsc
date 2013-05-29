@@ -1,0 +1,44 @@
+# Example configuration to read a smokeping RRD
+
+# type must be set to smokeping -- type MUST be the first option
+type=smokeping
+
+# This should be a short name identifying where the smokeping instance was run
+source=smokeping.example.org
+
+# This should be a short name identifying the host being tested to
+host=google.com
+
+# The full path to the RRD file containing the smokeping results
+file=/var/lib/smokeping/google.rrd
+
+# A longer name describing the data source in full. This is used for titles
+# etc, so try to make it as descriptive as possible.
+name=Google Smokeping (IPv4)
+
+
+
+# Example configuration to read a munin RRD
+
+# type must be set to muninbytes -- type MUST be the first option
+type=muninbytes
+
+# This should be a label describing the device that measurements are coming from
+switch=Example Switch
+
+# This should be a unique value identifying the interface being measured, e.g.
+# the port number
+interface=20
+
+# This is an optional parameter that can be used to provide a textual 
+# description of what the interface is used for / connected to
+interfacelabel=Steve's Desk
+
+# This is the direction measured, must be either 'sent' or 'received'.
+direction=received
+
+# The full path to the RRD file containing the munin byte counts for the
+# given switch / interface / direction combination. 
+file=/var/lib/munin/internal/example-sw.internal-snmp_example_sw_internal_if_20-recv-d.rrd
+
+

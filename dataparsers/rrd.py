@@ -123,6 +123,10 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
 
 
     if rrdtype == "smokeping":
+        if "source" not in params:
+            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+            print >> sys.stderr, "All Smokeping RRDs must have a 'source' parameter"
+        
         if "host" not in params:
             print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
             print >> sys.stderr, "All Smokeping RRDs must have a 'host' parameter"
@@ -133,10 +137,8 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             print >> sys.stderr, "All Smokeping RRDs must have a 'name' parameter"
             return
         
-        source = socket.gethostname()
-        
         rrd_smokeping.insert_stream(db, None, params['name'], params['file'], 
-                source, params['host'], minres, rows)
+                params["source"], params['host'], minres, rows)
         
     if rrdtype == "muninbytes":
         if "switch" not in params:
