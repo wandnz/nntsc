@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
 	String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float
+from sqlalchemy.types import Integer, String, Float, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
 
 STREAM_TABLE_NAME="streams_rrd_muninbytes"
@@ -18,8 +18,11 @@ def stream_table(db):
         Column('filename', String, nullable=False),
         # switch name
         Column('switch', String, nullable=False),
-        # name describing the purpose of the interface
+        # name identifying the interface on the switch, usually a port number
         Column('interface', String, nullable=False),
+        # textual description of the purpose of the interface, e.g. the host
+        # or device connected to the port
+        Column('interfacelabel', String, nullable=True),
         # direction, e.g. sent or received
         Column('direction', String, nullable=False),
         # seconds between measurements at highest resolution
@@ -42,7 +45,7 @@ def data_table(db):
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
-        Column('bytes', Integer, nullable=True),
+        Column('bytes', BigInteger, nullable=True),
     )
 
     Index('index_rrd_muninbytes_stream', dt.c.stream_id)
@@ -50,11 +53,11 @@ def data_table(db):
     return DATA_TABLE_NAME
 
 def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
-        rows):
+        rows, label):
 
     props = {"name":name, "filename":filename, "switch":switch, 
             "interface":interface, "direction":dir, "minres":minres,
-            "highrows":rows}
+            "highrows":rows, "interfacelabel":label}
 
     colid, streamid = db.register_new_stream("rrd", "muninbytes", name)
 
@@ -66,7 +69,8 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid,
                 filename=filename, switch=switch, interface=interface,
-                direction=dir, minres=minres, highrows=rows)
+                direction=dir, minres=minres, highrows=rows, 
+                interfacelabel=label)
     except IntegrityError, e:
         db.rollback_transaction()
         print >> sys.stderr, e

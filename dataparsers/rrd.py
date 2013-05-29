@@ -53,6 +53,12 @@ class RRDModule:
         
         if (r["lasttimestamp"] > startts):
             startts = r["lasttimestamp"]
+        
+        # XXX Occasionally we manage to push our endts back past our last
+        # timestamp, so we need to make sure we don't query for a broken
+        # time period. This is a bit of a hax fix, but is better than nothing
+        if endts < startts:
+            endts = startts
             
         return startts, endts
 
@@ -101,10 +107,6 @@ class RRDModule:
 
 def create_rrd_stream(db, rrdtype, params, index, existing):
 
-    if "name" not in params:
-        print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-        print >> sys.stderr, "All RRDs must have a 'name' parameter"
-        return
     
     if "file" not in params:
         print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
@@ -117,7 +119,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
     info = rrdtool.info(params['file'])
     minres = info['step']
     rows = info['rra[0].rows']
-    print "Creating stream for RRD-%s %s: %s" % (rrdtype, params['file'], params['name'])
+    print "Creating stream for RRD-%s: %s" % (rrdtype, params['file'])
 
 
     if rrdtype == "smokeping":
@@ -126,6 +128,11 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             print >> sys.stderr, "All Smokeping RRDs must have a 'host' parameter"
             return
 
+        if "name" not in params:
+            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
+            print >> sys.stderr, "All Smokeping RRDs must have a 'name' parameter"
+            return
+        
         source = socket.gethostname()
         
         rrd_smokeping.insert_stream(db, None, params['name'], params['file'], 
@@ -149,10 +156,19 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
             print >> sys.stderr, "'direction' parameter for MuninBytes RRDs must be either 'sent' or 'received'"
             return
+        
+        if "interfacelabel" not in params:
+            label = None
+            namelabel = "Port " + params["interface"]
+        else:
+            label = params["interfacelabel"]
+            namelabel = label
 
-        rrd_muninbytes.insert_stream(db, None, params['name'], params['file'], 
+        muninname = params["switch"] + " >> " + namelabel + " (Bytes " + params["direction"] + ")"
+
+        rrd_muninbytes.insert_stream(db, None, muninname, params['file'], 
                 params['switch'], params['interface'], params['direction'],
-                minres, rows)
+                minres, rows, label)
 
 def insert_rrd_streams(db, conf):
 
