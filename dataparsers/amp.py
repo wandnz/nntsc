@@ -15,6 +15,16 @@ class AmpModule:
         dbconf = get_nntsc_db_config(nntsc_config)
         if dbconf == {}:
             sys.exit(1)
+        
+        self.disable = get_nntsc_config_bool(nntsc_config, "amp", "disable")
+        if self.disable == "NNTSCConfigError":
+            print >> sys.stderr, "Invalid disable option for AMP"
+            sys.exit(1)
+
+        if self.disable == True:
+            return
+        
+        self.disable = False    # just to be safe
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
@@ -36,27 +46,27 @@ class AmpModule:
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
         if username == "NNTSCConfigError":
-            print >> sys.stderr, "invalid username: %s" % username
+            print >> sys.stderr, "Invalid username option for AMP" 
             sys.exit(1)
         password = get_nntsc_config(nntsc_config, "amp", "password")
         if password == "NNTSCConfigError":
-            print >> sys.stderr, "invalid password: %s" % password
+            print >> sys.stderr, "Invalid password option for AMP" 
             sys.exit(1)
         self.host = get_nntsc_config(nntsc_config, "amp", "host")
         if self.host == "NNTSCConfigError":
-            print >> sys.stderr, "invalid host: %s" % self.host
+            print >> sys.stderr, "Invalid host option for AMP" 
             sys.exit(1)
         self.port = get_nntsc_config(nntsc_config, "amp", "port")
         if self.port == "NNTSCConfigError":
-            print >> sys.stderr, "invalid port: %s" % self.port
+            print >> sys.stderr, "Invalid port option for AMP" 
             sys.exit(1)
         self.ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
         if self.ssl == "NNTSCConfigError":
-            print >> sys.stderr, "invalid ssl: %s" % self.ssl
+            print >> sys.stderr, "Invalid ssl option for AMP" 
             sys.exit(1)
         self.queue = get_nntsc_config(nntsc_config, "amp", "queue")
         if self.queue == "NNTSCConfigError":
-            print >> sys.stderr, "invalid queue: %s" % self.queue
+            print >> sys.stderr, "Invalid queue option for AMP" 
             sys.exit(1)
 
         self.credentials = pika.PlainCredentials(username, password)
@@ -116,7 +126,10 @@ class AmpModule:
     def run(self):
         """ Run forever, calling the process_data callback for each message """
         print "Running amp modules: %s" % " ".join(self.amp_modules)
-        
+       
+        if self.disable:
+            return
+             
         try:
             self.channel.start_consuming()
         except KeyboardInterrupt:
