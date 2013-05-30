@@ -1,0 +1,256 @@
+NNTSC 2.1
+
+---------------------------------------------------------------------------
+Copyright (c) 2013 The University of Waikato, Hamilton, New Zealand.
+All rights reserved.
+
+This code has been developed by the University of Waikato WAND
+research group. For further information please see http://www.wand.net.nz/.
+---------------------------------------------------------------------------
+
+NNTSC is a system designed for collecting, storing and examining network time
+series data. Unlike RRDs, NNTSC does not attempt to aggregate measurements to
+preserve disk space. Instead, all measurements are kept to avoid losing any
+detail when doing historical analysis.
+
+NNTSC also provides a client API that allows other programs to connect to
+the measurement database and either ask for historical data or register 
+interest in upcoming live data.
+
+If you have any questions, comments or suggestions about NNTSC, please
+email us at contact@wand.net.nz.
+
+
+Installation
+============
+NNTSC uses Python setuptools to install both itself and its dependencies.
+
+Simply run the following to install NNTSC:
+	python setup.py install
+
+By default, NNTSC installs into your system's dist-packages directory but you
+will need root privileges to install it there. You can change the installation
+location using the --prefix option. Run 'python setup.py --help install' for
+more details about how you can customise the install process.
+
+You may have some problems with the py-rrdtool dependency, as setuptools may
+not be able to locate a suitable version to install for you. In that case,
+the best solution is to download the source tarball for py-rrdtool
+(http://sourceforge.net/projects/py-rrdtool/) and run:
+	easy_install <downloaded tarball name>
+
+Then, re-run setup.py for NTNSC and it should detect that py-rrdtool is now
+installed on your system.
+
+
+Supported Network Measurement Data Sources
+==========================================
+At present, NNTSC only supports a handful of network measurement methods, but
+we are working to extend this as time goes on.
+
+NNTSC has support for the following data sources:
+
+  AMP -- the Active Measurement Project
+  Smokeping
+  Libprotoident Collector
+  Munin
+
+
+Glossary
+========
+Here are a few important terms that we use when talking about NNTSC.
+
+collection: A collection is a group of network measurement time series' (which
+we call streams) which use the same measurement approach and result structure.
+For example, each AMP test would result in a separate collection.
+
+dataparser: The Python code that processes incoming network measurements and
+inserts them into the NNTSC database. Each collection has its own dataparser.
+
+metric: A term that describes what the data value for a time series actually
+represents. For instance, the ping values stored by the NNTSC smokeping 
+collection and the rtt values stored by the AMP ICMP collection both measure
+latency, so the metric for these is 'latency'. Munin interface usage and LPI
+byte counts both measure traffic observed in bytes, so the metric there is
+'bytes'. 
+
+module: Refers to the input source for a collection. The name 'module' is used
+because many collections share the same basic input source, e.g. all the AMP
+test collections deal with the AMP message broker, so the dataparsers for those
+collections all end up using the same Python module for receiving and processing
+messages from the shared source.
+
+modsubtype: Used to differentiate between collections that share the same
+input source. Short for 'module subtype', where the subtype can be used to
+determine which dataparser should be used to process and store the 
+received measurements correctly.
+
+resolution: When discussing RRDs, resolution refers to the frequency at which
+measurements are taken. NNTSC only stores measurements taken at the highest
+available resolution and will not store RRD data that has been aggregated.
+
+stream: A stream is a single network measurement time series within NNTSC. Each 
+stream has a unique ID number and has a series of properties that describe how
+the measurements were taken. 
+
+
+Configuration
+=============
+Before you start using NNTSC, you'll need to create a config file that
+defines where your time series data is going to be coming from and where you
+want to store it. An example configuration file is located in 
+conf/example.conf.
+
+The configuration options use the standard python ConfigParser format, where
+options are grouped into sections. The sections currently supported by NNTSC
+and their options are as follows:
+
+[database]
+  Options relating to the database where the time series data will be stored
+
+  Available options:
+  	host - the host where the database is located. Leave blank if the
+	       database is on the local machine.
+	database - the name of the NNTSC database.
+	username - the username to use when connecting to the database. Leave
+	           blank to use the name of the user running NNTSC.
+	password - the password to use when connecting to the database.	Leave
+	           blank if no password required.
+
+[lpi]
+  Options relating to accepting and storing data from a libprotoident collector
+
+  Available options:
+  	server - the host that the LPI collector is running on. Leave blank if
+	         you do not wish to collect LPI data.
+	port - the port that the LPI collector is running on. If blank, this
+	       will default to 3678.
+
+[amp]
+  Options relating to connecting to an AMP message queue and receiving AMP data
+
+  Available options:
+  	disable - if True, all other AMP options are ignored and no connection
+	          is made to an AMP message queue.
+  	username - the username to use when connecting to AMP's message queue.
+	password - the password to use when connecting to AMP's message queue.
+	host - the host where the AMP message broker is running.
+	port - the port to connect to on the AMP message broker host.
+	ssl - if True, encrypt all messages using SSL. If False, use plain-text.
+	queue - the name of the message queue to read AMP data from.
+
+[rrd]
+  Options relating to RRD file parsing.
+
+  Available options:
+  	rrdlist - the full path to another config file describing the RRD files
+	          that data should be read from. An example rrdlist file is
+		  given in conf/rrd.examples.
+
+
+Building the Database
+=====================
+
+Before you can run NNTSC itself, you will need to create and initialise the
+database that will be used to store the time series data that you are 
+collecting. NNTSC uses a postgresql database for its storage. First, decide
+on a name for your database -- in the following examples, I am going to use
+'nntsc' as the database name but you can choose anything you like.
+
+Next, create a database and ensure that it is owned by the user that you will
+be ultimately connecting to the database as. In the simplest case, I will be
+connecting using my own username so I can create the nntsc database using:
+	
+	createdb nntsc
+
+The next step is run the build_db script that should have been installed on
+your system when you installed NNTSC. This script will create all of the
+required tables for storing the time series data. In the case of some input
+sources, e.g. RRDs, it will also create 'streams' for each of time series
+that will be collected. Make sure the database section of your config file
+now refers to your new database and then simply run the script as follows:
+
+	build_db -C <your config file>
+	
+If you update your configuration, e.g. you wish to enable a data source that
+you had earlier disabled or you have added new RRDs that you want to collect
+data for, you can re-run build_db and it will add new tables and streams as 
+needed without overwriting any existing ones.
+
+If you really do want to start over fresh, you can pass a -F flag to build_db.
+Be warned, this will drop ALL of your existing tables and any time series data
+and streams that are stored within them. Don't do this unless you are really
+sure you want to lose all that data! 
+
+If you explore your new database with the psql tool, you should have a 
+'collections' table and a 'streams' table. You may also have a number of tables
+begining with 'stream_' and 'data_' as well as possibly a series of tables
+beginning with 'internal_'. Make sure you at least have a collections and
+streams table.
+
+
+Starting the NNTSC Collector
+============================
+
+Once you've created and initialised your database, you can start NNTSC by
+running:
+
+	datacollector -C <your config file>
+
+Note that the same config file is used by both the datacollector and the
+build_db script. 
+
+We strongly recommend running the datacollector within a screen or some other
+persistent terminal environment. Future versions of the datacollector will run
+as a daemon but we haven't quite got that far yet.
+
+
+Querying the NNTSC Database
+===========================
+
+While running, datacollector also listens on TCP port 61234 for client
+connections. Connected clients may query NNTSC to access any data currently
+stored in the time series database or register an interest in live data as it
+arrives from the various input sources. 
+
+Included with NNTSC is a Python API for writing a client that can connect to
+and query the NNTSC datacollector, without the programmer needing to know
+the underlying communication protocol. The code for this API is located in
+clientapi/nntscclient.py -- it's not very well-documented at the moment but
+hopefully we can improve that in future releases.
+
+To use the client API, just add the following imports to your Python program:
+
+	from libnntsc.export import *
+	from libnntsc.client.nntscclient import NNTSCClient
+
+There are three types of messages that a client can send to the NNTSC collector:
+
+  NNTSC_REQUEST -- requests information about the current collections or streams
+  NNTSC_SUBSCRIBE -- requests measurement data for a set of streams
+  NNTSC_AGGREGATE -- requests aggregated measurement data for a set of streams
+
+
+NNTSC_REQUEST messages must also specify a request type:
+  NNTSC_REQ_COLLECTION -- request a list of all available collections
+  NNTSC_REQ_STREAMS -- request a list of streams for a given collection
+  NNTSC_REQ_SCHEMA -- request the list of columns in the stream and data tables
+                      for a given collection
+                      
+NNTSC_SUBSCRIBE messages can be used to get all of the available measurements
+for some set of streams over a given time period. If the time period includes
+historical data, any available historical data will be immediately returned in 
+response. If the time period ends in the future, new measurements will be 
+exported to the client as they arrive until the end time is passed. If the end 
+time is set to 0, then live data will be exported until the client disconnects.
+
+NNTSC_AGGREGATE messages work much the same as NNTSC_SUBSCRIBE messages, 
+except that the measurements are aggregated into bins of a given size. 
+NNTSC_AGGREGATE can only be used with historical data -- if the end time is in
+the future, then you will only get data up to the current time. You must also
+provide an aggregator function and a list of columns from the data table that
+you want to apply the aggregation to.
+
+Supported aggregation functions are: max, min, sum, avg and count. They should
+be fairly self-explanatory as to how they will aggregate the data within a bin.
+
