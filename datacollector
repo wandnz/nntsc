@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 
-import sys, time, getopt, string, os, imp, select
+import sys, time, getopt, string, os, imp, select, argparse
 from multiprocessing import *
 
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
 from libnntsc.exporter import NNTSCExporter
+import libnntsc.logger as logger
+import daemon, lockfile, signal
 
-
-class DataCollector:
+class DataCollector():
     def start_module(self, name, mod, conf):
         try:
             streams = self.db.select_streams_by_module(name)
@@ -24,13 +25,17 @@ class DataCollector:
         except Exception, e:
             raise
 
-    def __init__(self, listen_port):
+    def __init__(self, listen_port, config, backgrounded):
         self.modules = import_parsers([])
         self.exporter = NNTSCExporter(listen_port);
+        self.config = config
 
-    def configure(self, conf_fname):
+        if backgrounded:
+            setBackgrounded(True)
 
-        nntsc_conf = load_nntsc_config(conf_fname)
+    def configure(self):
+
+        nntsc_conf = load_nntsc_config(self.config)
         if nntsc_conf == 0:
             sys.exit(0)
 
@@ -41,13 +46,15 @@ class DataCollector:
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 
                 dbconf["host"])
 
-        self.exporter.configure(conf_fname)
+        self.exporter.configure(self.config)
 
         self.processes = []
         self.config =nntsc_conf 
 
     def run(self):
-
+        
+        self.configure()
+        logger.log("Starting NNTSC Collector")
         for m in self.modules.items():
             self.start_module(m[0], m[1], self.config)
         for p in self.processes:
@@ -64,42 +71,64 @@ class DataCollector:
     def get_processes(self):
         return self.processes
 
-def print_usage(prog):
-    print "Usage for %s" % (prog)
-    print
-    print "Available options:"
-    print "   -C <filename> "
-    print "          Specifies the location of the configuration file"
-    print "   -h "
-    print "          Display this usage test"
-    print
-    sys.exit(0)
 
+    def __del__(self):
+        for p in self.processes:
+            p.terminate()
+        
+
+def cleanup():
+    for p in dc.get_processes():
+        p.terminate()
+    exit(0)
 
 if __name__ == '__main__':
-    listen_port = 61234
 
-    opts, rest = getopt.getopt(sys.argv[1:],'C:hP:')
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-C", "--configfile", help="Specify the location of the NNTSC config file")
+    parser.add_argument("-p", "--port", help="The port to listen for incoming connections on (default: 61234)", default=61234, type=int)
+    parser.add_argument("-b", "--background", help="Run as a daemon", action="store_true")
+    parser.add_argument("-P", "--pidfile", help="PID file location (if running backgrounded)", default=None)
 
-    for o,a in opts:
-        if o == '-C':
-            conf_fname = a
-        if o == '-h':
-            print_usage(sys.argv[0])
-        if o  == '-P':
-            listen_port = int(a)
-
-    dc = DataCollector(listen_port)
-    dc.configure(conf_fname)
+    args = parser.parse_args()
     
-    try:
-        dc.run()
-    except KeyboardInterrupt:
-        for p in dc.get_processes():
-            p.terminate()
-        exit(1)
-    except:
-        raise
+    if (args.configfile == None):
+        print >> sys.stderr, "Must provide a config file using -C!"
+        sys.exit(1)
+    else:
+        config = args.configfile
+
+    listen_port = args.port
+         
+    if args.background:
+        backgrounded = True
+        
+        if args.pidfile == None:    
+            pidfile = None
+        else:
+            pidfile = lockfile.FileLock(args.pidfile)
+    
+        context = daemon.DaemonContext(
+            pidfile = pidfile,
+        )
+
+        context.signal_map = {
+            signal.SIGTERM: cleanup,
+            signal.SIGHUP: cleanup,
+        }
+
+        with context:
+            dc = DataCollector(listen_port, config, True)
+            dc.run()
+    
+    else:
+        dc = DataCollector(listen_port, config, False)
+        try:
+            dc.run()
+        except KeyboardInterrupt:
+            cleanup()
+        except:
+            raise
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

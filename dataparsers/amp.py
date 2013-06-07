@@ -8,6 +8,8 @@ from libnntsc.parsers import amp_icmp, amp_traceroute, amp_http2, amp_udpstream
 import time
 import logging
 
+import libnntsc.logger as logger
+
 class AmpModule:
     def __init__(self, tests, nntsc_config, exp):
 
@@ -18,7 +20,7 @@ class AmpModule:
         
         self.disable = get_nntsc_config_bool(nntsc_config, "amp", "disable")
         if self.disable == "NNTSCConfigError":
-            print >> sys.stderr, "Invalid disable option for AMP"
+            logger.log("Invalid disable option for AMP")
             sys.exit(1)
 
         if self.disable == True:
@@ -46,27 +48,27 @@ class AmpModule:
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
         if username == "NNTSCConfigError":
-            print >> sys.stderr, "Invalid username option for AMP" 
+            logger.log("Invalid username option for AMP")
             sys.exit(1)
         password = get_nntsc_config(nntsc_config, "amp", "password")
         if password == "NNTSCConfigError":
-            print >> sys.stderr, "Invalid password option for AMP" 
+            logger.log("Invalid password option for AMP") 
             sys.exit(1)
         self.host = get_nntsc_config(nntsc_config, "amp", "host")
         if self.host == "NNTSCConfigError":
-            print >> sys.stderr, "Invalid host option for AMP" 
+            logger.log("Invalid host option for AMP")
             sys.exit(1)
         self.port = get_nntsc_config(nntsc_config, "amp", "port")
         if self.port == "NNTSCConfigError":
-            print >> sys.stderr, "Invalid port option for AMP" 
+            logger.log("Invalid port option for AMP")
             sys.exit(1)
         self.ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
         if self.ssl == "NNTSCConfigError":
-            print >> sys.stderr, "Invalid ssl option for AMP" 
+            logger.log("Invalid ssl option for AMP")
             sys.exit(1)
         self.queue = get_nntsc_config(nntsc_config, "amp", "queue")
         if self.queue == "NNTSCConfigError":
-            print >> sys.stderr, "Invalid queue option for AMP" 
+            logger.log("Invalid queue option for AMP")
             sys.exit(1)
 
         self.credentials = pika.PlainCredentials(username, password)
@@ -90,7 +92,7 @@ class AmpModule:
                 delay = attempts * 10.0
                 if delay > 120:
                     delay = 120.0
-                print >> sys.stderr, "Failed to connect to RabbitMQ (attempt %d), trying again in %.0f seconds" % (attempts, delay)
+                logger.log("Failed to connect to RabbitMQ (attempt %d), trying again in %.0f seconds" % (attempts, delay))
                 time.sleep(delay)
                 attempts += 1
                 continue
@@ -117,15 +119,15 @@ class AmpModule:
                 amp_icmp.process_data(self.db, self.exporter, 
                         properties.timestamp, data, source)
         else:
-            print >> sys.stderr, "unknown test: '%s'" % (
-                    properties.headers["x-amp-test-type"])
+            logger.log("unknown test: '%s'" % (
+                    properties.headers["x-amp-test-type"]))
         # TODO check if it all worked, don't ack if it fails
         self.db.commit_transaction()
         channel.basic_ack(delivery_tag = method.delivery_tag)
 
     def run(self):
         """ Run forever, calling the process_data callback for each message """
-        print "Running amp modules: %s" % " ".join(self.amp_modules)
+        logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
        
         if self.disable:
             return
@@ -134,7 +136,7 @@ class AmpModule:
             self.channel.start_consuming()
         except KeyboardInterrupt:
             self.channel.stop_consuming()
-        print >> sys.stderr, "AMP: Closing connection to RabbitMQ"
+        logger.log("AMP: Closing connection to RabbitMQ")
         self.connection.close()
 
 def run_module(tests, config, exp):

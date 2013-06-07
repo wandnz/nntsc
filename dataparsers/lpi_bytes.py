@@ -3,6 +3,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
 from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
+import libnntsc.logger as logger
 
 import sys, string
 
@@ -80,7 +81,7 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto):
                 source=mon, user=user, dir=dir, freq=freq, protocol=proto)
     except IntegrityError, e:
         db.rollback_transaction()
-        print sys.stderr, e
+        logger.log(e)
         return -1
 
     if streamid >= 0 and exp != None:
@@ -96,7 +97,7 @@ def insert_data(db, exp, stream_id, ts, value):
         db.conn.execute(dt.insert(), stream_id=stream_id, timestamp=ts, bytes=value)
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
     
     exp.send((0, ("lpi_bytes", stream_id, ts, {"bytes":value})))
@@ -111,15 +112,15 @@ def process_data(db, exp, protomap, data):
 
     for n in data['results']:
         if n[0] not in protomap.keys():
-            print >> sys.stderr, "LPI Bytes: Unknown protocol id: %u" % (n[0])
+            logger.log("LPI Bytes: Unknown protocol id: %u" % (n[0]))
             return -1
         stream_id = find_stream(mon, user, dir, freq, protomap[n[0]])
         if stream_id == -1:
             stream_id = add_new_stream(db, exp, mon, user, dir, freq, protomap[n[0]])
 
             if stream_id == -1:
-                print >> sys.stderr, "LPI Bytes: Cannot create new stream"
-                print >> sys.stderr, "LPI Bytes: %s:%s %s %s %s\n" % (mon, user, dir, freq, protomap[n[0]])
+                logger.log("LPI Bytes: Cannot create new stream")
+                logger.log("LPI Bytes: %s:%s %s %s %s\n" % (mon, user, dir, freq, protomap[n[0]]))
                 return -1
             else:
                 lpi_bytes_streams[(mon, user, dir, freq, protomap[n[0]])] = stream_id

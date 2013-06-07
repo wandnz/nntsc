@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.types import Integer, String, Float
 from sqlalchemy.exc import IntegrityError, OperationalError
+import libnntsc.logger as logger
 
 STREAM_TABLE_NAME="streams_rrd_smokeping"
 DATA_TABLE_NAME="data_rrd_smokeping"
@@ -87,7 +88,7 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
                 host=host, minres=minres, highrows=rows)
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     #id = db.insert_stream(mod="rrd", modsubtype="smokeping", name=name, 
@@ -133,7 +134,7 @@ def insert_data(db, exp, stream, ts, line):
                 **kwargs)
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     exp.send((0, ("rrd_smokeping", stream, ts, exportdict)))

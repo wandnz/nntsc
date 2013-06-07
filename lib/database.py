@@ -13,6 +13,8 @@ from sqlalchemy.schema import DDLElement, DropTable, ForeignKeyConstraint, \
 from sqlalchemy.sql import table
 from sqlalchemy.ext import compiler
 
+from libnntsc.logger import *
+
 class CreateView(DDLElement):
     def __init__(self, name, selectable):
         self.name=name
@@ -45,7 +47,7 @@ class Database:
                 host=dbhost, database=dbname)
 
         if debug:
-            print 'Connecting to db using "%s"' % connect_string
+            log('Connecting to db using "%s"' % connect_string)
 
         self.init_error = False
 
@@ -72,8 +74,8 @@ class Database:
         try:
             self.metadata.reflect(bind=self.engine)
         except OperationalError, e:
-            print >> sys.stderr, "Error binding to database %s" % (dbname)
-            print >> sys.stderr, "Are you sure you've specified the right database name?"
+            log("Error binding to database %s" % (dbname))
+            log("Are you sure you've specified the right database name?")
             self.init_error = True
             sys.exit(1)
 
@@ -157,7 +159,7 @@ class Database:
                     streamtable=stable, datatable=dtable)
         except IntegrityError, e:
             self.rollback_transaction()
-            print >> sys.stderr, "Failed to register collection for %s:%s, probably already exists" % (mod, subtype)
+            log("Failed to register collection for %s:%s, probably already exists" % (mod, subtype))
             #print >> sys.stderr, e
             return -1
 
@@ -173,11 +175,11 @@ class Database:
         result = sql.execute()
         
         if result.rowcount == 0:
-            print sys.stderr, "Database Error: no collection for %s:%s" % (mod, subtype)
+            log("Database Error: no collection for %s:%s" % (mod, subtype))
             return -1, -1
 
         if result.rowcount > 1:
-            print sys.stderr, "Database Error: duplicate collections for %s:%s" % (mod, subtype)
+            log("Database Error: duplicate collections for %s:%s" % (mod, subtype))
             return -1, -1
 
         col = result.fetchone()
@@ -191,7 +193,7 @@ class Database:
             result = self.conn.execute(sttable.insert(), collection=col_id,
                     name=name, lasttimestamp=0)
         except IntegrityError, e:
-            print >> sys.stderr, "Failed to register stream %s for %s:%s, probably already exists" % (name, mod, subtype)
+            log("Failed to register stream %s for %s:%s, probably already exists" % (name, mod, subtype))
             #print >> sys.stderr, e
             return -1, -1
 
@@ -403,7 +405,7 @@ class Database:
         elif agg == "count":
             return func.count
         else:
-            print >> sys.stderr, "Unsupported aggregator function: %s" % (aggregator)
+            log("Unsupported aggregator function: %s" % (aggregator))
             return None
 
     

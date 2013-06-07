@@ -2,6 +2,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
 	String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
+import libnntsc.logger as logger
 
 STREAM_TABLE_NAME="streams_rrd_muninbytes"
 DATA_TABLE_NAME="data_rrd_muninbytes"
@@ -73,7 +74,7 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
                 interfacelabel=label)
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     if streamid >= 0 and exp != None:
@@ -107,7 +108,7 @@ def insert_data(db, exp, stream, ts, line):
                 **kwargs)
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     exp.send((0, ("rrd_muninbytes", stream, ts, exportdict)))

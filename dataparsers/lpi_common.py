@@ -1,5 +1,6 @@
 import sys, struct
 from socket import *
+import libnntsc.logger as logger
 
 lpicp_header_fmt = "!BBHHH"
 lpicp_stats_fmt = "!LLLBBHHH"
@@ -24,12 +25,12 @@ def connect_lpi_server(host, port):
     try:
         s = socket(AF_INET, SOCK_STREAM)
     except error, msg:
-        sys.stderr.write("Failed to create socket: %s\n" % (msg[1]))
+        logger.log("Failed to create socket: %s\n" % (msg[1]))
         return -1
     try:
         s.connect((host, port))
     except error, msg:
-        sys.stderr.write("Failed to connect to %s on port %u: %s\n" %
+        logger.log("Failed to connect to %s on port %u: %s\n" %
                 (host, port, msg[1]))
         return -1
 
@@ -102,8 +103,7 @@ def read_lpicp_hdr(s):
     try:
         msg_buf = s.recv(struct.calcsize(lpicp_header_fmt))
     except error, msg:
-        sys.stderr.write("Error receiving header: %s\n" %
-                (msg[1]))
+        logger.log("Error receiving header: %s\n" % (msg[1]))
         return {}, 0
 
     if not msg_buf:
@@ -122,8 +122,7 @@ def receive_lpicp_message(s, to_read):
         try:
             foo = s.recv(to_read - received)
         except error, msg:
-            sys.stderr.write("Error receiving body: %s\n" %
-                    (msg[1]))
+            logger.log("Error receiving body: %s\n" % (msg[1]))
             return ""
         msg_buf += foo
         received = len(msg_buf)
@@ -135,11 +134,11 @@ def read_lpicp(s):
 
     lpicp_hdr, to_read = read_lpicp_hdr(s)
     if lpicp_hdr == {}:
-        print >> sys.stderr, "Failed to read LPICP header"
+        logger.log("Failed to read LPICP header")
         return -1, {}
 
     if int(lpicp_hdr[0]) != 1:
-        print >> sys.stderr, "Invalid LPICP version number: %u" % (int(lpicp_hdr[0]))
+        logger.log("Invalid LPICP version number: %u" % (int(lpicp_hdr[0])))
         return -1, {}
 
     msg_buf = receive_lpicp_message(s, to_read)

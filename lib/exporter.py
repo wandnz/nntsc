@@ -8,7 +8,7 @@ from multiprocessing import Pipe
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.export import *
-
+from libnntsc.logger import *
         
 class NNTSCExporter:
     def __init__(self, port):
@@ -21,14 +21,15 @@ class NNTSCExporter:
         self.client_sockets = []
 
     def drop_client(self, sock):
-        print "Dropping client on fd %d" % (sock.fileno())
+        
+        #log("Dropping client on fd %d" % (sock.fileno()))
 
         self.pwe.del_fd_event(sock)
         self.client_sockets.remove(sock)
         sock.close()
     
     def drop_source(self, sock):
-        print "Dropping source on fd %d" % (sock.fileno())
+        log("Dropping source on fd %d" % (sock.fileno()))
 
         self.pwe.del_fd_event(sock)
         sock.close()
@@ -52,12 +53,12 @@ class NNTSCExporter:
         try:
             coll_id, coll_name, stream_id, properties = received
         except ValueError:
-            print >> sys.stderr, "Incorrect data format from source %d" % (fd)
-            print >> sys.stderr, "Format should be (collection id, collection name, streamid, values dict)"
+            log("Incorrect data format from source %d" % (fd))
+            log("Format should be (collection id, collection name, streamid, values dict)")
             return -1
         
         if not isinstance(properties, dict):
-            print >> sys.stderr, "Values should expressed as a dictionary"
+            log("Values should expressed as a dictionary")
             return -1
 
         # XXX UNTESTED!!
@@ -79,7 +80,7 @@ class NNTSCExporter:
             try:
                 sock.send(header + ns_data)
             except error, msg:
-                print >> sys.stderr, "Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1])
+                log("Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1]))
                 self.drop_client(sock)
             else:
                 active.append(sock)
@@ -92,12 +93,12 @@ class NNTSCExporter:
         try:
             name, stream_id, timestamp, values = received
         except ValueError:
-            print >> sys.stderr, "Incorrect data format from source %d" % (fd)
-            print >> sys.stderr, "Format should be (name, streamid, timestamp, values dict)"
+            log("Incorrect data format from source %d" % (fd))
+            log("Format should be (name, streamid, timestamp, values dict)")
             return -1
         
         if not isinstance(values, dict):
-            print >> sys.stderr, "Values should expressed as a dictionary"
+            log("Values should expressed as a dictionary")
             return -1
         
         if stream_id in self.subscribers.keys():
@@ -123,7 +124,7 @@ class NNTSCExporter:
                     try:
                         sock.send(header + contents)
                     except error, msg:
-                        print >> sys.stderr, "Error sending live data to client fd %d: %s" % (sock.fileno(), msg[1])
+                        log("Error sending live data to client fd %d: %s" % (sock.fileno(), msg[1]))
                         self.drop_client(sock)
                     else:
                         if results != {}:
@@ -142,7 +143,7 @@ class NNTSCExporter:
         try:
             sock.send(header + col_pickle)
         except error, msg:
-            print >> sys.stderr, "Error sending collections to client fd %d" % (sock.fileno(), msg[1])
+            log("Error sending collections to client fd %d" % (sock.fileno(), msg[1]))
             self.drop_client(sock)
             return -1
         return 0
@@ -162,7 +163,7 @@ class NNTSCExporter:
         try:
             sock.send(header + schema_pick)
         except error, msg:
-            print >> sys.stderr, "Error sending schemas to client fd %d" % (sock.fileno(), msg[1])
+            log("Error sending schemas to client fd %d" % (sock.fileno(), msg[1]))
             self.drop_client(sock)
             return -1
         return 0
@@ -195,7 +196,7 @@ class NNTSCExporter:
             try:
                 sock.send(header + stream_data)
             except error, msg:
-                print >> sys.stderr, "Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1])
+                log("Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1]))
                 self.drop_client(sock)
                 return -1
 
@@ -212,7 +213,7 @@ class NNTSCExporter:
         try:
             sock.send(header + contents)
         except error, msg:
-            print >> sys.stderr, "Error sending data to client fd %d: %s" % (sock.fileno(), msg[1])
+            log("Error sending data to client fd %d: %s" % (sock.fileno(), msg[1]))
             self.drop_client(sock)
 
             return -1
@@ -354,7 +355,7 @@ class NNTSCExporter:
         try:
             received = sock.recv(4096)
         except Exception, msg:
-            print >> sys.stderr, "Error receiving data from client %d: %s" % (fd, msg)
+            log("Error receiving data from client %d: %s" % (fd, msg))
             self.drop_client(sock)
             return
 
@@ -380,7 +381,7 @@ class NNTSCExporter:
         try:
             obj = sock.recv()
         except EOFError, msg:
-            print >> sys.stderr, "Error receiving data from source %d: %s" % (fd, msg)
+            log("Error receiving data from source %d: %s" % (fd, msg))
             self.drop_source(sock)
             return
 
@@ -402,17 +403,17 @@ class NNTSCExporter:
         try:
             client, addr = sock.accept()
         except error, msg:
-            print >> sys.stderr, "Error accepting connection: %s" % (msg[1])
+            log("Error accepting connection: %s" % (msg[1]))
             return
 
-        print "Accepted connection on fd %d" % (client.fileno())
+        #log("Accepted connection on fd %d" % (client.fileno()))
 
         self.client_sockets.append(client)
         self.pwe.add_fd_event(client, 1, "", self.receive_client)
 
 
     def register_source(self, pipe):
-        print "Registering source on fd %d" % (pipe.fileno())
+        log("Registering source on fd %d" % (pipe.fileno()))
         
         self.pwe.add_fd_event(pipe, 1, "", self.receive_source)    
 
@@ -421,26 +422,26 @@ class NNTSCExporter:
         try:
             s = socket(AF_INET, SOCK_STREAM)
         except error, msg:
-            print >> sys.stderr, "Failed to create socket: %s" % (msg[1])
+            log("Failed to create socket: %s" % (msg[1]))
             return -1
 
         try:
             s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         except error, msg:
-            print >> sys.stderr, "Failed to set SO_REUSEADDR: %s" % (msg[1])
+            log("Failed to set SO_REUSEADDR: %s" % (msg[1]))
             return -1
 
 
         try:
             s.bind(('', port))
         except error, msg:
-            print >> sys.stderr, "Failed to bind to port %d: %s" % (port, msg[1])
+            log("Failed to bind to port %d: %s" % (port, msg[1]))
             return -1
 
         try:
             s.listen(5)
         except error, msg:
-            print >> sys.stderr, "Failed to listen on port %d: %s" % (port, msg[1])
+            log("Failed to listen on port %d: %s" % (port, msg[1]))
             return -1
 
         return s

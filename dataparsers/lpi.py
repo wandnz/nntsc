@@ -1,6 +1,7 @@
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common
+import libnntsc.logger as logger
 
 from socket import *
 import sys, struct
@@ -19,7 +20,7 @@ class LPIModule:
             sys.exit(1)
         
         if lpiserver == "":
-            print >> sys.stderr, "No LPI Server specified, disabling module"
+            logger.log("No LPI Server specified, disabling module")
             sys.exit(0)
 
         lpiport = get_nntsc_config(nntsc_conf, 'lpi', 'port')
@@ -45,7 +46,7 @@ class LPIModule:
 
     def process_stats(self, data):
         if data == {}:
-            print >> sys.stderr, "LPIModule: Empty Stats Dict"
+            logger.log("LPIModule: Empty Stats Dict")
             return -1
 
         if data['metric'] == "bytes":
@@ -67,7 +68,7 @@ class LPIModule:
 
             if rec_type == 0:
                 if self.process_stats(data) == -1:
-                    print >> sys.stderr, "LPIModule: Invalid Statistics Data"
+                    logger.log("LPIModule: Invalid Statistics Data")
                     break
 
             if rec_type == -1:

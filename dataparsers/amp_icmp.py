@@ -4,6 +4,8 @@ from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 
+import libnntsc.logger as logger
+
 import sys, string
 
 STREAM_TABLE_NAME="streams_amp_icmp"
@@ -94,7 +96,7 @@ def insert_stream(db, exp, source, dest, size):
                 datastyle="rtt_ms")
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     if streamid >= 0 and exp != None:
@@ -111,7 +113,7 @@ def insert_data(db, exp, stream, ts, result):
                 **result)
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     exp.send((0, ("amp_icmp", stream, ts, result)))
@@ -135,9 +137,9 @@ def process_data(db, exp, timestamp, data, source):
             stream_id = insert_stream(db, exp, source, d["target"], sizestr)
 
             if stream_id == -1:
-                print >> sys.stderr, "AMPModule: Cannot create stream for:"
-                print >> sys.stderr, "AMPModule: %s %s:%s:%s\n" % (
-                        "icmp", source, d["target"], sizestr)
+                logger.log("AMPModule: Cannot create stream for:")
+                logger.log("AMPModule: %s %s:%s:%s\n" % (
+                        "icmp", source, d["target"], sizestr))
                 return -1
             else:
                 amp_icmp_streams[key] = stream_id

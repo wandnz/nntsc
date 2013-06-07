@@ -4,6 +4,7 @@ from sqlalchemy.types import Integer, String, Float
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
+import libnntsc.logger as logger
 import sys, rrdtool, socket, time
 
 class RRDModule:
@@ -63,7 +64,7 @@ class RRDModule:
         return startts, endts
 
     def run(self):
-        print "Running rrd"
+        logger.log("Starting RRD module") 
         while True:
             for fname,rrds in self.rrds.items():
                 for r in rrds:
@@ -109,8 +110,8 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
 
     
     if "file" not in params:
-        print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-        print >> sys.stderr, "All RRDs must have a 'file' parameter"
+        logger.log("Failed to create stream for RRD %d" % (index))
+        logger.log("All RRDs must have a 'file' parameter")
         return
     
     if params['file'] in existing:
@@ -119,22 +120,22 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
     info = rrdtool.info(params['file'])
     minres = info['step']
     rows = info['rra[0].rows']
-    print "Creating stream for RRD-%s: %s" % (rrdtype, params['file'])
+    logger.log("Creating stream for RRD-%s: %s" % (rrdtype, params['file']))
 
 
     if rrdtype == "smokeping":
         if "source" not in params:
-            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-            print >> sys.stderr, "All Smokeping RRDs must have a 'source' parameter"
+            logger.log("Failed to create stream for RRD %d" % (index))
+            logger.log("All Smokeping RRDs must have a 'source' parameter")
         
         if "host" not in params:
-            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-            print >> sys.stderr, "All Smokeping RRDs must have a 'host' parameter"
+            logger.log("Failed to create stream for RRD %d" % (index))
+            logger.log("All Smokeping RRDs must have a 'host' parameter")
             return
 
         if "name" not in params:
-            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-            print >> sys.stderr, "All Smokeping RRDs must have a 'name' parameter"
+            logger.log("Failed to create stream for RRD %d" % (index))
+            logger.log("All Smokeping RRDs must have a 'name' parameter")
             return
         
         rrd_smokeping.insert_stream(db, None, params['name'], params['file'], 
@@ -142,21 +143,21 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
         
     if rrdtype == "muninbytes":
         if "switch" not in params:
-            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-            print >> sys.stderr, "All MuninBytes RRDs must have a 'switch' parameter"
+            logger.log("Failed to create stream for RRD %d" % (index))
+            logger.log("All MuninBytes RRDs must have a 'switch' parameter")
             return
         if "interface" not in params:
-            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-            print >> sys.stderr, "All MuninBytes RRDs must have a 'interface' parameter"
+            logger.log("Failed to create stream for RRD %d" % (index))
+            logger.log("All MuninBytes RRDs must have a 'interface' parameter")
             return
         if "direction" not in params:
-            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-            print >> sys.stderr, "All MuninBytes RRDs must have a 'direction' parameter"
+            logger.log("Failed to create stream for RRD %d" % (index))
+            logger.log("All MuninBytes RRDs must have a 'direction' parameter")
             return
 
         if params["direction"] not in ["sent", "received"]:
-            print >> sys.stderr, "Failed to create stream for RRD %d" % (index)
-            print >> sys.stderr, "'direction' parameter for MuninBytes RRDs must be either 'sent' or 'received'"
+            logger.log("Failed to create stream for RRD %d" % (index))
+            logger.log("'direction' parameter for MuninBytes RRDs must be either 'sent' or 'received'")
             return
         
         if "interfacelabel" not in params:
@@ -187,7 +188,7 @@ def insert_rrd_streams(db, conf):
     try:
         f = open(conf, "r")
     except IOError, e:
-        print >> sys.stderr, "WARNING: %s does not exist - no RRD streams will be added" % (conf)
+        logger.log("WARNING: %s does not exist - no RRD streams will be added" % (conf))
         return
 
     index = 1

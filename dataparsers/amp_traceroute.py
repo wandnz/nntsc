@@ -5,6 +5,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.expression import select, join, outerjoin, func, label
 
+import libnntsc.logger as logger
+
 STREAM_TABLE_NAME="streams_amp_traceroute"
 DATA_VIEW_NAME="data_amp_traceroute"
 HOP_TABLE_NAME="internal_amp_traceroute_hop"
@@ -140,7 +142,7 @@ def insert_stream(db, exp, source, dest, size):
                 datastyle="traceroute")
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     if streamid >= 0 and exp != None:
@@ -165,7 +167,7 @@ def get_or_create_hop_id(db, address):
         return item.inserted_primary_key[0]
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
 
@@ -183,7 +185,7 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
         test_id = test.inserted_primary_key[0]
     except IntegrityError, e:
         db.rollback_transaction()
-        print >> sys.stderr, e
+        logger.log(e)
         return -1
 
     # insert each hop along the path
@@ -201,7 +203,7 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
                     hop_rtt=hop["rtt"])
         except IntegrityError, e:
             db.rollback_transaction()
-            print >> sys.stderr, e
+            logger.log(e)
             return -1
         ttl += 1
 
@@ -238,9 +240,9 @@ def process_data(db, exp, timestamp, data, source):
             stream_id = insert_stream(db, exp, source, d["target"], sizestr)
 
             if stream_id == -1:
-                print >> sys.stderr, "AMPModule: Cannot create stream for:"
-                print >> sys.stderr, "AMPModule: %s %s:%s:%s\n" % (
-                        "traceroute", source, d["target"], sizestr)
+                logger.log("AMPModule: Cannot create stream for:")
+                logger.log("AMPModule: %s %s:%s:%s\n" % (
+                        "traceroute", source, d["target"], sizestr))
                 return -1
             else:
                 amp_trace_streams[key] = stream_id
