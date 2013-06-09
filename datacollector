@@ -19,6 +19,8 @@ class DataCollector():
             
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
                     pipe_send))
+            p.daemon = True
+
 
             self.exporter.register_source(pipe_recv)
             self.processes.append(p)
@@ -29,9 +31,7 @@ class DataCollector():
         self.modules = import_parsers([])
         self.exporter = NNTSCExporter(listen_port);
         self.config = config
-
-        if backgrounded:
-            setBackgrounded(True)
+        self.backgrounded = backgrounded
 
     def configure(self):
 
@@ -52,6 +52,9 @@ class DataCollector():
         self.config =nntsc_conf 
 
     def run(self):
+        if self.backgrounded:
+            logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
+
         
         self.configure()
         logger.log("Starting NNTSC Collector")
@@ -78,6 +81,7 @@ class DataCollector():
         
 
 def cleanup():
+    logger.log("Calling cleanup function\n")
     for p in dc.get_processes():
         p.terminate()
     exit(0)
@@ -101,7 +105,6 @@ if __name__ == '__main__':
     listen_port = args.port
          
     if args.background:
-        backgrounded = True
         
         if args.pidfile == None:    
             pidfile = None
@@ -111,11 +114,6 @@ if __name__ == '__main__':
         context = daemon.DaemonContext(
             pidfile = pidfile,
         )
-
-        context.signal_map = {
-            signal.SIGTERM: cleanup,
-            signal.SIGHUP: cleanup,
-        }
 
         with context:
             dc = DataCollector(listen_port, config, True)
