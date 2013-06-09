@@ -189,32 +189,31 @@ beginning with 'internal_'. Make sure you at least have a collections and
 streams table.
 
 
-Starting the NNTSC Collector
+Starting NNTSC
 ============================
 
 Once you've created and initialised your database, you can start NNTSC by
 running:
 
-	datacollector -C <your config file>
+	nntsc -C <your config file>
 
-Note that the same config file is used by both the datacollector and the
-build_db script. 
+Note that the same config file is used by both NNTSC and the build_db script. 
 
-We strongly recommend running the datacollector within a screen or some other
-persistent terminal environment. Future versions of the datacollector will run
+We strongly recommend running the nntsc within a screen or some other
+persistent terminal environment. Future versions of NNTSC will run
 as a daemon but we haven't quite got that far yet.
 
 
 Querying the NNTSC Database
 ===========================
 
-While running, datacollector also listens on TCP port 61234 for client
+While running, nntsc also listens on TCP port 61234 for client
 connections. Connected clients may query NNTSC to access any data currently
 stored in the time series database or register an interest in live data as it
 arrives from the various input sources. 
 
 Included with NNTSC is a Python API for writing a client that can connect to
-and query the NNTSC datacollector, without the programmer needing to know
+and query NNTSC, without the programmer needing to know
 the underlying communication protocol. The code for this API is located in
 clientapi/nntscclient.py -- it's not very well-documented at the moment but
 hopefully we can improve that in future releases.
