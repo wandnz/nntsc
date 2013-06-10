@@ -12,7 +12,10 @@ class PidFile(object):
         self.pidfile = None
 
     def __enter__(self):
-        self.pidfile = open(self.path, "a+")
+        try:
+		self.pidfile = open(self.path, "a+")
+	except IOError:
+		raise SystemExit("Failed to open pid file: %s" % self.path)
         try:
             fcntl.flock(self.pidfile.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError:

@@ -50,7 +50,7 @@ class Database:
             log('Connecting to db using "%s"' % connect_string)
 
         self.init_error = False
-
+        self.dbname = dbname
         self.engine = create_engine(connect_string, echo=debug)
 
         self.__reflect_db()
@@ -74,7 +74,7 @@ class Database:
         try:
             self.metadata.reflect(bind=self.engine)
         except OperationalError, e:
-            log("Error binding to database %s" % (dbname))
+            log("Error binding to database %s" % (self.dbname))
             log("Are you sure you've specified the right database name?")
             self.init_error = True
             sys.exit(1)

@@ -39,10 +39,14 @@ class DataCollector():
 
         nntsc_conf = load_nntsc_config(self.config)
         if nntsc_conf == 0:
-            sys.exit(0)
+            sys.exit(1)
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
+            sys.exit(1)
+
+        if dbconf["name"] == "":
+            logger.log("No database name specified in the NNTSC configuration file")
             sys.exit(1)
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 

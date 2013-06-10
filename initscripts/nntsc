@@ -2,16 +2,9 @@
 
 PATH=/usr/local/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/local/bin/nntsc
-NAME=NNTSC
-PIDFILE=nntsc.pid
-
-if [ "$#" -lt 2 ] ; then
-  	N=/etc/init.d/$DAEMON
-	echo "Usage: $N <configfile> {start|stop|restart}" >&2
-	exit 1
-fi	
-
-CONF=$1
+NAME=nntsc
+PIDFILE=/tmp/nntsc.pid
+CONF=/etc/nntsc.conf
 
 export PATH=$PATH
 
@@ -20,30 +13,35 @@ test -x $DAEMON || exit 0
 
 set -e
 
-case "$2" in
+case "$1" in
   start)
   	echo "Starting $NAME"
-	start-stop-daemon --start --quiet --exec $DAEMON \
-		-- -P /var/run/$PIDFILE -C $CONF -b
-	echo "Started"
+	start-stop-daemon --quiet --start --exec $DAEMON \
+		-- -P $PIDFILE -C $CONF -b
+	
+	if [ $? -ne 0 ]; then
+		echo "Failed to start $NAME"
+	else
+		echo "Started"
+	fi
 	;;
   stop)
   	echo "Stopping $NAME"
-	start-stop-daemon --stop --quiet --pidfile /var/run/$PIDFILE --oknodo
+	start-stop-daemon --stop --quiet --pidfile $PIDFILE --oknodo
 	echo "Stopped"
 	;;
   restart)
   	echo "Restarting $NAME"
-	start-stop-daemon --stop --quiet --pidfile /var/run/$PIDFILE --oknodo
+	start-stop-daemon --stop --quiet --pidfile $PIDFILE --oknodo
 	echo "Stopped"
 	sleep 1
 	start-stop-daemon --start --quiet --exec $DAEMON \
-		-- -P /var/run/$PIDFILE -C $CONF -b
+		-- -P $PIDFILE -C $CONF -b
 	echo "Restarted"
 	;;
   *)
-  	N=/etc/init.d/$DAEMON
-	echo "Usage: $N <configfile> {start|stop|restart}" >&2
+  	N=/etc/init.d/$NAME
+	echo "Usage: $N {start|stop|restart}" >&2
 	exit 1
 	;;
 esac

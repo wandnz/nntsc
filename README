@@ -98,8 +98,8 @@ Configuration
 =============
 Before you start using NNTSC, you'll need to create a config file that
 defines where your time series data is going to be coming from and where you
-want to store it. An example configuration file is located in 
-conf/example.conf.
+want to store it. An example configuration file is installed in 
+/etc/nntsc.conf, which you can use as a starting point.
 
 The configuration options use the standard python ConfigParser format, where
 options are grouped into sections. The sections currently supported by NNTSC
@@ -199,17 +199,20 @@ several ways.
 
 Firstly, if you have installed NNTSC via a Debian package, there will be an
 init script installed in /etc/init.d/ that you can use to start and stop a
-NNTSC daemon. This is by far the best option if available. Using the script,
+NNTSC daemon. This is by far the best available option. Using the script,
 you can start NNTSC by running the following:
 
-	/etc/init.d/nntsc <your config file> start
+	/etc/init.d/nntsc start
 
 The init script also accepts 'stop' and 'restart' as commands, so it can be
-used to easily stop a running instance of NNTSC.
+used to easily stop a running instance of NNTSC. The init script will use
+/etc/nntsc.conf as the NNTSC configuration file so either make sure that file
+contains your desired config or edit the init script to point to your own
+config file.
 
 Alternatively, you may manually start an NNTSC daemon by running the following:
 
-	nntsc -b -C <your config file>
+	nntsc -b -C <your config file> [-P pidfile]
 
 Finally, you may run NNTSC in the foreground by omitting the '-b' option from
 the manual command given above. In this case, we strongly recommend running

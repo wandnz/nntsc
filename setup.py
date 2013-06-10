@@ -2,13 +2,15 @@
 
 import sys
 
+from pkg_resources import Requirement, resource_filename
+
 try:
         from setuptools import setup
 except ImportError:
         from distutils.core import setup
 
 requires = [ \
-        'sqlalchemy>=0.8', 'py_rrdtool', 'psycopg2', 'pika', 'daemon' \
+        'sqlalchemy>=0.8', 'py_rrdtool', 'psycopg2', 'pika', 'python-daemon' \
 ]
 
 if sys.version_info < (2, 7):
@@ -32,8 +34,22 @@ setup(name="NNTSC",
 	},
 	include_package_data=True,
 	package_data = {
-		'libnntsc': ['conf/example.conf', 'conf/rrd.examples',
+		'libnntsc': ['conf/nntsc.conf', 'conf/rrd.examples',
 			'initscripts/nntsc']
 	},
 )
+
+# XXX Commented out because this probably shouldn't be done here -- get the
+# packaging system to do it instead
+
+
+# Install configuration file
+#filename = resource_filename(Requirement.parse("NNTSC"), "conf/nntsc.conf")
+
+#try:
+#	import shutil, os
+#	if not os.path.exists("/etc/nntsc.conf"):
+#		shutil.copyfile(filename, "/etc/nntsc.conf")
+#except IOError:
+#	print "Unable to copy configuration file to /etc/nntsc.conf"
 
