@@ -163,21 +163,21 @@ connecting using my own username so I can create the nntsc database using:
 	
 	createdb nntsc
 
-The next step is run the build_db script that should have been installed on
-your system when you installed NNTSC. This script will create all of the
+The next step is run the build_nntsc_db script that should have been installed 
+on your system when you installed NNTSC. This script will create all of the
 required tables for storing the time series data. In the case of some input
 sources, e.g. RRDs, it will also create 'streams' for each of time series
 that will be collected. Make sure the database section of your config file
 now refers to your new database and then simply run the script as follows:
 
-	build_db -C <your config file>
+	build_nntsc_db -C <your config file>
 	
 If you update your configuration, e.g. you wish to enable a data source that
 you had earlier disabled or you have added new RRDs that you want to collect
-data for, you can re-run build_db and it will add new tables and streams as 
-needed without overwriting any existing ones.
+data for, you can re-run build_nntsc_db and it will add new tables and streams 
+as needed without overwriting any existing ones.
 
-If you really do want to start over fresh, you can pass a -F flag to build_db.
+If you really do want to start over fresh, you can pass a -F flag to build_nntsc_db.
 Be warned, this will drop ALL of your existing tables and any time series data
 and streams that are stored within them. Don't do this unless you are really
 sure you want to lose all that data! 
@@ -192,16 +192,23 @@ streams table.
 Starting NNTSC
 ============================
 
-Once you've created and initialised your database, you can start NNTSC by
-running:
+Once you've created and initialised your database, you can start NNTSC in
+several ways.
 
-	nntsc -C <your config file>
+Firstly, if you have installed NNTSC via a Debian package, there will be an
+init script installed in /etc/init.d/ that you can use to start and stop a
+NNTSC daemon. This is by far the best option if available.
 
-Note that the same config file is used by both NNTSC and the build_db script. 
+Alternatively, you may manually start an NNTSC daemon by running the following:
 
-We strongly recommend running the nntsc within a screen or some other
-persistent terminal environment. Future versions of NNTSC will run
-as a daemon but we haven't quite got that far yet.
+	nntsc -b -C <your config file>
+
+Finally, you may run NNTSC in the foreground by omitting the '-b' option from
+the manual command given above. In this case, we strongly recommend running
+NNTSC within screen or some other persistant terminal environment.
+
+Note that in all cases, the same config file is used by both NNTSC and the 
+build_nntsc_db script. 
 
 
 Querying the NNTSC Database

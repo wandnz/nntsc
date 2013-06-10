@@ -1,1 +1,1 @@
-__all__ = ['configurator', 'database', 'importer', 'logger']
+__all__ = ['configurator', 'database', 'importer', 'logger', 'pidfile']

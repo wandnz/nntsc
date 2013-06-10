@@ -7,8 +7,10 @@ from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
 from libnntsc.exporter import NNTSCExporter
+from libnntsc.pidfile import PidFile
 import libnntsc.logger as logger
 import daemon, lockfile, signal
+
 
 class DataCollector():
     def start_module(self, name, mod, conf):
@@ -109,11 +111,10 @@ if __name__ == '__main__':
         if args.pidfile == None:    
             pidfile = None
         else:
-            pidfile = lockfile.FileLock(args.pidfile)
+            pidfile = PidFile(args.pidfile)
     
-        context = daemon.DaemonContext(
-            pidfile = pidfile,
-        )
+        context = daemon.DaemonContext()
+        context.pidfile = pidfile
 
         with context:
             dc = DataCollector(listen_port, config, True)

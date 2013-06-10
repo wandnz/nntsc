@@ -20,7 +20,7 @@ setup(name="NNTSC",
         author='Nathan Overall, Shane Alcock',
         author_email='contact@wand.net.nz',
         url='http://www.wand.net.nz',
-	scripts=['build_db', 'nntsc'],
+	scripts=['build_nntsc_db', 'nntsc'],
 	packages=['libnntsc', 'libnntsc.parsers', 'pywandevent', \
 		'libnntsc.client'],
 	install_requires = requires,
