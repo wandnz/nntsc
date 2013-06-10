@@ -8,7 +8,7 @@ except ImportError:
         from distutils.core import setup
 
 requires = [ \
-        'sqlalchemy>=0.8', 'py_rrdtool', 'psycopg2', 'pika' \
+        'sqlalchemy>=0.8', 'py_rrdtool', 'psycopg2', 'pika', 'daemon' \
 ]
 
 if sys.version_info < (2, 7):
@@ -32,7 +32,8 @@ setup(name="NNTSC",
 	},
 	include_package_data=True,
 	package_data = {
-		'libnntsc': ['conf/example.conf', 'conf/rrd.examples']
-	}
+		'libnntsc': ['conf/example.conf', 'conf/rrd.examples',
+			'initscripts/nntsc']
+	},
 )
 

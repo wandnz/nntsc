@@ -177,7 +177,9 @@ you had earlier disabled or you have added new RRDs that you want to collect
 data for, you can re-run build_nntsc_db and it will add new tables and streams 
 as needed without overwriting any existing ones.
 
-If you really do want to start over fresh, you can pass a -F flag to build_nntsc_db.
+If you really do want to start over fresh, you can pass a -F flag to 
+build_nntsc_db.
+
 Be warned, this will drop ALL of your existing tables and any time series data
 and streams that are stored within them. Don't do this unless you are really
 sure you want to lose all that data! 
@@ -197,7 +199,13 @@ several ways.
 
 Firstly, if you have installed NNTSC via a Debian package, there will be an
 init script installed in /etc/init.d/ that you can use to start and stop a
-NNTSC daemon. This is by far the best option if available.
+NNTSC daemon. This is by far the best option if available. Using the script,
+you can start NNTSC by running the following:
+
+	/etc/init.d/nntsc <your config file> start
+
+The init script also accepts 'stop' and 'restart' as commands, so it can be
+used to easily stop a running instance of NNTSC.
 
 Alternatively, you may manually start an NNTSC daemon by running the following:
 
@@ -209,6 +217,9 @@ NNTSC within screen or some other persistant terminal environment.
 
 Note that in all cases, the same config file is used by both NNTSC and the 
 build_nntsc_db script. 
+
+If run as a daemon, NNTSC will write any error or log messages to 
+/tmp/nntsc.log, otherwise it will print them directly to standard error.
 
 
 Querying the NNTSC Database

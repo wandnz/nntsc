@@ -77,11 +77,6 @@ class DataCollector():
         return self.processes
 
 
-    def __del__(self):
-        for p in self.processes:
-            p.terminate()
-        
-
 def cleanup():
     logger.log("Calling cleanup function\n")
     for p in dc.get_processes():
