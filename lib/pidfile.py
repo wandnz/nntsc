@@ -1,3 +1,24 @@
+# This file is part of NNTSC, however the code in it was not developed by the
+# authors of NNTSC.
+#
+# Copyright (C) 2011 Graham Poulter
+#
+# This code is subject to the terms of the MIT license, which is described in
+# full in the file COPYING that should be included with the NNTSC source
+# distribution.
+#
+# If you did not receive a copy of the MIT license with this code, please
+# email us at contact@wand.net.nz
+#
+# $Id$
+
+"""This code was written by Graham Poulter and distributed using the MIT
+   license. 
+
+   It was originally acquired from:
+   http://code.activestate.com/recipes/577911-context-manager-for-a-daemon-pid-file/
+"""
+
 import fcntl
 import os
 
