@@ -98,8 +98,9 @@ Configuration
 =============
 Before you start using NNTSC, you'll need to create a config file that
 defines where your time series data is going to be coming from and where you
-want to store it. An example configuration file is installed in 
-/etc/nntsc.conf, which you can use as a starting point.
+want to store it. An example configuration file is included in conf/nntsc.conf
+which you can use as a starting point. If you've installed from a Debian
+package, this same file will be installed to /etc/nntsc.conf.
 
 The configuration options use the standard python ConfigParser format, where
 options are grouped into sections. The sections currently supported by NNTSC

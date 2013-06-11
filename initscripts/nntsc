@@ -3,10 +3,16 @@
 PATH=/usr/local/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/local/bin/nntsc
 NAME=nntsc
-PIDFILE=/tmp/nntsc.pid
+
+# These should get overridden by the contents of /etc/default/nntsc
 CONF=/etc/nntsc.conf
+PIDFILE=/tmp/nntsc.pid
 
 export PATH=$PATH
+
+if test -f /etc/default/nntsc; then
+	. /etc/default/nntsc 
+fi
 
 test -f $CONF || exit 0
 test -x $DAEMON || exit 0

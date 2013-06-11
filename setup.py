@@ -35,7 +35,7 @@ setup(name="NNTSC",
 	include_package_data=True,
 	package_data = {
 		'libnntsc': ['conf/nntsc.conf', 'conf/rrd.examples',
-			'initscripts/nntsc']
+			'initscripts/nntsc', 'initscripts/nntsc.default']
 	},
 )
 
