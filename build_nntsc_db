@@ -47,6 +47,10 @@ if dbconf == {}:
 
 modules = import_parsers(disabled)
 
+if dbconf["name"] == "":
+    print >> sys.stderr, "No database name specified in the config file. Please edit your config file (%s)" % (conf_fname)
+    sys.exit(1)
+
 db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
 db.build_databases(modules, new=clean_db)
 
