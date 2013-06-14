@@ -1,0 +1,23 @@
+Source: nntsc
+Section: net
+Priority: optional
+Maintainer: Brendon Jones <brendonj@waikato.ac.nz>
+Build-Depends: debhelper (>= 8.0.0), python
+Standards-Version: 3.9.3
+Homepage: http://wand.net.nz/projects/details/storage-network-monitoring-and-measurement-data
+#Vcs-Git: git://git.debian.org/collab-maint/nntsc.git
+#Vcs-Browser: http://git.debian.org/?p=collab-maint/nntsc.git;a=summary
+
+Package: nntsc
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}
+Description: Collects, stores and examines network time series data
+ NNTSC is a system designed for collecting, storing and examining network
+ time series data. Unlike RRDs, NNTSC does not attempt to aggregate
+ measurements to preserve disk space. Instead, all measurements are kept
+ to avoid losing any detail when doing historical analysis.
+ .
+ NNTSC also provides a client API that allows other programs to connect to
+ the measurement database and either ask for historical data or register
+ interest in upcoming live data.
+

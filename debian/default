@@ -1,0 +1,3 @@
+START_DAEMON=0
+CONF=/etc/nntsc.conf
+PIDFILE=/tmp/nntsc.pid
