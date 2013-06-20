@@ -248,6 +248,12 @@ class NNTSCExporter:
         tosend = []
         c = 0
 
+        # If there is no data to send, just push out an empty list and
+        # return.
+        if len(hist) == 0:
+            return self.export_hist_block(sock, name, streamid, tosend,
+                    False, binsize, aggname)
+
         for h in hist:
             
             tosend.append(h)
