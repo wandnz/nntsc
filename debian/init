@@ -14,7 +14,7 @@ DAEMON=/usr/bin/nntsc
 NAME=nntsc
 
 # These should get overridden by the contents of /etc/default/nntsc
-CONF=/etc/nntsc.conf
+CONF=/etc/nntsc/nntsc.conf
 PIDFILE=/tmp/nntsc.pid
 
 export PATH=$PATH
