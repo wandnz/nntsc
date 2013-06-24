@@ -28,9 +28,10 @@ Quickstart Instructions for Debian Users
  	createdb nntsc
  3. Configure NNTSC (see 'Configuration' section below for more details)
 	3.1. Create an RRD List file (if needed).
-	3.2. Edit /etc/nntsc.conf to point to your new database and RRD list.
+	3.2. Edit /etc/nntsc/nntsc.conf to point to your new database and
+             RRD list.
  4. Run:
- 	build_nntsc_db -C /etc/nntsc.conf
+ 	build_nntsc_db -C /etc/nntsc/nntsc.conf
  5. Run:
  	/etc/init.d/nntsc start
 
@@ -115,8 +116,8 @@ Before you start using NNTSC, you'll need to create a config file that
 defines where your time series data is going to be coming from and where you
 want to store it. An example configuration file is included in conf/nntsc.conf
 which you can use as a starting point. If you've installed NNTSC from a Debian
-package, this same file will be installed to /etc/nntsc.conf and you should
-edit that file to add your configuration.
+package, this same file will be installed to /etc/nntsc/nntsc.conf and you
+should edit that file to add your configuration.
 
 The configuration options use the standard python ConfigParser format, where
 options are grouped into sections. The sections currently supported by NNTSC
@@ -247,8 +248,8 @@ you can start NNTSC by running the following:
 
 The init script also accepts 'stop' and 'restart' as commands, so it can be
 used to easily stop a running instance of NNTSC. The init script will use
-/etc/nntsc.conf as the NNTSC configuration file so either make sure that file
-contains your desired config or edit the init script to point to your own
+/etc/nntsc/nntsc.conf as the NNTSC configuration file so either make sure that
+file contains your desired config or edit the init script to point to your own
 config file.
 
 Alternatively, you may manually start an NNTSC daemon by running the following:
