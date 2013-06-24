@@ -1,3 +1,11 @@
+nntsc (2.2-1) unstable; urgency=low
+
+  * Install extra sample configuration.
+  * Disabled amp and lpi modules, leaving only rrd enabled.
+  * Update documentation with correct file locations.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Mon, 24 Jun 2013 16:19:12 +1200
+
 nntsc (2.1-1) unstable; urgency=low
 
   * Initial release
