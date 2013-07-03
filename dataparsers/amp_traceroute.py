@@ -72,6 +72,7 @@ def data_tables(db):
         extend_existing=True,
     )
 
+    Index('index_amp_traceroute_stream', testtable.c.stream_id)
     Index('index_amp_traceroute_timestamp', testtable.c.timestamp)
 
     hoptable = Table("internal_amp_traceroute_hop", db.metadata,

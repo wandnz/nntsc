@@ -69,6 +69,7 @@ def data_table(db):
         useexisting=True
     )
 
+    Index('index_lpi_bytes_stream_id', dt.c.stream_id)
     Index('index_lpi_bytes_timestamp', dt.c.timestamp)
     return DATA_TABLE_NAME
 
