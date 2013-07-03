@@ -21,7 +21,7 @@
 
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint, event, DDL
+        String, MetaData, ForeignKey, UniqueConstraint, event, DDL, Index
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.sql import and_, or_, not_, text
 from sqlalchemy.sql.expression import select, outerjoin, func, label
@@ -161,6 +161,8 @@ class Database:
             )
       
             streams.create()
+      
+            Index('index_streams_collection', streams.c.collection)
        
         #self.metadata.create_all()
         #self.commit_transaction()
