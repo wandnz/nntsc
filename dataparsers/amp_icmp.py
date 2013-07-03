@@ -77,6 +77,7 @@ def data_table(db):
         useexisting=True,
     )
 
+    Index('index_amp_icmp_stream', dt.c.stream_id)
     Index('index_amp_icmp_timestamp', dt.c.timestamp)
     Index('index_amp_icmp_packet_size', dt.c.packet_size)
 

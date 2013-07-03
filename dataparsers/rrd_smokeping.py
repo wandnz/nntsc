@@ -20,7 +20,7 @@
 # $Id$
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint
+        String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float
 from sqlalchemy.exc import IntegrityError, OperationalError
 import libnntsc.logger as logger
@@ -87,6 +87,9 @@ def data_table(db):
         Column('ping20', Float, nullable=True),
         useexisting=True
     )
+    
+    Index('index_rrd_smokeping_stream', dt.c.stream_id);
+    Index('index_rrd_smokeping_timestamp', dt.c.timestamp);
 
     return DATA_TABLE_NAME
 
