@@ -10,7 +10,7 @@ except ImportError:
         from distutils.core import setup
 
 requires = [ \
-        'sqlalchemy>=0.8', 'py_rrdtool', 'psycopg2', 'pika', 'python-daemon' \
+        'sqlalchemy>=0.8', 'python-rrdtool', 'psycopg2', 'pika', 'python-daemon' \
 ]
 
 if sys.version_info < (2, 7):

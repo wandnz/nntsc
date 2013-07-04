@@ -1,1 +1,1 @@
-__all__ = ['rrd']
+__all__ = ['rrd', 'lpi', 'amp']

@@ -26,30 +26,316 @@ import sys, socket, time, struct, getopt, pickle
 from pywandevent.pywandevent import PyWandEvent
 from socket import *
 from multiprocessing import Pipe
+import threading, select
 
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.export import *
 from libnntsc.logger import *
         
+class NNTSCClient(threading.Thread):
+    def __init__(self, sock, parent, pipeend, dbconf):
+        threading.Thread.__init__(self)
+        assert(dbconf)
+        self.sock = sock
+        self.parent = parent
+        self.pipeend = pipeend
+        self.recvbuf = ""
+        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
+                dbconf["host"])
+    
+    def export_hist_block(self, name, streamid, block, more, binsize,
+            aggname):        
+
+        contents = pickle.dumps((name, streamid, block, more, binsize, aggname))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
+
+
+        try:
+            self.sock.send(header + contents)
+        except error, msg:
+            log("Error sending data to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+            return -1
+
+        return 0
+
+
+    def send_history(self, streamid, name, hist, binsize, aggname):
+       
+        tosend = []
+        c = 0
+
+        # If there is no data to send, just push out an empty list and
+        # return.
+        if len(hist) == 0:
+            return self.export_hist_block(name, streamid, tosend,
+                    False, binsize, aggname)
+
+        for h in hist:
+            
+            tosend.append(h)
+            c += 1
+
+            if (c >= 100):
+                if h != hist[-1]:
+                    more = True
+                else:
+                    more = False
+
+                if self.export_hist_block(name, streamid, tosend, 
+                            more, binsize, aggname) == -1:
+                    return -1
+                c = 0
+                tosend = []
+
+        if c != 0:
+            return self.export_hist_block(name, streamid, tosend, False,
+                    binsize, aggname)
+        return 0
+                    
+    def send_collections(self, cols):
+
+        col_pickle = pickle.dumps(cols)
+        msglen = len(col_pickle)
+
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_COLLECTIONS, msglen)
+
+        try:
+            self.sock.send(header + col_pickle)
+        except error, msg:
+            log("Error sending collections to client fd %d" % (self.sock.fileno(), msg[1]))
+            return -1
+        return 0
+
+    def send_schema(self, col_id):
+        
+        stream_schema, data_schema = self.db.get_collection_schema(col_id)
+
+        # We just want the column names
+        stream_schema = map(lambda a: a.name, stream_schema)
+        data_schema = map(lambda a: a.name, data_schema)
+
+        schema_pick = pickle.dumps((col_id, stream_schema, data_schema))
+
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(schema_pick))
+
+        try:
+            self.sock.send(header + schema_pick)
+        except error, msg:
+            log("Error sending schemas to client fd %d" % (self.sock.fileno(), msg[1]))
+            return -1
+        return 0
+
+    def send_streams(self, col):
+      
+        self.parent.register_collection(self.sock, col)
+       
+        streams = self.db.select_streams_by_collection(col)
+     
+        i = 0
+        while (i < len(streams)):
+
+            start = i
+            if len(streams) <= i + 100:
+                end = len(streams)
+                more = False
+            else:
+                end = i + 100
+                more = True
+
+            stream_data = pickle.dumps((col, more, streams[start:end]))
+        
+            header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
+                    len(stream_data))
+            try:
+                self.sock.send(header + stream_data)
+            except error, msg:
+                log("Error sending schemas to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+                return -1
+
+            i = end
+        return 0
+    
+    def subscribe(self, submsg):
+        name, start, end, cols, streams = pickle.loads(submsg)
+        now = int(time.time())
+
+        if start == 0 or start == None:
+            start = now
+        if end == 0:
+            end = None
+       
+        for s in streams:
+
+            # If live data is going to be required, add to the sub list
+            if (end == None or end > now):
+                self.parent.register_stream(s, self.sock, cols, start, end, name)
+
+            # Send any historical data that we've been asked for
+            if start < now:
+                hist = self.db.select_data(name, [s], cols, start, end)
+                if self.send_history(s, name, hist, 0, "raw") == -1:
+                    return -1
+        return 0
+
+    
+    def process_request(self, reqmsg):
+        req_hdr = struct.unpack(nntsc_req_fmt, 
+                reqmsg[0:struct.calcsize(nntsc_req_fmt)])
+
+        if req_hdr[0] == NNTSC_REQ_COLLECTION:
+            # Requesting the collection list
+            cols = self.db.list_collections()
+            
+            shrink = []
+            for c in cols:
+                shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
+
+            return self.send_collections(shrink)
+
+        if req_hdr[0] == NNTSC_REQ_SCHEMA:
+            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
+            return self.send_schema(col_id)
+
+
+        if req_hdr[0] == NNTSC_REQ_STREAMS:
+            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
+            return self.send_streams(col_id)
+
+        return 0
+    
+    def aggregate(self, aggmsg):
+        tup = pickle.loads(aggmsg)
+        name, start, end, streams, aggcols, groupcols, binsize, fname = tup
+        now = int(time.time())
+
+        if start == None:
+            return 0
+        if start > now:
+            return 0
+        if end == 0:
+            end = None
+
+        for s in streams:
+            agghist = self.db.select_aggregated_data(name, [s], aggcols, 
+                    start, end, groupcols, binsize, fname)
+            if self.send_history(s, name, agghist, binsize, fname) == -1:
+                return -1
+
+        return 0
+
+       
+    def client_message(self, msg):
+
+        error = 0
+        header = struct.unpack(nntsc_hdr_fmt, msg[0:struct.calcsize(nntsc_hdr_fmt)])
+        total_len = header[2] + struct.calcsize(nntsc_hdr_fmt)
+        body = msg[struct.calcsize(nntsc_hdr_fmt):total_len]
+
+        if len(msg) < total_len:
+            return msg, 1, error
+
+        if header[1] == NNTSC_REQUEST:
+            if self.process_request(body) == -1:
+                error = 1
+
+        if header[1] == NNTSC_AGGREGATE:
+            if self.aggregate(body) == -1:
+                error = 1
+
+        if header[1] == NNTSC_SUBSCRIBE:
+            if self.subscribe(body) == -1:
+                error = 1
+
+        return msg[total_len:], 0, error
+
+    def receive_client(self):
+
+        buf = self.recvbuf
+        fd = self.sock.fileno()
+
+        try:
+            received = self.sock.recv(4096)
+        except Exception, msg:
+            log("Error receiving data from client %d: %s" % (fd, msg))
+            return 0
+
+        if len(received) == 0:
+            # Client has disconnected
+            return 0
+
+        buf = buf + received
+        error = 0
+
+        while len(buf) > struct.calcsize(nntsc_hdr_fmt):
+            buf, halt, error = self.client_message(buf)
+
+            if halt or error == 1:
+                break
+       
+        if error != 1:
+            self.recvbuf = buf
+
+    def receive_live(self):
+
+        fd = self.pipeend.fileno()
+
+        try:
+            obj = self.pipeend.recv()
+        except EOFError, msg:
+            log("Error receiving live data from pipe %d: %s" % (fd, msg))
+            return 0
+
+        # Just reflect whatever we get on the socket to our client
+        totalsent = 0
+        while totalsent < len(obj):
+                sent = self.sock.send(obj[totalsent:])
+                if sent == 0:
+                    return 0
+                totalsent += sent
+
+        return totalsent
+
+    def run(self):
+        running = 1
+        
+        while running:
+            input = [self.sock, self.pipeend]
+
+            inpready, outready, exready = select.select(input, [], [])
+            for s in inpready:
+                if s == self.sock:
+                    if self.receive_client() == 0:
+                        running = 0
+                        break
+                if s == self.pipeend:
+                    if self.receive_live() == 0:
+                        running = 0
+                        break
+        
+        log("Closing client thread on fd %d" % self.sock.fileno())
+        self.parent.deregister_client(self.sock)
+        self.pipeend.close()
+        self.sock.close()
+
+
 class NNTSCExporter:
     def __init__(self, port):
         self.pwe = PyWandEvent()
 
         self.listen_port = port
-        self.db = None
+        self.dbconf = None
         self.collections = {}
         self.subscribers = {}
-        self.client_sockets = []
+        self.client_sockets = {}
+        self.client_threads = {}
 
-    def drop_client(self, sock):
+    def deregister_client(self, sock):
         
         #log("Dropping client on fd %d" % (sock.fileno()))
-
-        self.pwe.del_fd_event(sock)
-        self.client_sockets.remove(sock)
-        sock.close()
-    
+        del self.client_sockets[sock]
+        del self.client_threads[sock]
+        
     def drop_source(self, sock):
         log("Dropping source on fd %d" % (sock.fileno()))
 
@@ -70,6 +356,20 @@ class NNTSCExporter:
 
         return results
 
+    def register_stream(self, s, sock, cols, start, end, name):
+        if self.subscribers.has_key(s):
+            self.subscribers[s].append((sock, cols, start, end, name))
+        else:
+            self.subscribers[s] = [(sock, cols, start, end, name)]
+
+
+    def register_collection(self, sock, col):
+        if self.collections.has_key(col):
+            if sock not in self.collections[col]:
+                self.collections[col].append(sock)
+        else:
+            self.collections[col] = [sock]
+      
     def export_new_stream(self, received, fd):
 
         try:
@@ -99,11 +399,12 @@ class NNTSCExporter:
             if sock not in self.client_sockets:
                 continue
     
+            pipesend = self.client_sockets[sock]
             try:
-                sock.send(header + ns_data)
+                pipesend.send(header + ns_data)
             except error, msg:
-                log("Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1]))
-                self.drop_client(sock)
+                log("Error sending schemas to pipe for client fd %d: %s" % (sock.fileno(), msg[1]))
+                self.deregister_client(sock)
             else:
                 active.append(sock)
         self.collections[coll_name] = active
@@ -117,12 +418,15 @@ class NNTSCExporter:
         except ValueError:
             log("Incorrect data format from source %d" % (fd))
             log("Format should be (name, streamid, timestamp, values dict)")
-            return -1
+            self.drop_source(sock)
+            return
         
         if not isinstance(values, dict):
             log("Values should expressed as a dictionary")
-            return -1
-        
+            self.drop_source(sock)
+            return
+
+
         if stream_id in self.subscribers.keys():
             active = []
 
@@ -142,12 +446,13 @@ class NNTSCExporter:
                         len(contents))
 
                 if sock in self.client_sockets:
+                    pipesend = self.client_sockets[sock]
 
                     try:
-                        sock.send(header + contents)
+                        pipesend.send(header + contents)
                     except error, msg:
-                        log("Error sending live data to client fd %d: %s" % (sock.fileno(), msg[1]))
-                        self.drop_client(sock)
+                        log("Error sending live data to pipe for client %d: %s" % (sock.fileno(), msg[1]))
+                        self.deregister_client(sock)
                     else:
                         if results != {}:
                             active.append((sock, columns, start, end, col))
@@ -155,257 +460,7 @@ class NNTSCExporter:
 
         return 0
 
-    def send_collections(self, sock, cols):
-
-        col_pickle = pickle.dumps(cols)
-        msglen = len(col_pickle)
-
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_COLLECTIONS, msglen)
-
-        try:
-            sock.send(header + col_pickle)
-        except error, msg:
-            log("Error sending collections to client fd %d" % (sock.fileno(), msg[1]))
-            self.drop_client(sock)
-            return -1
-        return 0
-
-    def send_schema(self, sock, col_id):
-        
-        stream_schema, data_schema = self.db.get_collection_schema(col_id)
-
-        # We just want the column names
-        stream_schema = map(lambda a: a.name, stream_schema)
-        data_schema = map(lambda a: a.name, data_schema)
-
-        schema_pick = pickle.dumps((col_id, stream_schema, data_schema))
-
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(schema_pick))
-
-        try:
-            sock.send(header + schema_pick)
-        except error, msg:
-            log("Error sending schemas to client fd %d" % (sock.fileno(), msg[1]))
-            self.drop_client(sock)
-            return -1
-        return 0
-
-    def send_streams(self, sock, col):
-       
-        if self.collections.has_key(col):
-            if sock not in self.collections[col]:
-                self.collections[col].append(sock)
-        else:
-            self.collections[col] = [sock]
-       
-        streams = self.db.select_streams_by_collection(col)
-     
-        i = 0
-        while (i < len(streams)):
-
-            start = i
-            if len(streams) <= i + 100:
-                end = len(streams)
-                more = False
-            else:
-                end = i + 100
-                more = True
-
-            stream_data = pickle.dumps((col, more, streams[start:end]))
-        
-            header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
-                    len(stream_data))
-            try:
-                sock.send(header + stream_data)
-            except error, msg:
-                log("Error sending schemas to client fd %d: %s" % (sock.fileno(), msg[1]))
-                self.drop_client(sock)
-                return -1
-
-            i = end
-        return 0
-    
-    def export_hist_block(self, sock, name, streamid, block, more, binsize,
-            aggname):        
-
-        contents = pickle.dumps((name, streamid, block, more, binsize, aggname))
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
-
-
-        try:
-            sock.send(header + contents)
-        except error, msg:
-            log("Error sending data to client fd %d: %s" % (sock.fileno(), msg[1]))
-            self.drop_client(sock)
-
-            return -1
-
-        return 0
-
-
-    def send_history(self, streamid, sock, name, hist, binsize, aggname):
-       
-        tosend = []
-        c = 0
-
-        # If there is no data to send, just push out an empty list and
-        # return.
-        if len(hist) == 0:
-            return self.export_hist_block(sock, name, streamid, tosend,
-                    False, binsize, aggname)
-
-        for h in hist:
-            
-            tosend.append(h)
-            c += 1
-
-            if (c >= 100):
-                if h != hist[-1]:
-                    more = True
-                else:
-                    more = False
-
-                if self.export_hist_block(sock, name, streamid, tosend, 
-                            more, binsize, aggname) == -1:
-                    return -1
-                c = 0
-                tosend = []
-
-        if c != 0:
-            return self.export_hist_block(sock, name, streamid, tosend, False,
-                    binsize, aggname)
-        return 0
-                    
-    def subscribe(self, sock, submsg):
-        name, start, end, cols, streams = pickle.loads(submsg)
-        now = int(time.time())
-
-        if start == 0 or start == None:
-            start = now
-        if end == 0:
-            end = None
-       
-        
-        for s in streams:
-
-            # If live data is going to be required, add to the sub list
-            if (end == None or end > now):
-                if self.subscribers.has_key(s):
-                    self.subscribers[s].append((sock, cols, start, end, name))
-                else:
-                    self.subscribers[s] = [(sock, cols, start, end, name)]
-
-            # Send any historical data that we've been asked for
-            if start < now:
-                hist = self.db.select_data(name, [s], cols, start, end)
-                if self.send_history(s, sock, name, hist, 0, "raw") == -1:
-                    return -1
-        return 0
-
-    def aggregate(self, sock, aggmsg):
-        tup = pickle.loads(aggmsg)
-        name, start, end, streams, aggcols, groupcols, binsize, fname = tup
-        now = int(time.time())
-
-        if start == None:
-            return 0
-        if start > now:
-            return 0
-        if end == 0:
-            end = None
-
-        for s in streams:
-            
-            agghist = self.db.select_aggregated_data(name, [s], aggcols, 
-                    start, end, groupcols, binsize, fname)
-            if self.send_history(s, sock, name, agghist, binsize, fname) == -1:
-                return -1
-
-        return 0
-
-
-    def request_message(self, sock, reqmsg):
-
-        req_hdr = struct.unpack(nntsc_req_fmt, 
-                reqmsg[0:struct.calcsize(nntsc_req_fmt)])
-
-        if req_hdr[0] == NNTSC_REQ_COLLECTION:
-            # Requesting the collection list
-            cols = self.db.list_collections()
-            
-            shrink = []
-            for c in cols:
-                shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
-
-            return self.send_collections(sock, shrink)
-
-        if req_hdr[0] == NNTSC_REQ_SCHEMA:
-            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
-            return self.send_schema(sock,col_id)
-
-
-        if req_hdr[0] == NNTSC_REQ_STREAMS:
-            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
-            return self.send_streams(sock, col_id)
-
-        return 0
-
-    def client_message(self, sock, msg):
-
-        error = 0
-        header = struct.unpack(nntsc_hdr_fmt, msg[0:struct.calcsize(nntsc_hdr_fmt)])
-        total_len = header[2] + struct.calcsize(nntsc_hdr_fmt)
-        body = msg[struct.calcsize(nntsc_hdr_fmt):total_len]
-
-        if len(msg) < total_len:
-            return msg, 1, error
-
-        if header[1] == NNTSC_REQUEST:
-            if self.request_message(sock, body) == -1:
-                error = 1
-
-        if header[1] == NNTSC_AGGREGATE:
-            if self.aggregate(sock, body) == -1:
-                error = 1
-
-        if header[1] == NNTSC_SUBSCRIBE:
-            if self.subscribe(sock, body) == -1:
-                error = 1
-
-        return msg[total_len:], 0, error
-
-    def receive_client(self, fd, evtype, sock, data):
-
-        buf = data
-
-        assert(evtype == 1)
-
-        try:
-            received = sock.recv(4096)
-        except Exception, msg:
-            log("Error receiving data from client %d: %s" % (fd, msg))
-            self.drop_client(sock)
-            return
-
-        if len(received) == 0:
-            # Client has disconnected
-            self.drop_client(sock)
-            return
-
-        buf = buf + received
-        error = 0
-
-        while len(buf) > struct.calcsize(nntsc_hdr_fmt):
-            buf, halt, error = self.client_message(sock, buf)
-
-            if halt or error == 1:
-                break
-       
-        if error != 1:
-            self.pwe.update_fd_data(sock,buf)
-
     def receive_source(self, fd, evtype, sock, data):
-
         try:
             obj = sock.recv()
         except EOFError, msg:
@@ -415,15 +470,14 @@ class NNTSCExporter:
 
         msgtype, contents = obj
         
-        ret = 0
-
         if msgtype == 0:
             ret = self.export_live_data(contents, sock.fileno())
         if msgtype == 1:
             ret = self.export_new_stream(contents, sock.fileno())
-
-        if ret < 0:
-            self.drop_source(sock)
+       
+        return ret 
+        
+    
 
 
     def accept_connection(self, fd, evtype, sock, data):
@@ -434,10 +488,17 @@ class NNTSCExporter:
             log("Error accepting connection: %s" % (msg[1]))
             return
 
-        #log("Accepted connection on fd %d" % (client.fileno()))
+        log("Accepted connection on fd %d" % (client.fileno()))
 
-        self.client_sockets.append(client)
-        self.pwe.add_fd_event(client, 1, "", self.receive_client)
+        pipe_recv, pipe_send = Pipe(False)
+
+        cthread = NNTSCClient(client, self, pipe_recv, self.dbconf)
+        cthread.daemon = True
+        cthread.start()
+        self.client_sockets[client] = pipe_send
+        self.client_threads[client] = cthread
+
+        #self.pwe.add_fd_event(client, 1, "", self.receive_client)
 
 
     def register_source(self, pipe):
@@ -483,8 +544,7 @@ class NNTSCExporter:
         if dbconf == {}:
             sys.exit(1)
 
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
-                dbconf["host"])
+        self.dbconf = dbconf
  
         listen_sock = self.create_listener(self.listen_port)
     
