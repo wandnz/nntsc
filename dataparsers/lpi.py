@@ -26,29 +26,35 @@ from libnntsc.parsers import lpi_bytes, lpi_common
 import libnntsc.logger as logger
 
 from socket import *
-import sys, struct
+import sys, struct, time
 
 class LPIModule:
     def __init__(self, existing, nntsc_conf, exp):
 
         self.exporter = exp
+        self.enabled = True
+        self.wait = 15
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
-            sys.exit(1)
+            self.enabled = False
+            return
 
-        lpiserver = get_nntsc_config(nntsc_conf, 'lpi', 'server')
-        if lpiserver == "NNTSCConfigError":
-            sys.exit(1)
+        self.lpiserver = get_nntsc_config(nntsc_conf, 'lpi', 'server')
+        if self.lpiserver == "NNTSCConfigError":
+            self.enabled = False
+            return
         
-        if lpiserver == "":
+        if self.lpiserver == "":
             logger.log("No LPI Server specified, disabling module")
-            sys.exit(0)
+            self.enabled = False
+            return
 
-        lpiport = get_nntsc_config(nntsc_conf, 'lpi', 'port')
-        if lpiport == "NNTSCConfigError":
-            sys.exit(1)
-        if lpiport == "":
+        self.lpiport = get_nntsc_config(nntsc_conf, 'lpi', 'port')
+        if self.lpiport == "NNTSCConfigError":
+            self.enabled = False
+            return
+        if self.lpiport == "":
             lpiport = 3678
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
@@ -59,12 +65,6 @@ class LPIModule:
             if s['modsubtype'] == "bytes":
                 lpi_bytes.create_existing_stream(s)
      
-        self.server_fd = lpi_common.connect_lpi_server(lpiserver, int(lpiport))
-        if self.server_fd == -1:
-            sys.exit(1)
-
-        self.protocol_map = {}    
-
 
     def process_stats(self, data):
         if data == {}:
@@ -79,24 +79,42 @@ class LPIModule:
         return 0
 
     def run(self):
-        while True:
-            rec_type, data = lpi_common.read_lpicp(self.server_fd)
+        while self.enabled:
+            logger.log("Attempting to connect to LPI Server")
+            self.server_fd = lpi_common.connect_lpi_server(self.lpiserver, 
+                    int(self.lpiport))
+            if self.server_fd == -1:
+                logger.log("Connection failed -- will retry in %d seconds" %  
+                        self.wait)
+                time.sleep(self.wait)
+                self.wait *= 2
+                if self.wait > 600:
+                    self.wait = 600
+                continue
 
-            if rec_type == 3:
-                self.db.commit_transaction()
+            logger.log("Successfully connected to LPI Server")
+            self.wait = 15
+            self.protocol_map = {}    
 
-            if rec_type == 4:
-                self.protocol_map = data
+            while True:
+                rec_type, data = lpi_common.read_lpicp(self.server_fd)
 
-            if rec_type == 0:
-                if self.process_stats(data) == -1:
-                    logger.log("LPIModule: Invalid Statistics Data")
+                if rec_type == 3:
+                    self.db.commit_transaction()
+
+                if rec_type == 4:
+                    self.protocol_map = data
+
+                if rec_type == 0:
+                    if self.process_stats(data) == -1:
+                        logger.log("LPIModule: Invalid Statistics Data")
+                        break
+
+                if rec_type == -1:
                     break
 
-            if rec_type == -1:
-                break
+            self.server_fd.close()
 
-        self.server_fd.close()
 
 def run_module(existing, config, exp):
     lpi = LPIModule(existing, config, exp)
