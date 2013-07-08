@@ -55,7 +55,7 @@ class LPIModule:
             self.enabled = False
             return
         if self.lpiport == "":
-            lpiport = 3678
+            self.lpiport = 3678
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
