@@ -44,10 +44,10 @@ class NNTSCClient(threading.Thread):
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
     
-    def export_hist_block(self, name, streamid, block, more, binsize,
+    def export_hist_block(self, name, streamid, block, more, freq,
             aggname):        
 
-        contents = pickle.dumps((name, streamid, block, more, binsize, aggname))
+        contents = pickle.dumps((name, streamid, block, more, freq, aggname))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
 
@@ -60,7 +60,7 @@ class NNTSCClient(threading.Thread):
         return 0
 
 
-    def send_history(self, streamid, name, hist, binsize, aggname):
+    def send_history(self, streamid, name, hist, freq, aggname):
        
         tosend = []
         c = 0
@@ -69,7 +69,7 @@ class NNTSCClient(threading.Thread):
         # return.
         if len(hist) == 0:
             return self.export_hist_block(name, streamid, tosend,
-                    False, binsize, aggname)
+                    False, freq, aggname)
 
         for h in hist:
             
@@ -83,14 +83,14 @@ class NNTSCClient(threading.Thread):
                     more = False
 
                 if self.export_hist_block(name, streamid, tosend, 
-                            more, binsize, aggname) == -1:
+                            more, freq, aggname) == -1:
                     return -1
                 c = 0
                 tosend = []
 
         if c != 0:
             return self.export_hist_block(name, streamid, tosend, False,
-                    binsize, aggname)
+                    freq, aggname)
         return 0
                     
     def send_collections(self, cols):
@@ -173,8 +173,8 @@ class NNTSCClient(threading.Thread):
 
             # Send any historical data that we've been asked for
             if start < now:
-                hist = self.db.select_data(name, [s], cols, start, end)
-                if self.send_history(s, name, hist, 0, "raw") == -1:
+                hist, freq = self.db.select_data(name, [s], cols, start, end)
+                if self.send_history(s, name, hist, freq, "raw") == -1:
                     return -1
         return 0
 
@@ -217,9 +217,9 @@ class NNTSCClient(threading.Thread):
             end = None
 
         for s in streams:
-            agghist = self.db.select_aggregated_data(name, [s], aggcols, 
+            agghist, freq = self.db.select_aggregated_data(name, [s], aggcols, 
                     start, end, groupcols, binsize, fname)
-            if self.send_history(s, name, agghist, binsize, fname) == -1:
+            if self.send_history(s, name, agghist, freq, fname) == -1:
                 return -1
 
         return 0

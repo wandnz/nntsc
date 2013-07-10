@@ -493,16 +493,10 @@ class Database:
         result = select(tablecols).where(wherecl).order_by(
                 table.c.timestamp).execute()
 
-        data = []
-        for r in result:
-            foo = {}
-            for i in range(0, len(tablecols)):
-                foo[tablecols[i].name] = r[i]
-            data.append(foo)
-
+        data, frequency = self._form_datadict(result, tablecols, table.c.timestamp, 0)
         result.close()
 
-        return data
+        return data, frequency
 
 
     def _group_columns(self, table, selectors, groups, aggregator, bts=None):
@@ -533,32 +527,156 @@ class Database:
         if bts is not None:
             aggts = label('timestamp', func.max(table.c.timestamp))
             aggcols.append(aggts)
-            selectcols = aggcols + groupcols
             groupcols.append(bts)
+            selectcols = aggcols + groupcols
         else:
             selectcols = aggcols + groupcols
 
 
         return selectcols, groupcols
     
-    def _group_select(self, selectcols, wherecl, groupcols, tscol):
-        result = select(selectcols).where(wherecl).group_by(*groupcols).order_by(tscol).execute()
-                
+    def _form_datadict(self, result, selectcols, tscol, size):
+        """ Converts a result object into a list of dictionaries, one
+            for each row. The dictionary is a map of column names to 
+            values.
+
+            Also applies some heuristics across the returned result to try
+            and determine the size of each bin (if data has been aggregated).
+        """
         data = []
+        tsdiff_dict = {}
+        total_diffs = 0
+        lastts = 0
+        lastbin = 0
+        perfect_bins = 0
+
+        # Long and complicated explanation follows....
+        #
+        # We need to know the 'binsize' so that we can determine whether
+        # there are missing measurements in the returned result. This is 
+        # useful for leaving gaps in our graphs where data was missing. 
+        #
+        # The database will give us results that are binned according to the
+        # requested binsize, but this binsize may be smaller than the 
+        # measurement frequency. If it is, we can't use the requested binsize
+        # to determine whether a measurement is missing because there will be
+        # empty bins simply because no measurement fell within that time
+        # period.
+        #
+        # Instead, we actually want to know the measurement frequency or
+        # the binsize, whichever is bigger. The problem is that we don't have
+        # any obvious way of knowing the measurement frequency, so we have to
+        # infer it.
+        #
+        # Each row in the result object corresponds to a bin. For 
+        # non-aggregated data, the bin will always only cover one data
+        # measurement.
+        #
+        # There are two timestamps associated with each result row:
+        #
+        #   'binstart' is the timestamp where a bin begins and is calculated 
+        #   based on the requested bin size. For non-aggregated data, this is
+        #   the same as the timestamp of the data point.
+        #
+        #   'timestamp' is the timestamp of the *last* measurement included in
+        #   the bin. This is the timestamp we use for plotting graphs.
+        #
+        #
+        # There are two main cases to consider:
+        #   1. The requested binsize is greater than or equal to the 
+        #      measurement frequency. In this case, use the requested binsize.
+        #   2. The requested binsize is smaller than the measurement frequency.
+        #      In this case, we need to use the measurement frequency.
+        #
+        # In case 1, the vast majority of bins are going to be separated by
+        # the requested binsize. So we can detect this case by looking at the
+        # number of occasions the time difference between bins (using 
+        # 'binstart' matches the binsize that we requested. 
+        #
+        # Case 2 is trickier. Once we rule out case 1, we need to guess what
+        # the measurement frequency is. Fortunately, we know that each bin
+        # can only contain 1 measurement at most, so we can use the 
+        # 'timestamp' field from consecutive bins to infer the frequency.
+        # We collect these time differences and use the mode of these values
+        # as our measurement frequency. This will work even if the requested
+        # binsize is not a factor of the measurement frequency.
+        #
+        # XXX Potential pitfalls
+        # * What if there are a lot of non-consecutive missing measurements?
+        # * What if the test changes its measurement frequency?
+        
+
         for r in result:
+            # Collecting data for our binsize heuristics
+            if lastts == 0:
+                lastts = r['timestamp']
+                lastbin = r[tscol]
+            else:
+                tsdiff = r['timestamp'] - lastts
+                bindiff = r[tscol] - lastbin
+
+                # Difference between bins matches our requested binsize
+                if bindiff == size:
+                    perfect_bins +=1
+
+                if tsdiff in tsdiff_dict:
+                    tsdiff_dict[tsdiff] += 1
+                else:
+                    tsdiff_dict[tsdiff] = 1
+                
+                total_diffs += 1
+                lastts = r['timestamp']
+                lastbin = r[tscol]
+
+            # This is the bit that actually converts the result into a 
+            # dictionary and appends it to our data list
             foo = {}
             for i in range(0, len(selectcols)):
                 foo[selectcols[i].name] = r[i]
             data.append(foo)
+
+        # If this check passes, we requested a binsize greater than the
+        # measurement frequency (case 1, above)
+        if perfect_bins / float(total_diffs) > 0.9:
+            binsize = size
+        else:
+            # If we get here, then our binsize is more than likely smaller
+            # than our measurement frequency. Now, we need to try and figure
+            # out what that frequency was...
+
+            # Try and set a sensible default frequency. In particular, let's
+            # not set the frequency too low, otherwise our graphs will end up
+            # lots of gaps if we get it wrong.
+            if size < 300:
+                binsize = 300
+            else:
+                binsize = size
+            
+            # Find a suitable mode in all the timestamp differences.
+            # I require a strong mode, i.e. at least half the differences
+            # must be equal to the mode, as there shouldn't be a lot of
+            # variation in the time differences (unless your measurements are
+            # very patchy).
+            for td, count in tsdiff_dict.items():
+                if count >= 0.5 * total_diffs:
+                    binsize = td
+                    break
         
+        return data, binsize
+
+    def _group_select(self, selectcols, wherecl, groupcols, tscol, size):
+        query = select(selectcols).where(wherecl).group_by(*groupcols).order_by(tscol)
+        result = query.execute()
+                
+        data, binsize = self._form_datadict(result, selectcols, tscol, size)
         result.close()
-        return data 
+        return data, binsize
        
     def _select_binned(self, table, wherecl, selectors, groups, size, aggre):
-        bts = label('timestamp', table.c.timestamp / size * size)
+        bts = label('binstart', table.c.timestamp - (table.c.timestamp % size))
         selectcols, groupcols = self._group_columns(table, selectors, groups, 
                 aggre, bts)
-        return self._group_select(selectcols, wherecl, groupcols, bts)
+        return self._group_select(selectcols, wherecl, groupcols, bts, size)
 
 
     def _select_unbinned(self, table, wherecl, selectors, groups, 
