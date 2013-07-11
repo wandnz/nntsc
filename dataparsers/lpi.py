@@ -22,7 +22,9 @@
 
 from libnntsc.database import Database
 from libnntsc.configurator import *
-from libnntsc.parsers import lpi_bytes, lpi_common
+from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
+from libnntsc.parsers import lpi_users, lpi_packets
+
 import libnntsc.logger as logger
 
 from socket import *
@@ -64,7 +66,12 @@ class LPIModule:
             
             if s['modsubtype'] == "bytes":
                 lpi_bytes.create_existing_stream(s)
-     
+            if s['modsubtype'] == "flows":
+                lpi_flows.create_existing_stream(s) 
+            if s['modsubtype'] == "packets":
+                lpi_packets.create_existing_stream(s) 
+            if s['modsubtype'] == "users":
+                lpi_users.create_existing_stream(s)
 
     def process_stats(self, data):
         if data == {}:
@@ -74,8 +81,19 @@ class LPIModule:
         if data['metric'] == "bytes":
             return lpi_bytes.process_data(self.db, self.exporter, \
                     self.protocol_map, data)
-        
 
+        if data['metric'] == "newflows" or data['metric'] == "peakflows":
+            return lpi_flows.process_data(self.db, self.exporter, \
+                    self.protocol_map, data)
+        
+        if data['metric'] == "packets":
+            return lpi_packets.process_data(self.db, self.exporter, \
+                    self.protocol_map, data)
+        
+        if data['metric'] == "activeusers" or data['metric'] == "observedusers":
+            return lpi_users.process_data(self.db, self.exporter, \
+                    self.protocol_map, data)
+        
         return 0
 
     def run(self):
@@ -124,8 +142,19 @@ def tables(db):
 
     st_name = lpi_bytes.stream_table(db)
     dt_name = lpi_bytes.data_table(db)
-
     db.register_collection("lpi", "bytes", st_name, dt_name)
+
+    st_name = lpi_flows.stream_table(db)
+    dt_name = lpi_flows.data_table(db)
+    db.register_collection("lpi", "flows", st_name, dt_name)
+
+    st_name = lpi_packets.stream_table(db)
+    dt_name = lpi_packets.data_table(db)
+    db.register_collection("lpi", "packets", st_name, dt_name)
+
+    st_name = lpi_users.stream_table(db)
+    dt_name = lpi_users.data_table(db)
+    db.register_collection("lpi", "users", st_name, dt_name)
 
 
 

@@ -32,7 +32,7 @@ lpicp_proto_subhdr_fmt = "!L"
 lpicp_proto_rec_fmt = "!LH"
 
 dirnames = ["out", "in"]
-metnames = ["pkts", "bytes", "new_flows", "curr_flows", "peak_flows", "active_ips", "observed_ips"]
+metnames = ["packets", "bytes", "newflows", "currflows", "peakflows", "activeusers", "observedusers"]
 
 def get_metric_name(metid):
 
