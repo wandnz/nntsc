@@ -482,7 +482,6 @@ class Database:
         return query
 
     def _select_unmodified(self, table, wherecl, columns):
-
         if 'stream_id' not in columns:
             columns.append('stream_id')
         if 'timestamp' not in columns:
@@ -635,6 +634,9 @@ class Database:
                 foo[selectcols[i].name] = r[i]
             data.append(foo)
 
+        if len(data) == 0:
+            return data, size
+ 
         # If this check passes, we requested a binsize greater than the
         # measurement frequency (case 1, above)
         if perfect_bins / float(total_diffs) > 0.9:
@@ -667,7 +669,7 @@ class Database:
     def _group_select(self, selectcols, wherecl, groupcols, tscol, size):
         query = select(selectcols).where(wherecl).group_by(*groupcols).order_by(tscol)
         result = query.execute()
-                
+        
         data, binsize = self._form_datadict(result, selectcols, tscol, size)
         result.close()
         return data, binsize
