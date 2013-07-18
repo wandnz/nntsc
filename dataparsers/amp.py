@@ -149,10 +149,10 @@ class AmpModule:
 
     def run(self):
         """ Run forever, calling the process_data callback for each message """
-        logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
        
         if self.disable:
             return
+        logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
              
         try:
             self.channel.start_consuming()
