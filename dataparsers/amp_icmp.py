@@ -71,7 +71,7 @@ def data_table(db):
         Column('packet_size', Integer, nullable=False),
         Column('rtt', Integer, nullable=True),
         Column('ttl', Integer, nullable=True),
-        Column('loss', Boolean, nullable=False),
+        Column('loss', Integer, nullable=False),
         Column('error_type', Integer, nullable=False),
         Column('error_code', Integer, nullable=False),
         useexisting=True,
