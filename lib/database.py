@@ -235,6 +235,7 @@ class Database:
         tbs = []
         all_fks = []
         views = []
+        partitions = []
 
         inspector = reflection.Inspector.from_engine(self.engine)
         for table_name in inspector.get_table_names():
@@ -246,7 +247,10 @@ class Database:
                     ForeignKeyConstraint((),(),name=fk['name'])
                     )
             t = Table(table_name,newmeta,*fks)
-            tbs.append(t)
+            if table_name[0:5] == "part_":
+                partitions.append(t)
+            else:
+                tbs.append(t)
             all_fks.extend(fks)
 
         for v in inspector.get_view_names():
@@ -254,6 +258,9 @@ class Database:
 
         for fkc in all_fks:
             self.conn.execute(DropConstraint(fkc))
+
+        for table in partitions:
+            self.conn.execute(DropTable(table))
 
         for table in tbs:
             self.conn.execute(DropTable(table))
