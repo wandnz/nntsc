@@ -641,8 +641,13 @@ class Database:
                 foo[selectcols[i].name] = r[i]
             data.append(foo)
 
-        if len(data) == 0:
-            return data, size
+        if len(data) <= 1:
+            if size < 300:
+                binsize = 300
+            else:
+                binsize = size
+
+            return data, binsize
  
         # If this check passes, we requested a binsize greater than the
         # measurement frequency (case 1, above)
