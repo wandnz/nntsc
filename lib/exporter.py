@@ -313,7 +313,7 @@ class NNTSCClient(threading.Thread):
                         running = 0
                         break
         
-        log("Closing client thread on fd %d" % self.sock.fileno())
+        #log("Closing client thread on fd %d" % self.sock.fileno())
         self.parent.deregister_client(self.sock)
         self.pipeend.close()
         self.sock.close()
@@ -488,7 +488,7 @@ class NNTSCExporter:
             log("Error accepting connection: %s" % (msg[1]))
             return
 
-        log("Accepted connection on fd %d" % (client.fileno()))
+        #log("Accepted connection on fd %d" % (client.fileno()))
 
         pipe_recv, pipe_send = Pipe(False)
 
