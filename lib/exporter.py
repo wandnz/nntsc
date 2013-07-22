@@ -431,8 +431,8 @@ class NNTSCExporter:
             active = []
 
             for sock, columns, start, end, col in self.subscribers[stream_id]:
-
                 if timestamp < start:
+                    active.append((sock, columns, start, end, col))
                     continue
 
                 if end != None and timestamp > end:
