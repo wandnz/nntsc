@@ -26,6 +26,8 @@ from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.expression import select, join, outerjoin, func, label
+from libnntsc.partition import PartitionedTable
+import libnntsc.logger as logger
 
 STREAM_TABLE_NAME="streams_amp_udpstream"
 DATA_VIEW_NAME="data_amp_udpstream"

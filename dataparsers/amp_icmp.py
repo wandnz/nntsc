@@ -25,7 +25,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
 from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
-
+from libnntsc.partition import PartitionedTable
 import libnntsc.logger as logger
 
 import sys, string
@@ -34,6 +34,7 @@ STREAM_TABLE_NAME="streams_amp_icmp"
 DATA_TABLE_NAME="data_amp_icmp"
 
 amp_icmp_streams = {}
+partitions = None
 
 def stream_table(db):
     """ Specify the description of an icmp stream, used to create the table """
@@ -76,10 +77,6 @@ def data_table(db):
         Column('error_code', Integer, nullable=False),
         useexisting=True,
     )
-
-    Index('index_amp_icmp_stream', dt.c.stream_id)
-    Index('index_amp_icmp_timestamp', dt.c.timestamp)
-    Index('index_amp_icmp_packet_size', dt.c.packet_size)
 
     return DATA_TABLE_NAME
 
@@ -128,8 +125,12 @@ def insert_stream(db, exp, source, dest, size):
     return streamid
 
 def insert_data(db, exp, stream, ts, result):
+    global partitions
 
     dt = db.metadata.tables[DATA_TABLE_NAME]
+    if partitions == None:
+        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id", "packet_size"])
+    partitions.update(ts)
     
     try:
         db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,

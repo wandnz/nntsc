@@ -26,12 +26,14 @@ from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 import libnntsc.logger as logger
+from libnntsc.partition import PartitionedTable
 
 import sys, string
 
 STREAM_TABLE_NAME="streams_lpi_bytes"
 DATA_TABLE_NAME="data_lpi_bytes"
 
+partitions = None
 lpi_bytes_streams = {}
 
 def stream_table(db):
@@ -59,6 +61,7 @@ def stream_table(db):
     return STREAM_TABLE_NAME
 
 def data_table(db):
+
     if DATA_TABLE_NAME in db.metadata.tables:
         return DATA_TABLE_NAME
     dt = Table(DATA_TABLE_NAME, db.metadata,
@@ -69,8 +72,9 @@ def data_table(db):
         useexisting=True
     )
 
-    Index('index_lpi_bytes_stream_id', dt.c.stream_id)
-    Index('index_lpi_bytes_timestamp', dt.c.timestamp)
+    #Index('index_lpi_bytes_stream_id', dt.c.stream_id)
+    #Index('index_lpi_bytes_timestamp', dt.c.timestamp)
+
     return DATA_TABLE_NAME
 
 
@@ -120,7 +124,14 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto):
     return streamid
 
 def insert_data(db, exp, stream_id, ts, value):
+    global partitions
+    
     dt = db.metadata.tables[DATA_TABLE_NAME]
+
+    if partitions == None:
+        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id"])
+    
+    partitions.update(ts)
 
     try:
         db.conn.execute(dt.insert(), stream_id=stream_id, timestamp=ts, bytes=value)

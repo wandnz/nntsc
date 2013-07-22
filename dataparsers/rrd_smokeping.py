@@ -24,9 +24,12 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
 from sqlalchemy.types import Integer, String, Float
 from sqlalchemy.exc import IntegrityError, OperationalError
 import libnntsc.logger as logger
+from libnntsc.partition import PartitionedTable
 
 STREAM_TABLE_NAME="streams_rrd_smokeping"
 DATA_TABLE_NAME="data_rrd_smokeping"
+
+partitions = None
 
 def stream_table(db):
 
@@ -88,9 +91,6 @@ def data_table(db):
         useexisting=True
     )
     
-    Index('index_rrd_smokeping_stream', dt.c.stream_id);
-    Index('index_rrd_smokeping_timestamp', dt.c.timestamp);
-
     return DATA_TABLE_NAME
 
 def insert_stream(db, exp, name, fname, source, host, minres, rows):
@@ -125,7 +125,7 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
     return streamid
 
 def insert_data(db, exp, stream, ts, line):
-
+    global partitions
     # This is terrible :(
 
     kwargs = {}
@@ -153,6 +153,10 @@ def insert_data(db, exp, stream, ts, line):
 
     dt = db.metadata.tables[DATA_TABLE_NAME]
     
+    if partitions == None:
+        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 30, ["timestamp", "stream_id"])
+    partitions.update(ts)
+
     try:
         db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,
                 **kwargs)
