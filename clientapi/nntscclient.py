@@ -9,13 +9,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -39,7 +39,7 @@ class NNTSCClient:
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_REQUEST on a closed socket!"
             return -1;
-        
+
         request = struct.pack(nntsc_req_fmt, reqtype)
         if reqtype == NNTSC_REQ_COLLECTION:
             col = -1
@@ -56,7 +56,7 @@ class NNTSCClient:
             return -1
 
         return 0
- 
+
     def subscribe_streams(self, name, columns, streams, start, end):
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_SUBSCRIBE on a closed socket!"
@@ -72,14 +72,14 @@ class NNTSCClient:
             return -1
 
         return 0
-    
+
     def request_aggregate(self, col, streams, start, end, aggcolumns, binsize,
             groupcolumns=[], aggfunc="avg"):
-        
+
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_AGGREGATE on a closed socket!"
             return -1;
-        contents = pickle.dumps((col, start, end, streams, aggcolumns, groupcolumns, 
+        contents = pickle.dumps((col, start, end, streams, aggcolumns, groupcolumns,
                 binsize, aggfunc))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_AGGREGATE, len(contents))
 
@@ -91,7 +91,7 @@ class NNTSCClient:
 
         return 0
 
- 
+
     def receive_message(self):
         if self.sock == None:
             print >> sys.stderr, "Cannot receive messages on a closed socket!"
@@ -102,9 +102,9 @@ class NNTSCClient:
         except error, msg:
             print >> sys.stderr, "Error receiving data from client: %s" % (msg[1])
             return -1
-        
+
         if len(received) == 0:
-            return 0; 
+            return 0;
 
         self.buf += received
         return len(received)
@@ -157,7 +157,7 @@ class NNTSCClient:
 
         self.buf = self.buf[total_len:]
         return header[1], msgdict
-            
+
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
