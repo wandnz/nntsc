@@ -508,20 +508,37 @@ class Database:
 
 
     def _group_columns(self, table, selectors, groups, aggregator, bts=None):
-        aggfunc = self._get_aggregator(aggregator)
-        if aggfunc == None:
+        if type(aggregator) is str:
+            # single (string) aggregator, use it for all columns
+            aggfuncs = [self._get_aggregator(aggregator)] * len(selectors)
+        else:
+            # list (iterable) aggregator, different one per column
+            aggfuncs = []
+            for agg in aggregator:
+                aggfuncs.append(self._get_aggregator(agg))
+
+        # make sure we have a valid aggregator for each column
+        if None in aggfunc or len(aggfunc) != len(selectors):
             return []
 
         if groups == None:
             groups = []
 
+        rename = False
         aggcols = []
         groupcols = []
+
+        # check if we have duplicate selector columns - if so then we will
+        # need to rename them based on the aggregation function used
+        if len(set(selectors)) < len(selectors):
+            rename = True
 
         for col in table.columns:
             if col.name in selectors:
                 labelstr = col.name
-                newcol = label(labelstr, aggfunc(col))
+                if rename:
+                    labelstr += "_" + aggregator[selectors.index(col.name)]
+                newcol = label(labelstr,aggfunc[selectors.index(col.name)](col))
                 aggcols.append(newcol)
             if col.name in groups:
                 groupcols.append(col)
