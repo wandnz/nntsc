@@ -435,6 +435,8 @@ class Database:
             return func.avg
         elif agg == "count":
             return func.count
+        elif agg = "stddev":
+            return func.stddev
         else:
             log("Unsupported aggregator function: %s" % (aggregator))
             return None
