@@ -51,11 +51,12 @@ class DataCollector():
         except Exception, e:
             raise
 
-    def __init__(self, listen_port, config, backgrounded):
+    def __init__(self, listen_port, config, backgrounded, exportonly):
         self.modules = import_parsers([])
         self.exporter = NNTSCExporter(listen_port);
         self.config = config
         self.backgrounded = backgrounded
+        self.exportonly = exportonly
 
     def configure(self):
 
@@ -86,10 +87,11 @@ class DataCollector():
         
         self.configure()
         logger.log("Starting NNTSC Collector")
-        for m in self.modules.items():
-            self.start_module(m[0], m[1], self.config)
-        for p in self.processes:
-            p.start()
+        if not self.exportonly:
+            for m in self.modules.items():
+                self.start_module(m[0], m[1], self.config)
+            for p in self.processes:
+                p.start()
        
         self.exporter.run()
 
@@ -116,6 +118,7 @@ if __name__ == '__main__':
     parser.add_argument("-p", "--port", help="The port to listen for incoming connections on (default: 61234)", default=61234, type=int)
     parser.add_argument("-b", "--background", help="Run as a daemon", action="store_true")
     parser.add_argument("-P", "--pidfile", help="PID file location (if running backgrounded)", default=None)
+    parser.add_argument("-E", "--exportonly", help="Run the exporter only -- do not collect any new data", action="store_true")
 
     args = parser.parse_args()
     
@@ -138,11 +141,11 @@ if __name__ == '__main__':
         context.pidfile = pidfile
 
         with context:
-            dc = DataCollector(listen_port, config, True)
+            dc = DataCollector(listen_port, config, True, args.exportonly)
             dc.run()
     
     else:
-        dc = DataCollector(listen_port, config, False)
+        dc = DataCollector(listen_port, config, False, args.exportonly)
         try:
             dc.run()
         except KeyboardInterrupt:
