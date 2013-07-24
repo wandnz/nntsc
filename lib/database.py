@@ -435,7 +435,7 @@ class Database:
             return func.avg
         elif agg == "count":
             return func.count
-        elif agg = "stddev":
+        elif agg == "stddev":
             return func.stddev
         else:
             log("Unsupported aggregator function: %s" % (aggregator))
@@ -518,7 +518,7 @@ class Database:
                 aggfuncs.append(self._get_aggregator(agg))
 
         # make sure we have a valid aggregator for each column
-        if None in aggfunc or len(aggfunc) != len(selectors):
+        if None in aggfuncs or len(aggfuncs) != len(selectors):
             return []
 
         if groups == None:
@@ -538,7 +538,8 @@ class Database:
                 labelstr = col.name
                 if rename:
                     labelstr += "_" + aggregator[selectors.index(col.name)]
-                newcol = label(labelstr,aggfunc[selectors.index(col.name)](col))
+                newcol = label(labelstr,
+                        aggfuncs[selectors.index(col.name)](col))
                 aggcols.append(newcol)
             if col.name in groups:
                 groupcols.append(col)
