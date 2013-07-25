@@ -106,7 +106,7 @@ def parse_stat_record(msg_buf, name_len):
     stat_record["freq"] = int(stats_hdr[2])
     stat_record["dir"] = dirnames[int(stats_hdr[3])]
     stat_record["metric"] = metnames[int(stats_hdr[4])]
-    stat_record["results"] = []
+    stat_record["results"] = {}
 
     for i in range(0, int(stats_hdr[5])):
 # getting the protocol ID
@@ -114,7 +114,7 @@ def parse_stat_record(msg_buf, name_len):
         upp = buf_parsed + struct.calcsize(lpicp_stats_rec_fmt)
         proto_rec = struct.unpack(lpicp_stats_rec_fmt, str(msg_buf[low:upp]))
         buf_parsed += struct.calcsize(lpicp_stats_rec_fmt)
-        stat_record["results"].append((proto_rec[0], proto_rec[1]))
+        stat_record["results"][proto_rec[0]] = proto_rec[1]
 
         assert(buf_parsed <= buf_read)
 

@@ -36,6 +36,9 @@ class LPIModule:
         self.exporter = exp
         self.enabled = True
         self.wait = 15
+        self.current_header = {}
+        self.observed_protos = {}
+        self.protocol_map = {}
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
@@ -96,6 +99,52 @@ class LPIModule:
         
         return 0
 
+    def reset_seen(self):
+        assert(self.protocol_map != {})
+
+        self.current_header = {}
+        self.observed_protocols = {}
+        for k in self.protocol_map.keys():
+            self.observed_protocols[k] = 0
+
+    def update_seen(self, data):
+        
+        if self.current_header == {}:
+            self.current_header['user'] = data['user']
+            self.current_header['id'] = data['id']
+            self.current_header['freq'] = data['freq']
+            self.current_header['dir'] = data['dir']
+            self.current_header['metric'] = data['metric']
+            self.current_header['ts'] = data['ts']
+        else:
+            assert(data['user'] == self.current_header['user'])
+            assert(data['id'] == self.current_header['id'])
+            assert(data['freq'] == self.current_header['freq'])
+            assert(data['dir'] == self.current_header['dir'])
+            assert(data['metric'] == self.current_header['metric'])
+            assert(data['ts'] == self.current_header['ts'])
+       
+        for k in data['results'].keys():
+            assert(k in self.observed_protocols)
+            del self.observed_protocols[k]
+    
+    def insert_zeroes(self):
+        assert(self.current_header != 0)
+
+        data = {}
+        data['user'] = self.current_header['user']
+        data['id'] = self.current_header['id']
+        data['freq'] = self.current_header['freq']
+        data['dir'] = self.current_header['dir']
+        data['ts'] = self.current_header['ts']
+        data['metric'] = self.current_header['metric']
+        data['results'] = {}
+
+        for k in self.observed_protocols.keys():
+            data['results'][k] = 0
+
+        self.process_stats(data)
+        
     def run(self):
         while self.enabled:
             logger.log("Attempting to connect to LPI Server")
@@ -118,12 +167,16 @@ class LPIModule:
                 rec_type, data = lpi_common.read_lpicp(self.server_fd)
 
                 if rec_type == 3:
+                    self.insert_zeroes()
                     self.db.commit_transaction()
+                    self.reset_seen()
 
                 if rec_type == 4:
                     self.protocol_map = data
+                    self.reset_seen()
 
                 if rec_type == 0:
+                    self.update_seen(data)
                     if self.process_stats(data) == -1:
                         logger.log("LPIModule: Invalid Statistics Data")
                         break

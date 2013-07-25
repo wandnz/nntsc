@@ -163,22 +163,26 @@ def process_data(db, exp, protomap, data):
         logger.log("LPI Flows: Unknown Metric: %s" % (data['metric']))
         return -1
 
-    for n in data['results']:
-        if n[0] not in protomap.keys():
-            logger.log("LPI Flows: Unknown protocol id: %u" % (n[0]))
+    for p, val in data['results'].items():
+        if p not in protomap.keys():
+            logger.log("LPI Flows: Unknown protocol id: %u" % (p))
             return -1
-        stream_id = find_stream(mon, user, dir, freq, protomap[n[0]], metric)
+        stream_id = find_stream(mon, user, dir, freq, protomap[p], metric)
         if stream_id == -1:
-            stream_id = add_new_stream(db, exp, mon, user, dir, freq, protomap[n[0]], metric)
+            if val == 0:
+                # Don't create a stream until we get a non-zero value
+                return 0
+
+            stream_id = add_new_stream(db, exp, mon, user, dir, freq, protomap[p], metric)
 
             if stream_id == -1:
                 logger.log("LPI Flows: Cannot create new stream")
-                logger.log("LPI Flows: %s:%s %s %s %s %s\n" % (mon, user, dir, freq, protomap[n[0]], metric))
+                logger.log("LPI Flows: %s:%s %s %s %s %s\n" % (mon, user, dir, freq, protomap[p], metric))
                 return -1
             else:
-                lpi_flows_streams[(mon, user, dir, freq, protomap[n[0]], metric)] = stream_id
+                lpi_flows_streams[(mon, user, dir, freq, protomap[p], metric)] = stream_id
 
-        insert_data(db, exp, stream_id, data['ts'], n[1])
+        insert_data(db, exp, stream_id, data['ts'], val)
         db.update_timestamp(stream_id, data['ts'])
     return 0
         
