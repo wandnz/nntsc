@@ -424,7 +424,6 @@ class Database:
         self.pending += 1
 
     def _get_aggregator(self, agg):
-
         if agg == "max":
             return func.max
         elif agg == "min":
@@ -524,6 +523,7 @@ class Database:
         if groups == None:
             groups = []
 
+        index = 0
         rename = False
         aggcols = []
         groupcols = []
@@ -533,16 +533,25 @@ class Database:
         if len(set(selectors)) < len(selectors):
             rename = True
 
-        for col in table.columns:
-            if col.name in selectors:
-                labelstr = col.name
+        # iterate over the selectors rather than the table columns to ensure
+        # any columns listed multiple times all get included appropriately
+        for colname in selectors:
+            # find the next (only) column with the matching name, if present
+            column = next((x for x in table.columns if x.name == colname), None)
+            if column is not None:
+                labelstr = colname
                 if rename:
-                    labelstr += "_" + aggregator[selectors.index(col.name)]
-                newcol = label(labelstr,
-                        aggfuncs[selectors.index(col.name)](col))
+                    # append the aggregate function name to differentiate this
+                    # result column from any others using the same column name
+                    labelstr += "_" + aggregator[index]
+                newcol = label(labelstr, aggfuncs[index](column))
                 aggcols.append(newcol)
-            if col.name in groups:
-                groupcols.append(col)
+            index += 1
+
+        for colname in groups:
+            column = next((x for x in table.columns if x.name == colname), None)
+            if column is not None:
+                groupcols.append(column)
 
         # If we are binning, put the timestamp column into the group list to
         # ensure the bins are of appropriate size
