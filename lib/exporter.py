@@ -127,7 +127,8 @@ class NNTSCClient(threading.Thread):
         return 0
 
     def send_streams(self, col):
-      
+     
+        #log("Sending streams to client for collection %d" % (col)) 
         self.parent.register_collection(self.sock, col)
        
         streams = self.db.select_streams_by_collection(col)
@@ -383,11 +384,10 @@ class NNTSCExporter:
             log("Values should expressed as a dictionary")
             return -1
 
-        # XXX UNTESTED!!
-
-        if coll_name not in self.collections.keys():
+        if coll_id not in self.collections.keys():
             return 0
 
+        #log("Exporting new stream %d to interested clients" % (stream_id))
         properties['stream_id'] = stream_id
 
         ns_data = pickle.dumps((coll_id, coll_name, False, [properties]))
@@ -395,7 +395,7 @@ class NNTSCExporter:
                 len(ns_data))
 
         active = []
-        for sock in self.collections[coll_name]:
+        for sock in self.collections[coll_id]:
             if sock not in self.client_sockets:
                 continue
     
@@ -407,7 +407,7 @@ class NNTSCExporter:
                 self.deregister_client(sock)
             else:
                 active.append(sock)
-        self.collections[coll_name] = active
+        self.collections[coll_id] = active
 
         return 0
 
