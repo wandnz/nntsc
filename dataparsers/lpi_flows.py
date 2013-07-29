@@ -171,7 +171,7 @@ def process_data(db, exp, protomap, data):
         if stream_id == -1:
             if val == 0:
                 # Don't create a stream until we get a non-zero value
-                return 0
+                continue
 
             stream_id = add_new_stream(db, exp, mon, user, dir, freq, protomap[p], metric)
 

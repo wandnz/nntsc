@@ -143,6 +143,7 @@ class LPIModule:
         for k in self.observed_protocols.keys():
             data['results'][k] = 0
 
+
         self.process_stats(data)
         
     def run(self):

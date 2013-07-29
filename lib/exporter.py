@@ -126,11 +126,12 @@ class NNTSCClient(threading.Thread):
             return -1
         return 0
 
-    def send_streams(self, col):
-      
+    def send_streams(self, col, startstream):
+     
+        #log("Sending streams to client for collection %d" % (col)) 
         self.parent.register_collection(self.sock, col)
        
-        streams = self.db.select_streams_by_collection(col)
+        streams = self.db.select_streams_by_collection(col, startstream)
      
         i = 0
         while (i < len(streams)):
@@ -194,13 +195,14 @@ class NNTSCClient(threading.Thread):
             return self.send_collections(shrink)
 
         if req_hdr[0] == NNTSC_REQ_SCHEMA:
-            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
+            col_id = req_hdr[1]
             return self.send_schema(col_id)
 
 
         if req_hdr[0] == NNTSC_REQ_STREAMS:
-            col_id = pickle.loads(reqmsg[struct.calcsize(nntsc_req_fmt):])
-            return self.send_streams(col_id)
+            col_id = req_hdr[1]
+            start = req_hdr[2]
+            return self.send_streams(col_id, start)
 
         return 0
     
@@ -275,6 +277,8 @@ class NNTSCClient(threading.Thread):
        
         if error != 1:
             self.recvbuf = buf
+        if error == 1:
+            return 0
 
     def receive_live(self):
 
@@ -383,19 +387,18 @@ class NNTSCExporter:
             log("Values should expressed as a dictionary")
             return -1
 
-        # XXX UNTESTED!!
-
-        if coll_name not in self.collections.keys():
+        if coll_id not in self.collections.keys():
             return 0
 
+        #log("Exporting new stream %d to interested clients" % (stream_id))
         properties['stream_id'] = stream_id
 
-        ns_data = pickle.dumps((coll_id, coll_name, False, [properties]))
+        ns_data = pickle.dumps((coll_id, False, [properties]))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
                 len(ns_data))
 
         active = []
-        for sock in self.collections[coll_name]:
+        for sock in self.collections[coll_id]:
             if sock not in self.client_sockets:
                 continue
     
@@ -407,7 +410,7 @@ class NNTSCExporter:
                 self.deregister_client(sock)
             else:
                 active.append(sock)
-        self.collections[coll_name] = active
+        self.collections[coll_id] = active
 
         return 0
 

@@ -23,7 +23,7 @@
 import sys
 
 nntsc_hdr_fmt = "!BBH"
-nntsc_req_fmt = "!B"
+nntsc_req_fmt = "!LLQ"
 
 NNTSC_REQ_COLLECTION = 0
 NNTSC_REQ_STREAMS = 1
