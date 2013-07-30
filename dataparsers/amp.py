@@ -66,7 +66,9 @@ class AmpModule:
 
             if testtype == "icmp":
                 key = amp_icmp.create_existing_stream(i)
-            
+            elif testtype == "traceroute":
+                key = amp_traceroute.create_existing_stream(i)
+
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
         if username == "NNTSCConfigError":
@@ -136,9 +138,11 @@ class AmpModule:
         if test in self.amp_modules:
             data = self.amp_modules[test].get_data(body)
             source = properties.headers["x-amp-source-monitor"]
-            
             if test == "icmp":
-                amp_icmp.process_data(self.db, self.exporter, 
+                amp_icmp.process_data(self.db, self.exporter,
+                        properties.timestamp, data, source)
+            elif test == "traceroute":
+                amp_traceroute.process_data(self.db, self.exporter,
                         properties.timestamp, data, source)
         else:
             logger.log("unknown test: '%s'" % (
