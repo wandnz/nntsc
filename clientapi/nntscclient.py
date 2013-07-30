@@ -35,22 +35,21 @@ class NNTSCClient:
         self.sock.close()
         self.sock = None
 
-    def send_request(self, reqtype, col):
+    def send_request(self, reqtype, col, start=0):
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_REQUEST on a closed socket!"
             return -1;
 
-        request = struct.pack(nntsc_req_fmt, reqtype)
         if reqtype == NNTSC_REQ_COLLECTION:
-            col = -1
+            col = 0
 
-        col_pick = pickle.dumps(col)
+        request = struct.pack(nntsc_req_fmt, reqtype, col, start)
 
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_REQUEST,
-                struct.calcsize(nntsc_req_fmt) + len(col_pick))
+                struct.calcsize(nntsc_req_fmt))
 
         try:
-            self.sock.sendall(header + request + col_pick)
+            self.sock.sendall(header + request)
         except error, msg:
             print >> sys.stderr, "Error sending NNTSC_REQUEST %d for collection %d: %s" % (reqtype, col, msg[1])
             return -1

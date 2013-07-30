@@ -354,14 +354,14 @@ class Database:
             result.close()
         return streams
 
-    def select_streams_by_collection(self, coll):
+    def select_streams_by_collection(self, coll, minid):
 
         coll_t = self.metadata.tables['collections']
         streams_t = self.metadata.tables['streams']
 
         selected = []
 
-        sql = select([streams_t.c.id, coll_t.c.streamtable, streams_t.c.name]).select_from(coll_t.join(streams_t, streams_t.c.collection == coll_t.c.id)).where(coll_t.c.id == coll)
+        sql = select([streams_t.c.id, coll_t.c.streamtable, streams_t.c.name]).select_from(coll_t.join(streams_t, streams_t.c.collection == coll_t.c.id)).where(coll_t.c.id == coll and streams_t.c.id > minid)
         result = sql.execute()
 
         for row in result:
