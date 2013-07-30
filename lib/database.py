@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -48,7 +48,7 @@ class DropView(DDLElement):
 
 @compiler.compiles(CreateView)
 def compile(element, compiler, **kw):
-    return "CREATE VIEW %s AS %s" % (element.name, compiler.sql_compiler.process(element.selectable)) 
+    return "CREATE VIEW %s AS %s" % (element.name, compiler.sql_compiler.process(element.selectable))
 
 @compiler.compiles(DropView)
 def compile(element, compiler, **kw):
@@ -78,7 +78,7 @@ class Database:
         self.__reflect_db()
 
         self.conn = self.engine.connect()
-        
+
         #self.stream_tables = {}
         #self.data_tables = {}
 
@@ -101,7 +101,7 @@ class Database:
             self.init_error = True
             sys.exit(1)
 
-        # reflect() is supposed to take a 'views' argument which will 
+        # reflect() is supposed to take a 'views' argument which will
         # force it to reflects views as well as tables, but our version of
         # sqlalchemy didn't like that. So fuck it, I'll just reflect the
         # views manually
@@ -117,7 +117,7 @@ class Database:
             self.conn.close()
 
     def create_view(self, name, query):
-       
+
         t = table(name)
 
         for c in query.c:
@@ -133,13 +133,13 @@ class Database:
         #DropView(name).execute_at('before-drop', self.metadata)
 
         return t
-        
+
 
     def build_databases(self, modules, new=False):
         if new:
             self.__delete_everything(self.engine)
             self.__reflect_db()
-       
+
         if 'collections' not in self.metadata.tables:
             collections = Table('collections', self.metadata,
                 Column('id', Integer, primary_key=True),
@@ -154,16 +154,16 @@ class Database:
         if 'streams' not in self.metadata.tables:
             streams = Table('streams', self.metadata,
                 Column('id', Integer, primary_key=True),
-                Column('collection', Integer, ForeignKey('collections.id'), 
+                Column('collection', Integer, ForeignKey('collections.id'),
                         nullable=False),
                 Column('name', String, nullable=False, unique=True),
                 Column('lasttimestamp', Integer, nullable=False),
             )
-      
+
             streams.create()
-      
+
             Index('index_streams_collection', streams.c.collection)
-       
+
         #self.metadata.create_all()
         #self.commit_transaction()
 
@@ -171,13 +171,13 @@ class Database:
 
         for base,mod in modules.items():
             mod.tables(self)
-        
+
         self.metadata.create_all()
         self.commit_transaction()
 
     def register_collection(self, mod, subtype, stable, dtable):
         table = self.metadata.tables['collections']
-        
+
         try:
             self.conn.execute(table.insert(), module=mod, modsubtype=subtype,
                     streamtable=stable, datatable=dtable)
@@ -197,7 +197,7 @@ class Database:
         sql = coltable.select().where(and_(coltable.c.module==mod,
                 coltable.c.modsubtype==subtype))
         result = sql.execute()
-        
+
         if result.rowcount == 0:
             log("Database Error: no collection for %s:%s" % (mod, subtype))
             return -1, -1
@@ -278,7 +278,7 @@ class Database:
                 result = sql.execute()
                 if result.rowcount == 1:
                     return mod
-    
+
     def __get_data_table(self, stream_id):
         # XXX This seems kinda slow....
         for i in self.metadata.tables.keys():
@@ -291,12 +291,12 @@ class Database:
 
     def list_collections(self):
         collections = []
-        
+
         table = self.metadata.tables['collections']
 
         result = table.select().execute()
         for row in result:
-            
+
             col = {}
             for k,v in row.items():
                 col[k] = v
@@ -305,19 +305,19 @@ class Database:
         return collections
 
     def get_collection_schema(self, col_id):
-        
+
         table = self.metadata.tables['collections']
-       
+
         result = select([table.c.streamtable, table.c.datatable]).where(table.c.id ==col_id).execute()
         for row in result:
             stream_table = self.metadata.tables[row[0]]
             data_table = self.metadata.tables[row[1]]
             return stream_table.columns, data_table.columns
-            
+
     def select_streams_by_module(self, mod):
 
         # Find all streams matching a given module type
-        
+
         # For each stream:
         #   Form a dictionary containing all the relevant information about
         #   that stream (this will require info from both the combined streams
@@ -331,7 +331,7 @@ class Database:
         # Find the collection matching the given module
         sql = col_t.select().where(col_t.c.module == mod)
         result = sql.execute()
-        
+
         stream_tables = {}
 
         for row in result:
@@ -368,7 +368,7 @@ class Database:
             s_id = row[0]
             table = self.metadata.tables[row[1]]
             name = row[2]
-            
+
             stream_data = table.select().where(table.c.stream_id == s_id).execute()
 
             assert(stream_data.rowcount == 1)
@@ -381,7 +381,7 @@ class Database:
             stream_dict['name'] = name
             selected.append(stream_dict)
         result.close()
-            
+
         return selected
 
     def select_stream_by_id(self, stream_id):
@@ -401,7 +401,7 @@ class Database:
         # TODO: Better error handling!
 
         #print "Committing %d statements (%s)" % (self.pending, \
-        #        time.strftime("%d %b %Y %H:%M:%S", time.localtime())) 
+        #        time.strftime("%d %b %Y %H:%M:%S", time.localtime()))
         try:
             self.trans.commit()
         except:
@@ -422,9 +422,8 @@ class Database:
                 lasttimestamp=lasttimestamp))
         result.close()
         self.pending += 1
-    
-    def _get_aggregator(self, agg):
 
+    def _get_aggregator(self, agg):
         if agg == "max":
             return func.max
         elif agg == "min":
@@ -435,11 +434,13 @@ class Database:
             return func.avg
         elif agg == "count":
             return func.count
+        elif agg == "stddev":
+            return func.stddev
         else:
             log("Unsupported aggregator function: %s" % (aggregator))
             return None
 
-    
+
     def _where_clause(self, table, start_time, stop_time, stream_ids):
 
         # Create the start time clause for our query
@@ -506,23 +507,51 @@ class Database:
 
 
     def _group_columns(self, table, selectors, groups, aggregator, bts=None):
-        aggfunc = self._get_aggregator(aggregator)
-        if aggfunc == None:
+        if type(aggregator) is str:
+            # single (string) aggregator, use it for all columns
+            aggfuncs = [self._get_aggregator(aggregator)] * len(selectors)
+        else:
+            # list (iterable) aggregator, different one per column
+            aggfuncs = []
+            for agg in aggregator:
+                aggfuncs.append(self._get_aggregator(agg))
+
+        # make sure we have a valid aggregator for each column
+        if None in aggfuncs or len(aggfuncs) != len(selectors):
             return []
 
         if groups == None:
             groups = []
 
+        index = 0
+        rename = False
         aggcols = []
         groupcols = []
 
-        for col in table.columns:
-            if col.name in selectors:
-                labelstr = col.name
-                newcol = label(labelstr, aggfunc(col))
+        # check if we have duplicate selector columns - if so then we will
+        # need to rename them based on the aggregation function used
+        if len(set(selectors)) < len(selectors):
+            rename = True
+
+        # iterate over the selectors rather than the table columns to ensure
+        # any columns listed multiple times all get included appropriately
+        for colname in selectors:
+            # find the next (only) column with the matching name, if present
+            column = next((x for x in table.columns if x.name == colname), None)
+            if column is not None:
+                labelstr = colname
+                if rename:
+                    # append the aggregate function name to differentiate this
+                    # result column from any others using the same column name
+                    labelstr += "_" + aggregator[index]
+                newcol = label(labelstr, aggfuncs[index](column))
                 aggcols.append(newcol)
-            if col.name in groups:
-                groupcols.append(col)
+            index += 1
+
+        for colname in groups:
+            column = next((x for x in table.columns if x.name == colname), None)
+            if column is not None:
+                groupcols.append(column)
 
         # If we are binning, put the timestamp column into the group list to
         # ensure the bins are of appropriate size
@@ -540,10 +569,10 @@ class Database:
 
 
         return selectcols, groupcols
-    
+
     def _form_datadict(self, result, selectcols, tscol, size):
         """ Converts a result object into a list of dictionaries, one
-            for each row. The dictionary is a map of column names to 
+            for each row. The dictionary is a map of column names to
             values.
 
             Also applies some heuristics across the returned result to try
@@ -559,11 +588,11 @@ class Database:
         # Long and complicated explanation follows....
         #
         # We need to know the 'binsize' so that we can determine whether
-        # there are missing measurements in the returned result. This is 
-        # useful for leaving gaps in our graphs where data was missing. 
+        # there are missing measurements in the returned result. This is
+        # useful for leaving gaps in our graphs where data was missing.
         #
         # The database will give us results that are binned according to the
-        # requested binsize, but this binsize may be smaller than the 
+        # requested binsize, but this binsize may be smaller than the
         # measurement frequency. If it is, we can't use the requested binsize
         # to determine whether a measurement is missing because there will be
         # empty bins simply because no measurement fell within that time
@@ -574,13 +603,13 @@ class Database:
         # any obvious way of knowing the measurement frequency, so we have to
         # infer it.
         #
-        # Each row in the result object corresponds to a bin. For 
+        # Each row in the result object corresponds to a bin. For
         # non-aggregated data, the bin will always only cover one data
         # measurement.
         #
         # There are two timestamps associated with each result row:
         #
-        #   'binstart' is the timestamp where a bin begins and is calculated 
+        #   'binstart' is the timestamp where a bin begins and is calculated
         #   based on the requested bin size. For non-aggregated data, this is
         #   the same as the timestamp of the data point.
         #
@@ -589,19 +618,19 @@ class Database:
         #
         #
         # There are two main cases to consider:
-        #   1. The requested binsize is greater than or equal to the 
+        #   1. The requested binsize is greater than or equal to the
         #      measurement frequency. In this case, use the requested binsize.
         #   2. The requested binsize is smaller than the measurement frequency.
         #      In this case, we need to use the measurement frequency.
         #
         # In case 1, the vast majority of bins are going to be separated by
         # the requested binsize. So we can detect this case by looking at the
-        # number of occasions the time difference between bins (using 
-        # 'binstart' matches the binsize that we requested. 
+        # number of occasions the time difference between bins (using
+        # 'binstart' matches the binsize that we requested.
         #
         # Case 2 is trickier. Once we rule out case 1, we need to guess what
         # the measurement frequency is. Fortunately, we know that each bin
-        # can only contain 1 measurement at most, so we can use the 
+        # can only contain 1 measurement at most, so we can use the
         # 'timestamp' field from consecutive bins to infer the frequency.
         # We collect these time differences and use the mode of these values
         # as our measurement frequency. This will work even if the requested
@@ -610,7 +639,7 @@ class Database:
         # XXX Potential pitfalls
         # * What if there are a lot of non-consecutive missing measurements?
         # * What if the test changes its measurement frequency?
-        
+
 
         for r in result:
             # Collecting data for our binsize heuristics
@@ -629,12 +658,12 @@ class Database:
                     tsdiff_dict[tsdiff] += 1
                 else:
                     tsdiff_dict[tsdiff] = 1
-                
+
                 total_diffs += 1
                 lastts = r['timestamp']
                 lastbin = r[tscol]
 
-            # This is the bit that actually converts the result into a 
+            # This is the bit that actually converts the result into a
             # dictionary and appends it to our data list
             foo = {}
             for i in range(0, len(selectcols)):
@@ -648,7 +677,7 @@ class Database:
                 binsize = size
 
             return data, binsize
- 
+
         # If this check passes, we requested a binsize greater than the
         # measurement frequency (case 1, above)
         if perfect_bins / float(total_diffs) > 0.9:
@@ -665,7 +694,7 @@ class Database:
                 binsize = 300
             else:
                 binsize = size
-            
+
             # Find a suitable mode in all the timestamp differences.
             # I require a strong mode, i.e. at least half the differences
             # must be equal to the mode, as there shouldn't be a lot of
@@ -675,28 +704,28 @@ class Database:
                 if count >= 0.5 * total_diffs:
                     binsize = td
                     break
-        
+
         return data, binsize
 
     def _group_select(self, selectcols, wherecl, groupcols, tscol, size):
         query = select(selectcols).where(wherecl).group_by(*groupcols).order_by(tscol)
         result = query.execute()
-        
+
         data, binsize = self._form_datadict(result, selectcols, tscol, size)
         result.close()
         return data, binsize
-       
+
     def _select_binned(self, table, wherecl, selectors, groups, size, aggre):
         bts = label('binstart', table.c.timestamp - (table.c.timestamp % size))
-        selectcols, groupcols = self._group_columns(table, selectors, groups, 
+        selectcols, groupcols = self._group_columns(table, selectors, groups,
                 aggre, bts)
         return self._group_select(selectcols, wherecl, groupcols, bts, size)
 
 
-    def _select_unbinned(self, table, wherecl, selectors, groups, 
+    def _select_unbinned(self, table, wherecl, selectors, groups,
             aggregator):
 
-        selectcols, groupcols = self._group_columns(table, selectors, groups, 
+        selectcols, groupcols = self._group_columns(table, selectors, groups,
                 aggregator)
 
         mints = label("min_timestamp", func.min(table.c.timestamp))
@@ -705,8 +734,8 @@ class Database:
 
 
         return self._group_select(selectcols, wherecl, groupcols, mints)
-        
-        
+
+
 
     """
         Get data from the database
@@ -715,7 +744,7 @@ class Database:
     """
     def select_data(self, col, stream_ids, selectcols, start_time=None,
             stop_time=None):
-        
+
         coll_t = self.metadata.tables['collections']
         res = select([coll_t.c.datatable]).select_from(coll_t).where(coll_t.c.id == col).execute()
 
@@ -725,12 +754,12 @@ class Database:
         table = self.metadata.tables[datatable]
 
         wherecl = self._where_clause(table, start_time, stop_time, stream_ids)
-        
-        return self._select_unmodified(table, wherecl, selectcols)
-       
 
-    def select_aggregated_data(self, collection, stream_ids, aggcols,  
-            start_time=None, stop_time=None, groupcols=None, binsize=0, 
+        return self._select_unmodified(table, wherecl, selectcols)
+
+
+    def select_aggregated_data(self, collection, stream_ids, aggcols,
+            start_time=None, stop_time=None, groupcols=None, binsize=0,
             aggregator="avg"):
 
         coll_t = self.metadata.tables['collections']
@@ -742,7 +771,7 @@ class Database:
         table = self.metadata.tables[datatable]
 
         wherecl = self._where_clause(table, start_time, stop_time, stream_ids)
-       
+
         if binsize == 0 and groupcols == None:
             return self._select_unmodified(table, wherecl, aggcols)
 
