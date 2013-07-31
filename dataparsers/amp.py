@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -39,7 +39,7 @@ class AmpModule:
         dbconf = get_nntsc_db_config(nntsc_config)
         if dbconf == {}:
             sys.exit(1)
-        
+
         self.disable = get_nntsc_config_bool(nntsc_config, "amp", "disable")
         if self.disable == "NNTSCConfigError":
             logger.log("Invalid disable option for AMP")
@@ -47,7 +47,7 @@ class AmpModule:
 
         if self.disable == True:
             return
-        
+
         self.disable = False    # just to be safe
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
@@ -61,12 +61,13 @@ class AmpModule:
         # set all the streams that we already know about for easy lookup of
         # their stream id when reporting data
         for i in tests:
-            
-            testtype = i["modsubtype"]
 
+            testtype = i["modsubtype"]
             if testtype == "icmp":
                 key = amp_icmp.create_existing_stream(i)
-            
+            elif testtype == "traceroute":
+                key = amp_traceroute.create_existing_stream(i)
+
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
         if username == "NNTSCConfigError":
@@ -74,7 +75,7 @@ class AmpModule:
             sys.exit(1)
         password = get_nntsc_config(nntsc_config, "amp", "password")
         if password == "NNTSCConfigError":
-            logger.log("Invalid password option for AMP") 
+            logger.log("Invalid password option for AMP")
             sys.exit(1)
         self.host = get_nntsc_config(nntsc_config, "amp", "host")
         if self.host == "NNTSCConfigError":
@@ -94,8 +95,8 @@ class AmpModule:
             sys.exit(1)
 
         self.credentials = pika.PlainCredentials(username, password)
-        self.connect_rabbit() 
-        
+        self.connect_rabbit()
+
     def connect_rabbit(self):
         # Connect to rabbitmq -- try again if the connection fails
         attempts = 1
@@ -126,7 +127,7 @@ class AmpModule:
         self.channel.basic_consume(self.process_data, queue=self.queue)
 
         # TODO: Add some sort of callback in the event of the server going
-        # away   
+        # away
 
     def process_data(self, channel, method, properties, body):
         """ Process a single message from the queue.
@@ -136,9 +137,11 @@ class AmpModule:
         if test in self.amp_modules:
             data = self.amp_modules[test].get_data(body)
             source = properties.headers["x-amp-source-monitor"]
-            
             if test == "icmp":
-                amp_icmp.process_data(self.db, self.exporter, 
+                amp_icmp.process_data(self.db, self.exporter,
+                        properties.timestamp, data, source)
+            elif test == "traceroute":
+                amp_traceroute.process_data(self.db, self.exporter,
                         properties.timestamp, data, source)
         else:
             logger.log("unknown test: '%s'" % (
@@ -149,11 +152,11 @@ class AmpModule:
 
     def run(self):
         """ Run forever, calling the process_data callback for each message """
-       
+
         if self.disable:
             return
         logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
-             
+
         try:
             self.channel.start_consuming()
         except KeyboardInterrupt:

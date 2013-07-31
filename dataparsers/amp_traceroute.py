@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -107,8 +107,8 @@ def data_tables(db):
     viewquery = select([testtable.c.stream_id, testtable.c.timestamp,
             testtable.c.traceroute_test_id,
             testtable.c.address.label("target_address"),
-            testtable.c.length, testtable.c.error_type, 
-            testtable.c.error_code, testtable.c.packet_size, 
+            testtable.c.length, testtable.c.error_type,
+            testtable.c.error_code, testtable.c.packet_size,
             fh.c.path_ttl,
             fh.c.hop_address]).select_from(testtable.join(fh))
 

@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -109,9 +109,9 @@ def insert_stream(db, exp, source, dest, size):
 
     # insert stream into our stream table
     st = db.metadata.tables[STREAM_TABLE_NAME]
-    
+
     try:
-        result = db.conn.execute(st.insert(), stream_id=streamid, 
+        result = db.conn.execute(st.insert(), stream_id=streamid,
                 source=source, destination=dest, packet_size=size,
                 datastyle="rtt_ms")
     except IntegrityError, e:
@@ -131,7 +131,7 @@ def insert_data(db, exp, stream, ts, result):
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id", "packet_size"])
     partitions.update(ts)
-    
+
     try:
         db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,
                 **result)
@@ -151,7 +151,7 @@ def process_data(db, exp, timestamp, data, source):
             sizestr = "random"
         else:
             sizestr = str(d["packet_size"])
-        
+
         d["source"] = source
         key = (source, d["target"], sizestr)
 
