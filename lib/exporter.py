@@ -94,7 +94,6 @@ class NNTSCClient(threading.Thread):
         return 0
                     
     def send_collections(self, cols):
-
         col_pickle = pickle.dumps(cols)
         msglen = len(col_pickle)
 
@@ -126,13 +125,29 @@ class NNTSCClient(threading.Thread):
             return -1
         return 0
 
+    def export_streams_msg(self, col, more, streams):
+        stream_data = pickle.dumps((col, more, streams))
+        
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
+                len(stream_data))
+        try:
+            self.sock.send(header + stream_data)
+        except error, msg:
+            log("Error sending schemas to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+            return -1
+        
+        return 0
+
     def send_streams(self, col, startstream):
      
         #log("Sending streams to client for collection %d" % (col)) 
         self.parent.register_collection(self.sock, col)
        
         streams = self.db.select_streams_by_collection(col, startstream)
-     
+      
+        if len(streams) == 0:
+            return self.export_streams_msg(col, False, [])
+             
         i = 0
         while (i < len(streams)):
 
@@ -143,15 +158,8 @@ class NNTSCClient(threading.Thread):
             else:
                 end = i + 1000
                 more = True
-
-            stream_data = pickle.dumps((col, more, streams[start:end]))
-        
-            header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
-                    len(stream_data))
-            try:
-                self.sock.send(header + stream_data)
-            except error, msg:
-                log("Error sending schemas to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+            
+            if self.export_streams_msg(col, more, streams[start:end]) == -1:
                 return -1
 
             i = end
