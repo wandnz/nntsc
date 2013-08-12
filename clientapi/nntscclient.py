@@ -32,7 +32,8 @@ class NNTSCClient:
         self.buf = ""
 
     def disconnect(self):
-        self.sock.close()
+        if self.sock != None:
+            self.sock.close()
         self.sock = None
 
     def send_request(self, reqtype, col, start=0):
