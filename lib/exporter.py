@@ -76,7 +76,7 @@ class NNTSCClient(threading.Thread):
             tosend.append(h)
             c += 1
 
-            if (c >= 100):
+            if (c >= 1000):
                 if h != hist[-1]:
                     more = True
                 else:
@@ -137,11 +137,11 @@ class NNTSCClient(threading.Thread):
         while (i < len(streams)):
 
             start = i
-            if len(streams) <= i + 100:
+            if len(streams) <= i + 1000:
                 end = len(streams)
                 more = False
             else:
-                end = i + 100
+                end = i + 1000
                 more = True
 
             stream_data = pickle.dumps((col, more, streams[start:end]))

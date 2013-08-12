@@ -22,7 +22,7 @@
 
 import sys
 
-nntsc_hdr_fmt = "!BBH"
+nntsc_hdr_fmt = "!BBL"
 nntsc_req_fmt = "!LLQ"
 
 NNTSC_REQ_COLLECTION = 0
