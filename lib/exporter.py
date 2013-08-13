@@ -219,14 +219,34 @@ class NNTSCClient(threading.Thread):
             end = None
 
         for s in streams:
-            agghist, freq = self.db.select_aggregated_data(name, [s], aggcols, 
+            agghist, freq = self.db.select_aggregated_data(name, [s], aggcols,
                     start, end, groupcols, binsize, fname)
             if self.send_history(s, name, agghist, freq, fname) == -1:
                 return -1
 
         return 0
 
-       
+    def percentile(self, pcntmsg):
+        tup = pickle.loads(pcntmsg)
+        name, start, end, streams, aggcols, groupcols, binsize, fname = tup
+        now = int(time.time())
+
+        if start == None:
+            return 0
+        if start > now:
+            return 0
+        if end == 0:
+            end = None
+
+        for s in streams:
+            agghist, freq = self.db.select_percentile_data(name, [s], aggcols,
+                    start, end, groupcols, binsize, fname)
+            if self.send_history(s, name, agghist, freq, fname) == -1:
+                return -1
+
+        return 0
+
+
     def client_message(self, msg):
 
         error = 0
@@ -243,6 +263,10 @@ class NNTSCClient(threading.Thread):
 
         if header[1] == NNTSC_AGGREGATE:
             if self.aggregate(body) == -1:
+                error = 1
+
+        if header[1] == NNTSC_PERCENTILE:
+            if self.percentile(body) == -1:
                 error = 1
 
         if header[1] == NNTSC_SUBSCRIBE:

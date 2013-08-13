@@ -37,5 +37,6 @@ NNTSC_SUBSCRIBE = 4
 NNTSC_HISTORY = 5
 NNTSC_LIVE = 6
 NNTSC_AGGREGATE = 7
+NNTSC_PERCENTILE = 8
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
