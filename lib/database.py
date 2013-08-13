@@ -864,7 +864,14 @@ class Database:
         query = select([
                 func.max(agg.c.recent).label("timestamp"),
                 agg.c.binstart,
-                func.array_agg(agg.c.rtt_avg).label("values"),
+                # array_agg() leaves NULLs in the array, so we now use
+                # string_agg() which appears to ignore trailing NULLs (the
+                # values are sorted, so they are at the end). It does take
+                # a small amount longer to convert to string and back to array,
+                # but it's probably still quicker than doing a tidy pass using
+                # the format_data() callback.
+                # TODO cast this back to floats before returning it
+                func.coalesce(func.string_to_array(func.string_agg(func.cast(agg.c.rtt_avg, String), ','), ','), []).label("values"),
                 func.avg(agg.c.loss_avg).label("loss")
                 ]).select_from(agg).group_by(agg.c.binstart)
 
