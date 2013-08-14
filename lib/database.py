@@ -788,4 +788,99 @@ class Database:
                 binsize, aggregator)
 
 
+    # The SQL generated here should end up looking something like this, fill
+    # in DATATABLE, BINSIZE, STREAM_ID as appropriate:
+    #
+    #   SELECT max(recent) AS timestamp,
+    #       binstart,
+    #       array_agg(rtt_avg) AS values,
+    #       avg(loss_avg) AS loss
+    #   FROM (
+    #       SELECT max(timestamp) AS recent,
+    #           binstart,
+    #           avg(rtt) AS rtt_avg,
+    #           avg(loss) AS loss_avg
+    #       FROM (
+    #           SELECT timestamp,
+    #               timestamp-timestamp%BINSIZE AS binstart,
+    #               rtt,
+    #               loss,
+    #               ntile(20) OVER (
+    #                   PARTITION BY timestamp-timestamp%BINSIZE
+    #                   ORDER BY rtt
+    #               )
+    #           FROM DATATABLE
+    #           WHERE stream_id=STREAM_ID
+    #           ORDER BY binstart
+    #       ) AS ntiles
+    #       GROUP BY binstart, ntile ORDER BY binstart, rtt_avg
+    #   ) AS agg
+    #   GROUP BY binstart"
+    #
+    # TODO ideally this should properly use the aggcols, groupcols and
+    # aggregator arguments to work with any data in the same manner that the
+    # other data fetching functions do. Shouldn't be too difficult, but a few
+    # assumptions are being made about which column is the one to get ntiles
+    # for and to array_agg at the top level.
+    def select_percentile_data(self, collection, stream_ids, aggcols,
+            start_time=None, stop_time=None, groupcols=None, binsize=0,
+            aggregator="avg"):
+
+        coll_t = self.metadata.tables['collections']
+        res = select([coll_t.c.datatable]).select_from(coll_t).where(coll_t.c.id == collection).execute()
+
+        assert(res.rowcount == 1)
+
+        datatable = res.fetchone()[0]
+        table = self.metadata.tables[datatable]
+
+        wherecl = self._where_clause(table, start_time, stop_time, stream_ids)
+        bts = label("binstart", table.c.timestamp - (table.c.timestamp % binsize))
+
+        # First, generate the ntiles column listing the ntile that each rtt
+        # measurement falls within.
+        ntiles = select([
+                    table.c.timestamp,
+                    bts,
+                    table.c.rtt,
+                    table.c.loss,
+                    func.ntile(20).over(partition_by=bts, order_by="rtt").label("ntile")
+                ]).where(wherecl).order_by(bts).alias("ntiles")
+
+        # Second, aggregate across each ntile to find the average values within
+        # each group. We should now have a timestamp for the start of each bin
+        # that a measurement falls in, the most recent timestamp from that bin
+        # that has been aggregated, and an average rtt/loss for every ntile
+        # within each bin.
+        agg = select([
+                    func.max(ntiles.c.timestamp).label("recent"),
+                    ntiles.c.binstart,
+                    func.avg(ntiles.c.rtt).label("rtt_avg"),
+                    func.avg(ntiles.c.loss).label("loss_avg")
+                ]).select_from(ntiles).group_by(ntiles.c.binstart, ntiles.c.ntile).order_by("binstart", "rtt_avg").alias("agg")
+
+        # Finally, collapse the multiple ntile measurements down into an array
+        # to give one row per bin, containing everything we are after.
+        query = select([
+                func.max(agg.c.recent).label("timestamp"),
+                agg.c.binstart,
+                # array_agg() leaves NULLs in the array, so we now use
+                # string_agg() which appears to ignore trailing NULLs (the
+                # values are sorted, so they are at the end). It does take
+                # a small amount longer to convert to string and back to array,
+                # but it's probably still quicker than doing a tidy pass using
+                # the format_data() callback.
+                # TODO cast this back to floats before returning it
+                func.coalesce(func.string_to_array(func.string_agg(func.cast(agg.c.rtt_avg, String), ','), ','), []).label("values"),
+                func.avg(agg.c.loss_avg).label("loss")
+                ]).select_from(agg).group_by(agg.c.binstart)
+
+        result = query.execute()
+
+        # query.c is a collection of the column objects, but needs to be a list
+        data, binsize = self._form_datadict(result, list(query.c), "binstart",
+                binsize)
+        result.close()
+        return data, binsize
+
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

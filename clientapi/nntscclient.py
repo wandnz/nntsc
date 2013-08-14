@@ -91,6 +91,24 @@ class NNTSCClient:
 
         return 0
 
+    def request_percentiles(self, col, streams, start, end, aggcolumns, binsize,
+            groupcolumns=[], aggfunc="avg"):
+
+        if self.sock == None:
+            print >> sys.stderr, "Cannot send NNTSC_PERCENTILE on a closed socket!"
+            return -1;
+        contents = pickle.dumps((col, start, end, streams, aggcolumns, groupcolumns,
+                binsize, aggfunc))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PERCENTILE, len(contents))
+
+        try:
+            self.sock.sendall(header + contents)
+        except error, msg:
+            print >> sys.stderr, "Error sending NNTSC_PERCENTILE for %s: %s" % (col, msg[1])
+            return -1
+
+        return 0
+
 
     def receive_message(self):
         if self.sock == None:

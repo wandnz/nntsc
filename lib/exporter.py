@@ -9,13 +9,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -32,7 +32,7 @@ from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.export import *
 from libnntsc.logger import *
-        
+
 class NNTSCClient(threading.Thread):
     def __init__(self, sock, parent, pipeend, dbconf):
         threading.Thread.__init__(self)
@@ -43,9 +43,9 @@ class NNTSCClient(threading.Thread):
         self.recvbuf = ""
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
-    
+
     def export_hist_block(self, name, streamid, block, more, freq,
-            aggname):        
+            aggname):
 
         contents = pickle.dumps((name, streamid, block, more, freq, aggname))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
@@ -61,7 +61,7 @@ class NNTSCClient(threading.Thread):
 
 
     def send_history(self, streamid, name, hist, freq, aggname):
-       
+
         tosend = []
         c = 0
 
@@ -72,7 +72,7 @@ class NNTSCClient(threading.Thread):
                     False, freq, aggname)
 
         for h in hist:
-            
+
             tosend.append(h)
             c += 1
 
@@ -82,7 +82,7 @@ class NNTSCClient(threading.Thread):
                 else:
                     more = False
 
-                if self.export_hist_block(name, streamid, tosend, 
+                if self.export_hist_block(name, streamid, tosend,
                             more, freq, aggname) == -1:
                     return -1
                 c = 0
@@ -92,7 +92,7 @@ class NNTSCClient(threading.Thread):
             return self.export_hist_block(name, streamid, tosend, False,
                     freq, aggname)
         return 0
-                    
+
     def send_collections(self, cols):
         col_pickle = pickle.dumps(cols)
         msglen = len(col_pickle)
@@ -107,7 +107,7 @@ class NNTSCClient(threading.Thread):
         return 0
 
     def send_schema(self, col_id):
-        
+
         stream_schema, data_schema = self.db.get_collection_schema(col_id)
 
         # We just want the column names
@@ -127,27 +127,27 @@ class NNTSCClient(threading.Thread):
 
     def export_streams_msg(self, col, more, streams):
         stream_data = pickle.dumps((col, more, streams))
-        
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
+
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS,
                 len(stream_data))
         try:
             self.sock.send(header + stream_data)
         except error, msg:
             log("Error sending schemas to client fd %d: %s" % (self.sock.fileno(), msg[1]))
             return -1
-        
+
         return 0
 
     def send_streams(self, col, startstream):
-     
-        #log("Sending streams to client for collection %d" % (col)) 
+
+        #log("Sending streams to client for collection %d" % (col))
         self.parent.register_collection(self.sock, col)
-       
+
         streams = self.db.select_streams_by_collection(col, startstream)
-      
+
         if len(streams) == 0:
             return self.export_streams_msg(col, False, [])
-             
+
         i = 0
         while (i < len(streams)):
 
@@ -158,13 +158,13 @@ class NNTSCClient(threading.Thread):
             else:
                 end = i + 1000
                 more = True
-            
+
             if self.export_streams_msg(col, more, streams[start:end]) == -1:
                 return -1
 
             i = end
         return 0
-    
+
     def subscribe(self, submsg):
         name, start, end, cols, streams = pickle.loads(submsg)
         now = int(time.time())
@@ -173,7 +173,7 @@ class NNTSCClient(threading.Thread):
             start = now
         if end == 0:
             end = None
-       
+
         for s in streams:
 
             # If live data is going to be required, add to the sub list
@@ -187,15 +187,15 @@ class NNTSCClient(threading.Thread):
                     return -1
         return 0
 
-    
+
     def process_request(self, reqmsg):
-        req_hdr = struct.unpack(nntsc_req_fmt, 
+        req_hdr = struct.unpack(nntsc_req_fmt,
                 reqmsg[0:struct.calcsize(nntsc_req_fmt)])
 
         if req_hdr[0] == NNTSC_REQ_COLLECTION:
             # Requesting the collection list
             cols = self.db.list_collections()
-            
+
             shrink = []
             for c in cols:
                 shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
@@ -213,7 +213,7 @@ class NNTSCClient(threading.Thread):
             return self.send_streams(col_id, start)
 
         return 0
-    
+
     def aggregate(self, aggmsg):
         tup = pickle.loads(aggmsg)
         name, start, end, streams, aggcols, groupcols, binsize, fname = tup
@@ -227,14 +227,34 @@ class NNTSCClient(threading.Thread):
             end = None
 
         for s in streams:
-            agghist, freq = self.db.select_aggregated_data(name, [s], aggcols, 
+            agghist, freq = self.db.select_aggregated_data(name, [s], aggcols,
                     start, end, groupcols, binsize, fname)
             if self.send_history(s, name, agghist, freq, fname) == -1:
                 return -1
 
         return 0
 
-       
+    def percentile(self, pcntmsg):
+        tup = pickle.loads(pcntmsg)
+        name, start, end, streams, aggcols, groupcols, binsize, fname = tup
+        now = int(time.time())
+
+        if start == None:
+            return 0
+        if start > now:
+            return 0
+        if end == 0:
+            end = None
+
+        for s in streams:
+            agghist, freq = self.db.select_percentile_data(name, [s], aggcols,
+                    start, end, groupcols, binsize, fname)
+            if self.send_history(s, name, agghist, freq, fname) == -1:
+                return -1
+
+        return 0
+
+
     def client_message(self, msg):
 
         error = 0
@@ -251,6 +271,10 @@ class NNTSCClient(threading.Thread):
 
         if header[1] == NNTSC_AGGREGATE:
             if self.aggregate(body) == -1:
+                error = 1
+
+        if header[1] == NNTSC_PERCENTILE:
+            if self.percentile(body) == -1:
                 error = 1
 
         if header[1] == NNTSC_SUBSCRIBE:
@@ -282,7 +306,7 @@ class NNTSCClient(threading.Thread):
 
             if halt or error == 1:
                 break
-       
+
         if error != 1:
             self.recvbuf = buf
         if error == 1:
@@ -310,7 +334,7 @@ class NNTSCClient(threading.Thread):
 
     def run(self):
         running = 1
-        
+
         while running:
             input = [self.sock, self.pipeend]
 
@@ -324,7 +348,7 @@ class NNTSCClient(threading.Thread):
                     if self.receive_live() == 0:
                         running = 0
                         break
-        
+
         #log("Closing client thread on fd %d" % self.sock.fileno())
         self.parent.deregister_client(self.sock)
         self.pipeend.close()
@@ -343,17 +367,17 @@ class NNTSCExporter:
         self.client_threads = {}
 
     def deregister_client(self, sock):
-        
+
         #log("Dropping client on fd %d" % (sock.fileno()))
         del self.client_sockets[sock]
         del self.client_threads[sock]
-        
+
     def drop_source(self, sock):
         log("Dropping source on fd %d" % (sock.fileno()))
 
         self.pwe.del_fd_event(sock)
         sock.close()
-                
+
     def filter_columns(self, cols, data, stream_id, ts):
 
         # Filter the data received from the NNTSC data parser to only
@@ -381,7 +405,7 @@ class NNTSCExporter:
                 self.collections[col].append(sock)
         else:
             self.collections[col] = [sock]
-      
+
     def export_new_stream(self, received, fd):
 
         try:
@@ -390,7 +414,7 @@ class NNTSCExporter:
             log("Incorrect data format from source %d" % (fd))
             log("Format should be (collection id, collection name, streamid, values dict)")
             return -1
-        
+
         if not isinstance(properties, dict):
             log("Values should expressed as a dictionary")
             return -1
@@ -402,14 +426,14 @@ class NNTSCExporter:
         properties['stream_id'] = stream_id
 
         ns_data = pickle.dumps((coll_id, False, [properties]))
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS, 
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS,
                 len(ns_data))
 
         active = []
         for sock in self.collections[coll_id]:
             if sock not in self.client_sockets:
                 continue
-    
+
             pipesend = self.client_sockets[sock]
             try:
                 pipesend.send(header + ns_data)
@@ -431,7 +455,7 @@ class NNTSCExporter:
             log("Format should be (name, streamid, timestamp, values dict)")
             self.drop_source(sock)
             return
-        
+
         if not isinstance(values, dict):
             log("Values should expressed as a dictionary")
             self.drop_source(sock)
@@ -449,11 +473,11 @@ class NNTSCExporter:
                 if end != None and timestamp > end:
                     results = {}
                 else:
-                    results = self.filter_columns(columns, values, stream_id, 
+                    results = self.filter_columns(columns, values, stream_id,
                             timestamp)
-                
+
                 contents = pickle.dumps((col, stream_id, results))
-                header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE, 
+                header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE,
                         len(contents))
 
                 if sock in self.client_sockets:
@@ -480,15 +504,15 @@ class NNTSCExporter:
             return
 
         msgtype, contents = obj
-        
+
         if msgtype == 0:
             ret = self.export_live_data(contents, sock.fileno())
         if msgtype == 1:
             ret = self.export_new_stream(contents, sock.fileno())
-       
-        return ret 
-        
-    
+
+        return ret
+
+
 
 
     def accept_connection(self, fd, evtype, sock, data):
@@ -514,11 +538,11 @@ class NNTSCExporter:
 
     def register_source(self, pipe):
         log("Registering source on fd %d" % (pipe.fileno()))
-        
-        self.pwe.add_fd_event(pipe, 1, "", self.receive_source)    
+
+        self.pwe.add_fd_event(pipe, 1, "", self.receive_source)
 
     def create_listener(self, port):
-        
+
         try:
             s = socket(AF_INET, SOCK_STREAM)
         except error, msg:
@@ -556,9 +580,9 @@ class NNTSCExporter:
             sys.exit(1)
 
         self.dbconf = dbconf
- 
+
         listen_sock = self.create_listener(self.listen_port)
-    
+
         if listen_sock == -1:
             return -1
 
@@ -568,7 +592,7 @@ class NNTSCExporter:
         self.pwe.run()
 
 if __name__ == '__main__':
-     
+
     opts, rest = getopt.getopt(sys.argv[1:],'p:h')
 
     for o,a in opts:
@@ -580,9 +604,9 @@ if __name__ == '__main__':
     exp = NNTSCExporter(listen_port)
     exp.configure(rest[0])
     exp.run()
-    
 
-    
 
-# vim: set sw=4 tabstop=4 softtabstop=4 expandtab :	
+
+
+# vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
