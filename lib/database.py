@@ -361,28 +361,28 @@ class Database:
 
         selected = []
 
-        sql = select([streams_t.c.id, coll_t.c.streamtable, streams_t.c.name]).select_from(coll_t.join(streams_t, streams_t.c.collection == coll_t.c.id)).where(coll_t.c.id == coll and streams_t.c.id > minid)
+        sql = coll_t.select().where(coll_t.c.id == coll)
+        result = sql.execute()
+
+        assert(result.rowcount == 1)
+        coldata = result.fetchone()
+
+        colstrtable = self.metadata.tables[coldata['streamtable']]
+
+        sql = select([colstrtable, streams_t]).select_from(colstrtable.join(streams_t, streams_t.c.id == colstrtable.c.stream_id)).where(colstrtable.c.stream_id > minid);
         result = sql.execute()
 
         for row in result:
-            s_id = row[0]
-            table = self.metadata.tables[row[1]]
-            name = row[2]
-
-            stream_data = table.select().where(table.c.stream_id == s_id).execute()
-
-            assert(stream_data.rowcount == 1)
-            stream = stream_data.fetchone()
-
             stream_dict = {}
-            for k,v in stream.items():
+            for k,v in row.items():
+                if k == "id":
+                    continue
                 stream_dict[k] = v
-            stream_data.close()
-            stream_dict['name'] = name
             selected.append(stream_dict)
         result.close()
-
         return selected
+
+
 
     def select_stream_by_id(self, stream_id):
         # find the mod table this id is in
