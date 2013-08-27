@@ -143,7 +143,7 @@ def data_stream_key(data, source):
     return (source, data["target"], sizestr)
 
 
-def insert_stream(db, exp, source, dest, size):
+def insert_stream(db, exp, source, dest, size, timestamp):
     """ Insert a new traceroute stream into the streams table """
 
     name = "traceroute %s:%s:%s" % (source, dest, size)
@@ -151,7 +151,8 @@ def insert_stream(db, exp, source, dest, size):
     props = {"name":name, "source":source, "destination":dest,
             "packet_size":size, "datastyle":"traceroute"}
 
-    colid, streamid = db.register_new_stream("amp", "traceroute", name)
+    colid, streamid = db.register_new_stream("amp", "traceroute", name, 
+            timestamp)
 
     if colid == -1:
         return -1
@@ -260,7 +261,8 @@ def process_data(db, exp, timestamp, data, source):
         if key in amp_trace_streams:
             stream_id = amp_trace_streams[key]
         else:
-            stream_id = insert_stream(db, exp, source, d["target"], sizestr)
+            stream_id = insert_stream(db, exp, source, d["target"], sizestr,
+                    timestamp)
 
             if stream_id == -1:
                 logger.log("AMPModule: Cannot create stream for:")

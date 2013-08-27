@@ -90,7 +90,7 @@ def find_stream(mon, user, dir, freq, proto, metric):
         return lpi_flows_streams[k]
     return -1
 
-def add_new_stream(db, exp, mon, user, dir, freq, proto, metric):
+def add_new_stream(db, exp, mon, user, dir, freq, proto, metric, ts):
     k = (mon, user, dir, freq, proto, metric)
 
     metstr = ""
@@ -108,7 +108,7 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, metric):
     namestr = "%s%s %s flows for user %s -- measured from %s every %s seconds" \
             % (metstr, proto, dirstr, user, mon, freq)
 
-    colid, streamid = db.register_new_stream("lpi", "flows", namestr)
+    colid, streamid = db.register_new_stream("lpi", "flows", namestr, ts)
 
     if colid == -1:
         return -1
@@ -173,7 +173,8 @@ def process_data(db, exp, protomap, data):
                 # Don't create a stream until we get a non-zero value
                 continue
 
-            stream_id = add_new_stream(db, exp, mon, user, dir, freq, protomap[p], metric)
+            stream_id = add_new_stream(db, exp, mon, user, dir, freq, 
+                    protomap[p], metric, data['ts'])
 
             if stream_id == -1:
                 logger.log("LPI Flows: Cannot create new stream")
