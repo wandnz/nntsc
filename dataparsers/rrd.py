@@ -121,8 +121,16 @@ class RRDModule:
                         
                         if current > r['lasttimestamp']:
                             r['lasttimestamp'] = current
-                        current += step
                     
+                        # RRD streams are created before we see any data so we
+                        # have to update firsttimestamp when we see the first
+                        # data point
+                        if (r['firsttimestamp'] == 0):
+                            r['firsttimestamp'] = current;
+                            self.db.set_firsttimestamp(r['stream_id'], current)
+    
+                        current += step
+                         
                     self.db.update_timestamp(r['stream_id'], r['lasttimestamp']) 
             self.db.commit_transaction()
 
