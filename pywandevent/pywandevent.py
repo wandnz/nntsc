@@ -38,6 +38,8 @@ class PyWandEvent:
         self.fd_events = {}
         self.timers = []
 
+        self.timerid = 0
+
         librt = ctypes.CDLL('librt.so.1', use_errno=True)
         self.clock_gettime = librt.clock_gettime
         self.clock_gettime.argtypes = [ctypes.c_int, ctypes.POINTER(TimeSpec)]
@@ -50,6 +52,48 @@ class PyWandEvent:
             errno_ = ctypes.get_errno()
             raise OSError(errno_, os.strerror(errno_))
         self.monotonic_time = t.tv_sec + t.tv_nsec * 1e-9
+
+    def add_timer_event(self, sec, usec, data, callback):
+        
+        self.get_monotonic_time()
+        now = self.monotonic_time
+        newtimer = {}
+        newtimer["expire"] = now + sec + (usec / 1000000.0)
+        newtimer["secs"] = sec
+        newtimer["usecs"] = usec
+        newtimer["data"] = data
+        newtimer["id"] = self.timerid
+        newtimer["callback"] = callback
+
+        self.timerid += 1
+
+        if len(self.timers) == 0: 
+            self.timers.append(newtimer)
+            return newtimer['id']
+
+        # XXX Be careful! The list is in REVERSE chronological order
+        ind = 0
+        inserted = False
+        
+        while (ind < len(self.timers)):
+            if newtimer['expire'] > self.timers[ind]['expire']:
+                self.timers.insert(ind, newtimer)
+                inserted = True
+                break
+            ind += 1
+
+        if not inserted:
+            self.timers.append(newtimer)
+
+        return newtimer['id']
+    
+    def del_timer_event(self, timerid):
+        
+        for t in self.timers:
+            if t['id'] == timerid:
+                self.timers.remove(t)
+                return t
+        return None
 
     def add_fd_event(self, sock, evtype, data, callback):
         fd = sock.fileno()
@@ -96,16 +140,14 @@ class PyWandEvent:
         while (self.running):
             self.get_monotonic_time()
 
-            while self.timers != [] and self.timers[0][0] < self.monotonic_time:
-                # TODO: Process all expired timers
-
-                pass
+            while self.timers != [] and self.timers[-1]['expire'] < self.monotonic_time:
+                t = self.timers[-1]
+                t['callback'](self, t)
+                self.timers.pop()
 
             if self.timers != []:
-                next_timer = self.timers[0]
-
-                # TODO: calculate select timeout based on next timer
-                delay = 0
+                next_timer = self.timers[-1]
+                delay = next_timer['expire'] - self.monotonic_time
             else:
                 delay = None
 
