@@ -710,7 +710,6 @@ class Database:
     def _group_select(self, selectcols, wherecl, groupcols, tscol, size):
         query = select(selectcols).where(wherecl).group_by(*groupcols).order_by(tscol)
         result = query.execute()
-
         data, binsize = self._form_datadict(result, selectcols, tscol, size)
         result.close()
         return data, binsize
@@ -722,18 +721,21 @@ class Database:
         return self._group_select(selectcols, wherecl, groupcols, bts, size)
 
 
-    def _select_unbinned(self, table, wherecl, selectors, groups,
-            aggregator):
-
+    def _select_unbinned(self, table, wherecl, selectors, groups, size, aggre):
         selectcols, groupcols = self._group_columns(table, selectors, groups,
-                aggregator)
+                aggre)
 
+        # TODO are min_timestamp and max_timestamp actually used anywhere?
+        # The other path through the select_binned function calls these
+        # columns "binstart" and "timestamp".
         mints = label("min_timestamp", func.min(table.c.timestamp))
         selectcols.append(mints)
         selectcols.append(label("max_timestamp", func.max(table.c.timestamp)))
+        # this extra timestamp column is the same as max_timestamp, but
+        # is expected by later functions to have the name "timestamp"
+        selectcols.append(label("timestamp", func.max(table.c.timestamp)))
 
-
-        return self._group_select(selectcols, wherecl, groupcols, mints)
+        return self._group_select(selectcols, wherecl, groupcols, mints, size)
 
 
 
@@ -780,9 +782,11 @@ class Database:
         elif 'stream_id' not in groupcols:
             groupcols.append('stream_id')
 
-        if binsize == 0:
+        # if binsize is not set, or if it is set to the same as the duration
+        # then fetch unbinned data
+        if binsize == 0 or binsize == (stop_time - start_time):
             return self._select_unbinned(table, wherecl, aggcols, groupcols,
-                    aggregator)
+                    binsize, aggregator)
 
         return self._select_binned(table, wherecl, aggcols, groupcols,
                 binsize, aggregator)
