@@ -98,7 +98,7 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
     props = {"name":name, "filename":fname, "source":source, "host":host,
             "minres":minres, "highrows":rows}
 
-    colid, streamid = db.register_new_stream("rrd", "smokeping", name)
+    colid, streamid = db.register_new_stream("rrd", "smokeping", name, 0)
 
     if colid == -1:
         return -1

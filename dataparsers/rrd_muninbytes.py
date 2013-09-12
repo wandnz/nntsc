@@ -82,7 +82,7 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
-    colid, streamid = db.register_new_stream("rrd", "muninbytes", name)
+    colid, streamid = db.register_new_stream("rrd", "muninbytes", name, 0)
 
     if colid == -1:
         return -1
