@@ -95,14 +95,14 @@ message broker"""
 
     return (source, data["target"], sizestr)
 
-def insert_stream(db, exp, source, dest, size):
+def insert_stream(db, exp, source, dest, size, timestamp):
 
     name = "icmp %s:%s:%s" % (source, dest, size)
 
     props = {"name":name, "source":source, "destination":dest,
             "packet_size":size, "datastyle":"rtt_ms"}
 
-    colid, streamid = db.register_new_stream("amp", "icmp", name)
+    colid, streamid = db.register_new_stream("amp", "icmp", name, timestamp)
 
     if colid == -1:
         return -1
@@ -158,7 +158,8 @@ def process_data(db, exp, timestamp, data, source):
         if key in amp_icmp_streams:
             stream_id = amp_icmp_streams[key]
         else:
-            stream_id = insert_stream(db, exp, source, d["target"], sizestr)
+            stream_id = insert_stream(db, exp, source, d["target"], sizestr, 
+                    timestamp)
 
             if stream_id == -1:
                 logger.log("AMPModule: Cannot create stream for:")

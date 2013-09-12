@@ -158,6 +158,7 @@ class Database:
                         nullable=False),
                 Column('name', String, nullable=False, unique=True),
                 Column('lasttimestamp', Integer, nullable=False),
+                Column('firsttimestamp', Integer, nullable=True),
             )
 
             streams.create()
@@ -189,7 +190,7 @@ class Database:
 
         self.commit_transaction()
 
-    def register_new_stream(self, mod, subtype, name):
+    def register_new_stream(self, mod, subtype, name, ts):
 
         # Find the appropriate collection id
         coltable = self.metadata.tables['collections']
@@ -215,7 +216,7 @@ class Database:
 
         try:
             result = self.conn.execute(sttable.insert(), collection=col_id,
-                    name=name, lasttimestamp=0)
+                    name=name, lasttimestamp=0, firsttimestamp=ts)
         except IntegrityError, e:
             log("Failed to register stream %s for %s:%s, probably already exists" % (name, mod, subtype))
             #print >> sys.stderr, e
@@ -422,6 +423,15 @@ class Database:
                 lasttimestamp=lasttimestamp))
         result.close()
         self.pending += 1
+
+    def set_firsttimestamp(self, stream_id, ts):
+        table = self.metadata.tables['streams']
+        result = self.conn.execute(table.update().where( \
+                table.c.id==stream_id).values( \
+                firsttimestamp=ts))
+        result.close()
+        self.pending += 1
+
 
     def _get_aggregator(self, agg):
         if agg == "max":
