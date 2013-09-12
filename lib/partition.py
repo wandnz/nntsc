@@ -7,13 +7,14 @@ from sqlalchemy.sql import text
 import libnntsc.logger as logger
 
 class PartitionedTable:
-    def __init__(self, db, basetable, freq, indexcols):
+    def __init__(self, db, basetable, freq, indexcols, partcol="timestamp"):
         self.base = basetable
         self.db = db
         self.freq = freq
         self.currentstart = None
         self.currentend = None
         self.lastend = 0
+        self.partitioncolumn = partcol
         self.indexcols = indexcols
         self.triggername = self.base + "_trigger"
         self.existing = []
@@ -38,21 +39,23 @@ class PartitionedTable:
                 self.lastend = end
 
 
-    def _create_table(self, ts):
+    def _create_table(self, partvalue):
         
-        start = ts / int(self.freq) * int(self.freq)
+        start = partvalue / int(self.freq) * int(self.freq)
         self.currentstart = start
         self.currentend = start + self.freq
         name = "part__" + self.base + "__" + str(start) + "__" + str(self.currentend)
+        indexname = "idx_" + self.base + "_" + str(start)
 
         logger.log("Creating new table partition: %s" % name)
             
-        self.db.conn.execute("""CREATE TABLE %s ( CHECK (timestamp >= %d AND                    timestamp < %d ) ) INHERITS (%s);""" % 
-                (name, self.currentstart, self.currentend, self.base))
+        self.db.conn.execute("""CREATE TABLE %s ( CHECK (%s >= %d AND                    %s < %d ) ) INHERITS (%s);""" % 
+                (name, self.partitioncolumn, self.currentstart, \
+                self.partitioncolumn, self.currentend, self.base))
    
         for col in self.indexcols:
-            self.db.conn.execute("CREATE INDEX index_%s_%s ON %s (%s);" %
-                (name, col, name, col))
+            self.db.conn.execute("CREATE INDEX %s_%s ON %s (%s);" %
+                (indexname, col, name, col))
 
         self.existing.append({'start':start, 'end':self.currentend, 'name':name})
         if self.currentend > self.lastend:
@@ -60,10 +63,10 @@ class PartitionedTable:
 
         return name
 
-    def update(self, ts):
+    def update(self, partvalue):
         
         if self.currentstart != None and self.currentend != None:
-            if ts >= self.currentstart and ts < self.currentend:
+            if partvalue >= self.currentstart and partvalue < self.currentend:
                 return
 
         # Current table partition is not suitable, see if a suitable partition
@@ -86,18 +89,18 @@ class PartitionedTable:
 
         name = None
 
-        if ts < self.lastend:
+        if partvalue < self.lastend:
             # Timestamp is before the end of our most recent partition, so
             # look for an existing partition that suits this data
             for p in self.existing:
-                if ts >= p['start'] and ts < p['end']:
+                if partvalue >= p['start'] and partvalue < p['end']:
                     name = p['name']
                     self.currentstart = p['start']
                     self.currentend = p['end']
                     break
 
         if name == None:
-            name = self._create_table(ts)
+            name = self._create_table(partvalue)
 
         #   self._create_table(name)
         logger.log("Switching to table partition: %s" % name)
@@ -105,13 +108,15 @@ class PartitionedTable:
         # Update our trigger that ensures we insert into the right partition
         trigfunc = text("""CREATE OR REPLACE FUNCTION %s()
                 RETURNS TRIGGER AS $$
+                DECLARE
+                    r %s%%rowtype;
                 BEGIN
-                    INSERT INTO %s VALUES (NEW.*);
-                    RETURN NULL;
+                    INSERT INTO %s VALUES (NEW.*) RETURNING * INTO r;
+                    RETURN r;
                 END;
                 $$
                 LANGUAGE plpgsql;
-                """ % (self.base + "_trigfunc", name))
+                """ % (self.base + "_trigfunc", self.base, name))
         self.db.conn.execute(trigfunc)
 
         # Create the trigger if it doesn't exist
