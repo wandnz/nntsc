@@ -133,21 +133,23 @@ class AmpModule:
         """ Process a single message from the queue.
             Depending on the test this message may include multiple results.
         """
-        test = properties.headers["x-amp-test-type"]
-        if test in self.amp_modules:
-            data = self.amp_modules[test].get_data(body)
-            source = properties.headers["x-amp-source-monitor"]
-            if test == "icmp":
-                amp_icmp.process_data(self.db, self.exporter,
-                        properties.timestamp, data, source)
-            elif test == "traceroute":
-                amp_traceroute.process_data(self.db, self.exporter,
-                        properties.timestamp, data, source)
-        else:
-            logger.log("unknown test: '%s'" % (
-                    properties.headers["x-amp-test-type"]))
-        # TODO check if it all worked, don't ack if it fails
-        self.db.commit_transaction()
+        # ignore any messages that don't have user_id set
+        if hasattr(properties, "user_id"):
+            test = properties.headers["x-amp-test-type"]
+            if test in self.amp_modules:
+                data = self.amp_modules[test].get_data(body)
+                source = properties.user_id
+                if test == "icmp":
+                    amp_icmp.process_data(self.db, self.exporter,
+                            properties.timestamp, data, source)
+                elif test == "traceroute":
+                    amp_traceroute.process_data(self.db, self.exporter,
+                            properties.timestamp, data, source)
+            else:
+                logger.log("unknown test: '%s'" % (
+                        properties.headers["x-amp-test-type"]))
+            # TODO check if it all worked, don't ack if it fails
+            self.db.commit_transaction()
         channel.basic_ack(delivery_tag = method.delivery_tag)
 
     def run(self):
