@@ -21,12 +21,13 @@
 
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index
+    String, MetaData, ForeignKey, UniqueConstraint, Index, Sequence
+from sqlalchemy.sql import text
 from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.expression import select, join, outerjoin, func, label
-
+from libnntsc.partition import PartitionedTable
 import libnntsc.logger as logger
 
 STREAM_TABLE_NAME="streams_amp_traceroute"
@@ -34,6 +35,8 @@ DATA_VIEW_NAME="data_amp_traceroute"
 HOP_TABLE_NAME="internal_amp_traceroute_hop"
 
 amp_trace_streams = {}
+test_partitions = None
+path_partitions = None
 
 def stream_table(db):
 
@@ -72,9 +75,6 @@ def data_tables(db):
         extend_existing=True,
     )
 
-    Index('index_amp_traceroute_stream', testtable.c.stream_id)
-    Index('index_amp_traceroute_timestamp', testtable.c.timestamp)
-
     hoptable = Table("internal_amp_traceroute_hop", db.metadata,
         Column('hop_id', Integer, primary_key=True),
         Column('hop_address', postgresql.INET, nullable=False),
@@ -95,8 +95,6 @@ def data_tables(db):
         Column('hop_rtt', Integer, nullable=True),
         extend_existing=True,
     )
-
-    Index('index_amp_traceroute_path_test_id', pathtable.c.test_id)
 
     # This view is kinda tricky
     fullhops = select([pathtable.c.test_id, pathtable.c.path_ttl,
@@ -197,20 +195,59 @@ def get_or_create_hop_id(db, address):
 
 def insert_data(db, exp, stream, ts, test_info, hop_info):
     """ Insert data for a single traceroute test into the database """
+    global test_partitions, path_partitions
 
     # information linking a test run together with the hops visited
     path_table = db.metadata.tables["internal_amp_traceroute_path"]
 
     # insert test information for this particular test run
     dt = db.metadata.tables["internal_amp_traceroute_test"]
+    
+    if test_partitions == None:
+        test_partitions = PartitionedTable(db, "internal_amp_traceroute_test", 
+                60 * 60 * 24 * 7, ["timestamp", "stream_id", "traceroute_test_id"])
+    test_partitions.update(ts)
+    db.commit_transaction()
+   
     try:
-        test = db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,
-                **test_info)
-        test_id = test.inserted_primary_key[0]
+        query = dt.insert().values(stream_id=stream, timestamp=ts, **test_info)
+        db.conn.execute(query)
+        
+        # This is a terrible way of getting the new test id, but we can't
+        # just rely on RETURNING it from the previous insert because table
+        # partitioning doesn't really allow it.
+        #
+        # To clarify, it is possible to return the inserted row from our
+        # "before insert" trigger function that inserts the data into the 
+        # right partition. However, returning NULL is required to prevent the
+        # row from also being inserted into the parent table. Some solutions
+        # propose setting up a second trigger to remove the duplicate row
+        # from the parent table but this doesn't work so well if you have a
+        # ON DELETE CASCADE clause as it will purge everything that refers to
+        # the new test.
+        #
+        # In short, inserting into table partitions sucks in postgresql.
+        query = text("""SELECT max(traceroute_test_id) FROM 
+                internal_amp_traceroute_test WHERE stream_id=%s AND
+                "timestamp"=%s AND address='%s' AND length=%s AND
+                error_type=%s AND error_code=%s AND packet_size=%s;""" 
+                % (stream, ts, test_info['address'], test_info['length'],
+                test_info['error_type'], test_info['error_code'], 
+                test_info['packet_size']))
+        result = db.conn.execute(query)
+
+        assert(result.rowcount == 1);
+        row = result.fetchone()
+        test_id = row[0]
     except IntegrityError, e:
         db.rollback_transaction()
         logger.log(e)
         return -1
+
+    if path_partitions == None:
+        path_partitions = PartitionedTable(db, "internal_amp_traceroute_path",
+                100000, ["test_id"], "test_id")
+    path_partitions.update(test_id)
 
     # insert each hop along the path
     ttl = 1
@@ -273,8 +310,8 @@ def process_data(db, exp, timestamp, data, source):
                 amp_trace_streams[key] = stream_id
 
         test_data = {
-            "source": source,
-            "target": d["target"],
+            #"source": source,
+            #"target": d["target"],
             "address": d["address"],
             "length": d["length"],
             "error_type": d["error_type"],
