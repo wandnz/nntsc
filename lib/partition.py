@@ -112,12 +112,13 @@ class PartitionedTable:
                     r %s%%rowtype;
                 BEGIN
                     INSERT INTO %s VALUES (NEW.*) RETURNING * INTO r;
-                    RETURN r;
+                    RETURN NULL;
                 END;
                 $$
                 LANGUAGE plpgsql;
                 """ % (self.base + "_trigfunc", self.base, name))
         self.db.conn.execute(trigfunc)
+
 
         # Create the trigger if it doesn't exist
         # XXX I really don't like this whole "drop and re-create" thing but
@@ -130,7 +131,6 @@ class PartitionedTable:
                 (self.triggername, self.base, self.base + "_trigfunc"))
         self.db.conn.execute(trigger)
         
-
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -73,7 +73,8 @@ class Database:
 
         self.init_error = False
         self.dbname = dbname
-        self.engine = create_engine(connect_string, echo=debug)
+        self.engine = create_engine(connect_string, echo=debug, 
+                implicit_returning = False)
 
         self.__reflect_db()
 

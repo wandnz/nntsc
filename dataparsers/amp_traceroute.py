@@ -21,7 +21,8 @@
 
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index
+    String, MetaData, ForeignKey, UniqueConstraint, Index, Sequence
+from sqlalchemy.sql import text
 from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
@@ -210,8 +211,34 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
    
     try:
         query = dt.insert().values(stream_id=stream, timestamp=ts, **test_info)
-        test = db.conn.execute(query)
-        test_id = test.inserted_primary_key[0]
+        db.conn.execute(query)
+        
+        # This is a terrible way of getting the new test id, but we can't
+        # just rely on RETURNING it from the previous insert because table
+        # partitioning doesn't really allow it.
+        #
+        # To clarify, it is possible to return the inserted row from our
+        # "before insert" trigger function that inserts the data into the 
+        # right partition. However, returning NULL is required to prevent the
+        # row from also being inserted into the parent table. Some solutions
+        # propose setting up a second trigger to remove the duplicate row
+        # from the parent table but this doesn't work so well if you have a
+        # ON DELETE CASCADE clause as it will purge everything that refers to
+        # the new test.
+        #
+        # In short, inserting into table partitions sucks in postgresql.
+        query = text("""SELECT max(traceroute_test_id) FROM 
+                internal_amp_traceroute_test WHERE stream_id=%s AND
+                "timestamp"=%s AND address='%s' AND length=%s AND
+                error_type=%s AND error_code=%s AND packet_size=%s;""" 
+                % (stream, ts, test_info['address'], test_info['length'],
+                test_info['error_type'], test_info['error_code'], 
+                test_info['packet_size']))
+        result = db.conn.execute(query)
+
+        assert(result.rowcount == 1);
+        row = result.fetchone()
+        test_id = row[0]
     except IntegrityError, e:
         db.rollback_transaction()
         logger.log(e)
