@@ -35,6 +35,7 @@ DATA_TABLE_NAME="data_amp_icmp"
 
 amp_icmp_streams = {}
 partitions = None
+amp_icmp_sources = {}
 
 def stream_table(db):
     """ Specify the description of an icmp stream, used to create the table """
@@ -47,9 +48,10 @@ def stream_table(db):
                 primary_key=True),
         Column('source', String, nullable=False),
         Column('destination', String, nullable=False),
+        Column('address', postgresql.INET, nullable=False),
         Column('packet_size', String, nullable=False),
         Column('datastyle', String, nullable=False),
-        UniqueConstraint('destination', 'source', 'packet_size'),
+        UniqueConstraint('destination', 'source', 'packet_size', 'address'),
         useexisting=True,
     )
 
@@ -68,7 +70,6 @@ def data_table(db):
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
-        Column('address', postgresql.INET, nullable=False),
         Column('packet_size', Integer, nullable=False),
         Column('rtt', Integer, nullable=True),
         Column('ttl', Integer, nullable=True),
@@ -84,10 +85,19 @@ def create_existing_stream(stream_data):
     """Extract the stream key from the stream data provided by NNTSC
 when the AMP module is first instantiated"""
 
-    key = (str(stream_data["source"]), str(stream_data["destination"]),
-        str(stream_data["packet_size"]))
+    src = str(stream_data["source"])
+    dest = str(stream_data["destination"])
+    addr = str(stream_data["address"])
+    size = str(stream_data["packet_size"])
+    streamid = stream_data["stream_id"]
 
-    amp_icmp_streams[key] = stream_data["stream_id"]
+    key = (src, dest, addr, size)
+
+    amp_icmp_streams[key] = streamid
+    if amp_icmp_sources.has_key(src):
+        amp_icmp_sources[src][streamid] = 0
+    else:
+        amp_icmp_sources[src] = {streamid: 0}
 
 def data_stream_key(data, source):
     """Extract the stream key from the data received from the AMP
@@ -95,12 +105,12 @@ message broker"""
 
     return (source, data["target"], sizestr)
 
-def insert_stream(db, exp, source, dest, size, timestamp):
+def insert_stream(db, exp, source, dest, size, address, timestamp):
 
-    name = "icmp %s:%s:%s" % (source, dest, size)
+    name = "icmp %s:%s:%s:%s" % (source, dest, address, size)
 
     props = {"name":name, "source":source, "destination":dest,
-            "packet_size":size, "datastyle":"rtt_ms"}
+            "packet_size":size, "datastyle":"rtt_ms", "address":address}
 
     colid, streamid = db.register_new_stream("amp", "icmp", name, timestamp)
 
@@ -113,7 +123,7 @@ def insert_stream(db, exp, source, dest, size, timestamp):
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid,
                 source=source, destination=dest, packet_size=size,
-                datastyle="rtt_ms")
+                address=address, datastyle="rtt_ms")
     except IntegrityError, e:
         db.rollback_transaction()
         logger.log(e)
@@ -146,6 +156,16 @@ def insert_data(db, exp, stream, ts, result):
 
 def process_data(db, exp, timestamp, data, source):
 
+    missing = {}
+
+    if source in amp_icmp_sources:
+        for k in amp_icmp_sources[source].keys():
+            # If we've not seen a test result for a large number of 
+            # consecutive measurements, stop inserting nulls until we
+            # see something valid for the stream again
+            if amp_icmp_sources[source][k] < 100:
+                missing[k] = 0
+
     for d in data:
         if d["random"]:
             sizestr = "random"
@@ -153,24 +173,49 @@ def process_data(db, exp, timestamp, data, source):
             sizestr = str(d["packet_size"])
 
         d["source"] = source
-        key = (source, d["target"], sizestr)
+        key = (source, d["target"], d["address"], sizestr)
 
         if key in amp_icmp_streams:
             stream_id = amp_icmp_streams[key]
+
+            assert(stream_id in missing)
+            del missing[stream_id]
+            amp_icmp_sources[source][stream_id] = 0
         else:
             stream_id = insert_stream(db, exp, source, d["target"], sizestr, 
-                    timestamp)
+                    d["address"], timestamp)
 
             if stream_id == -1:
                 logger.log("AMPModule: Cannot create stream for:")
-                logger.log("AMPModule: %s %s:%s:%s\n" % (
-                        "icmp", source, d["target"], sizestr))
+                logger.log("AMPModule: %s %s:%s:%s:%s\n" % (
+                        "icmp", source, d["target"], d["address"], sizestr))
                 return -1
             else:
                 amp_icmp_streams[key] = stream_id
+                
+                if amp_icmp_sources.has_key(source):
+                    amp_icmp_sources[source][stream_id] = 0
+                else:
+                    amp_icmp_sources[source] = {stream_id: 0}
 
         insert_data(db, exp, stream_id, timestamp, d)
         db.update_timestamp(stream_id, timestamp)
+
+    return 0    
+
+    # XXX Not sure if we actually need to insert nulls for streams we only
+    # get results for periodically. Leave this code here in case we do
+    # end up needing it, but don't actually run it until we are sure that
+    # the missing data values are causing us problems.
+
+    nulldata = {'packet_size':0, 'loss':0, 'error_type':0, 'error_code':0}
+    # Insert "null" data values for any streams that we didn't test this
+    # time around
+    for k in missing.keys:
+        insert_data(db, exp, k, timestamp, nulldata)
+        db.update_timestamp(k, timestamp)
+        # Increment the consecutive null count
+        amp_icmp_sources[source][k] += 1
 
 def register(db):
     st_name = stream_table(db)
