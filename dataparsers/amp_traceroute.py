@@ -49,7 +49,8 @@ def stream_table(db):
         Column('source', String, nullable=False),
         Column('destination', String, nullable=False),
         Column('packet_size', String, nullable=False),
-        UniqueConstraint('source', 'destination', 'packet_size'),
+        Column('address', postgresql.INET, nullable=False),
+        UniqueConstraint('source', 'destination', 'packet_size', 'address'),
         extend_existing=True,
     )
 
@@ -67,7 +68,6 @@ def data_tables(db):
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
         Column('traceroute_test_id', Integer, primary_key=True),
-        Column('address', postgresql.INET, nullable=False),
         Column('length', Integer, nullable=False),
         Column('error_type', Integer, nullable=False),
         Column('error_code', Integer, nullable=False),
@@ -104,7 +104,6 @@ def data_tables(db):
 
     viewquery = select([testtable.c.stream_id, testtable.c.timestamp,
             testtable.c.traceroute_test_id,
-            testtable.c.address.label("target_address"),
             testtable.c.length, testtable.c.error_type,
             testtable.c.error_code, testtable.c.packet_size,
             fh.c.path_ttl,
@@ -128,7 +127,7 @@ def create_existing_stream(stream_data):
     """
 
     key = (str(stream_data["source"]), str(stream_data["destination"]),
-        str(stream_data["packet_size"]))
+        str(stream_data["address"]), str(stream_data["packet_size"]))
 
     amp_trace_streams[key] = stream_data["stream_id"]
 
@@ -141,13 +140,14 @@ def data_stream_key(data, source):
     return (source, data["target"], sizestr)
 
 
-def insert_stream(db, exp, source, dest, size, timestamp):
+def insert_stream(db, exp, source, dest, size, address, timestamp):
     """ Insert a new traceroute stream into the streams table """
 
-    name = "traceroute %s:%s:%s" % (source, dest, size)
+    name = "traceroute %s:%s:%s:%s" % (source, dest, address, size)
 
     props = {"name":name, "source":source, "destination":dest,
-            "packet_size":size, "datastyle":"traceroute"}
+            "packet_size":size, "datastyle":"traceroute",
+            "address": address}
 
     colid, streamid = db.register_new_stream("amp", "traceroute", name, 
             timestamp)
@@ -161,7 +161,7 @@ def insert_stream(db, exp, source, dest, size, timestamp):
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid,
                 source=source, destination=dest, packet_size=size,
-                datastyle="traceroute")
+                address=address, datastyle="traceroute")
     except IntegrityError, e:
         db.rollback_transaction()
         logger.log(e)
@@ -229,9 +229,9 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
         # In short, inserting into table partitions sucks in postgresql.
         query = text("""SELECT max(traceroute_test_id) FROM 
                 internal_amp_traceroute_test WHERE stream_id=%s AND
-                "timestamp"=%s AND address='%s' AND length=%s AND
+                "timestamp"=%s AND length=%s AND
                 error_type=%s AND error_code=%s AND packet_size=%s;""" 
-                % (stream, ts, test_info['address'], test_info['length'],
+                % (stream, ts, test_info['length'],
                 test_info['error_type'], test_info['error_code'], 
                 test_info['packet_size']))
         result = db.conn.execute(query)
@@ -293,18 +293,19 @@ def process_data(db, exp, timestamp, data, source):
             sizestr = str(d["packet_size"])
 
         d["source"] = source
-        key = (source, d["target"], sizestr)
+        key = (source, d["target"], d['address'], sizestr)
 
         if key in amp_trace_streams:
             stream_id = amp_trace_streams[key]
         else:
             stream_id = insert_stream(db, exp, source, d["target"], sizestr,
-                    timestamp)
+                    d['address'], timestamp)
 
             if stream_id == -1:
                 logger.log("AMPModule: Cannot create stream for:")
-                logger.log("AMPModule: %s %s:%s:%s\n" % (
-                        "traceroute", source, d["target"], sizestr))
+                logger.log("AMPModule: %s %s:%s:%s:%s\n" % (
+                        "traceroute", source, d["target"], d["address"], 
+                        sizestr))
                 return -1
             else:
                 amp_trace_streams[key] = stream_id
@@ -312,7 +313,6 @@ def process_data(db, exp, timestamp, data, source):
         test_data = {
             #"source": source,
             #"target": d["target"],
-            "address": d["address"],
             "length": d["length"],
             "error_type": d["error_type"],
             "error_code": d["error_code"],
