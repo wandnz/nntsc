@@ -157,12 +157,14 @@ def insert_data(db, exp, stream, ts, result):
 def process_data(db, exp, timestamp, data, source):
 
     missing = {}
-    for k in amp_icmp_sources[source].keys():
-        # If we've not seen a test result for a large number of 
-        # consecutive measurements, stop inserting nulls until we
-        # see something valid for the stream again
-        if amp_icmp_sources[source][k] < 100:
-            missing[k] = 0
+
+    if source in amp_icmp_sources:
+        for k in amp_icmp_sources[source].keys():
+            # If we've not seen a test result for a large number of 
+            # consecutive measurements, stop inserting nulls until we
+            # see something valid for the stream again
+            if amp_icmp_sources[source][k] < 100:
+                missing[k] = 0
 
     for d in data:
         if d["random"]:
