@@ -657,7 +657,7 @@ class Database:
             if lastts == 0:
                 lastts = r['timestamp']
                 lastbin = r[tscol]
-            else:
+            elif lastts != r['timestamp']:
                 tsdiff = r['timestamp'] - lastts
                 bindiff = r[tscol] - lastbin
 
