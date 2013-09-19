@@ -50,7 +50,6 @@ class NNTSCClient(threading.Thread):
         contents = pickle.dumps((name, streamid, block, more, freq, aggname))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
-
         try:
             self.sock.send(header + contents)
         except error, msg:
