@@ -681,7 +681,7 @@ class Database:
                 foo[selectcols[i].name] = r[i]
             data.append(foo)
 
-        if len(data) <= 1:
+        if len(data) <= 1 or total_diffs == 0:
             if size < 300:
                 binsize = 300
             else:

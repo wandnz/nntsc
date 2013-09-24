@@ -485,7 +485,7 @@ class NNTSCExporter:
                     try:
                         pipesend.send(header + contents)
                     except IOError, msg:
-                        log("Error sending live data to pipe for client %d: %s" % (sock.fileno(), msg[1]))
+                        log("Error sending live data to pipe for client: %s" % (msg[1]))
                         self.deregister_client(sock)
                     else:
                         if results != {}:
