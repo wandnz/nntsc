@@ -29,8 +29,8 @@ from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
 from libnntsc.exporter import NNTSCExporter
-from libnntsc.pidfile import PidFile
-import libnntsc.logger as logger
+from libnntscclient.pidfile import PidFile
+import libnntscclient.logger as logger
 import daemon, lockfile, signal
 
 

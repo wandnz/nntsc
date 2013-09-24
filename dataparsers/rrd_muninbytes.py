@@ -24,7 +24,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
 	String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 from libnntsc.partition import PartitionedTable
 
 STREAM_TABLE_NAME="streams_rrd_muninbytes"

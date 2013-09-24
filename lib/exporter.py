@@ -30,8 +30,8 @@ import threading, select
 
 from libnntsc.database import Database
 from libnntsc.configurator import *
-from libnntsc.export import *
-from libnntsc.logger import *
+from libnntscclient.protocol import *
+from libnntscclient.logger import *
 
 class NNTSCClient(threading.Thread):
     def __init__(self, sock, parent, pipeend, dbconf):

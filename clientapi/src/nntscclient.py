@@ -24,7 +24,7 @@
 
 import sys,getopt,struct,pickle,time
 from socket import *
-from libnntsc.export import *
+from libnntscclient.protocol import *
 
 class NNTSCClient:
     def __init__(self, sock):

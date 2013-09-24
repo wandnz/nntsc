@@ -26,7 +26,7 @@ from sqlalchemy.types import Integer, String, Float
 from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 import sys, rrdtool, socket, time
 
 class RRDModule:
