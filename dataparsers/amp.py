@@ -30,7 +30,7 @@ from libnntsc.parsers import amp_icmp, amp_traceroute, amp_http2, amp_udpstream
 import time
 import logging
 
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, exp):

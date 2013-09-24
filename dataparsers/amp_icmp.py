@@ -26,7 +26,7 @@ from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 from libnntsc.partition import PartitionedTable
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 
 import sys, string
 

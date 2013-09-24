@@ -10,27 +10,25 @@ except ImportError:
         from distutils.core import setup
 
 requires = [ \
-        'sqlalchemy>=0.8', 'python-rrdtool', 'psycopg2', 'pika', 'python-daemon' \
+        'sqlalchemy>=0.8', 'python-rrdtool', 'psycopg2', 'pika', 'python-daemon', \
+	'libnntsc-client', 'pywandevent' \
 ]
 
 if sys.version_info < (2, 7):
         requires.append('argparse')
 
 setup(name="nntsc",
-	version="2.2",
+	version="2.3",
 	description='Nathan\'s Network Time Series Collector',
         author='Nathan Overall, Shane Alcock',
         author_email='contact@wand.net.nz',
         url='http://www.wand.net.nz',
 	scripts=['build_nntsc_db', 'nntsc'],
-	packages=['libnntsc', 'libnntsc.parsers', 'pywandevent', \
-		'libnntsc.client'],
+	packages=['libnntsc', 'libnntsc.parsers'],
 	install_requires = requires,
 	package_dir = { \
 		'libnntsc':'lib', \
 		'libnntsc.parsers':'dataparsers', \
-		'pywandevent':'pywandevent',
-		'libnntsc.client':'clientapi'
 	},
 	include_package_data=True,
 	package_data = {

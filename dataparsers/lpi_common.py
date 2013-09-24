@@ -22,7 +22,7 @@
 
 import sys, struct
 from socket import *
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 
 lpicp_header_fmt = "!BBHHH"
 lpicp_stats_fmt = "!LLLBBHHH"

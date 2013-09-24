@@ -142,7 +142,7 @@ class PyWandEvent:
 
             while self.timers != [] and self.timers[-1]['expire'] < self.monotonic_time:
                 t = self.timers[-1]
-                t['callback'](self, t)
+                t['callback'](self, t['data'])
                 self.timers.pop()
 
             if self.timers != []:
@@ -159,7 +159,7 @@ class PyWandEvent:
                     else:
                         active = select.select(self.read_fds, self.write_fds, 
                             self.ex_fds, delay)
-                except select.error, e:
+                except select.error as e:
                     if e[0] == errno.EINTR:
                         continue
                     else:

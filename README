@@ -1,4 +1,4 @@
-NNTSC 2.1
+NNTSC 2.3
 
 ---------------------------------------------------------------------------
 Copyright (c) 2013 The University of Waikato, Hamilton, New Zealand.
@@ -41,22 +41,22 @@ Installation from Source
 ========================
 NNTSC uses Python setuptools to install both itself and its dependencies.
 
-Simply run the following to install NNTSC:
+In version 2.3 there has been a significant change to the installation
+process -- some of the NNTSC dependencies are now distributed and installed
+separately, namely pywandevent and libnntsc-client.
+
+If you have checked out a copy of NNTSC from our git repository, pywandevent
+and libnntsc-client will be included (in the pywandevent/ and clientapi/
+directories respectively). Install these by changing into their directory and
+running 'python setup.py install' prior to attempting to install NNTSC itself.
+
+Once these are installed, simply run the following to install NNTSC:
 	python setup.py install
 
 By default, NNTSC installs into your system's dist-packages directory but you
 will need root privileges to install it there. You can change the installation
 location using the --prefix option. Run 'python setup.py --help install' for
 more details about how you can customise the install process.
-
-You may have some problems with the py-rrdtool dependency, as setuptools may
-not be able to locate a suitable version to install for you. In that case,
-the best solution is to download the source tarball for py-rrdtool
-(http://sourceforge.net/projects/py-rrdtool/) and run:
-	easy_install <downloaded tarball name>
-
-Then, re-run setup.py for NTNSC and it should detect that py-rrdtool is now
-installed on your system.
 
 
 Supported Network Measurement Data Sources

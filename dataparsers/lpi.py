@@ -25,7 +25,7 @@ from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
 
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 
 from socket import *
 import sys, struct, time
