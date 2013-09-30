@@ -3,6 +3,7 @@ import psycopg2.extras
 from libnntscclient.logger import *
 import time, sys
 
+
 class DBSelector:
     def __init__(self, dbname, dbuser, dbpass=None, dbhost=None):
 
@@ -162,15 +163,16 @@ class DBSelector:
         if start_time == None:
             start_time = stop_time - (24 * 60 * 60)
 
-        table = self._get_data_table(col, stream_ids, start_time, stop_time)
+        table, baseparams, columns = \
+                self._get_data_table(col, stream_ids, start_time, stop_time)
         if groupcols == None:
             groupcols = ['stream_id']
         elif 'stream_id' not in groupcols:
             groupcols.append('stream_id')
         
         # XXX Could we do this in one sanitise call?
-        groupcols = self._sanitise_columns(table, groupcols) 
-        aggcols = self._sanitise_columns(table, aggcols)
+        groupcols = self._sanitise_columns(columns, groupcols, baseparams) 
+        aggcols = self._sanitise_columns(columns, aggcols, baseparams)
 
         labeled_aggcols, aggfuncs = self._apply_aggregation(aggcols, aggregator)
         labeled_groupcols = list(groupcols)
@@ -189,7 +191,8 @@ class DBSelector:
             groupcols.append("binstart")
             tscol = "binstart"
 
-        return self._generic_select(table, stream_ids, start_time, stop_time,
+        params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
+        return self._generic_select(table, stream_ids, params,
                 labeled_aggcols + labeled_groupcols, groupcols, tscol, binsize)
 
     def select_data(self, col, stream_ids, selectcols, start_time=None, 
@@ -200,18 +203,21 @@ class DBSelector:
         if start_time == None:
             start_time = stop_time - (24 * 60 * 60)
 
-        table = self._get_data_table(col, stream_ids, start_time, stop_time)
-        selectcols = self._sanitise_columns(table, selectcols)
+        table, baseparams, columns = \
+                self._get_data_table(col, stream_ids, start_time, stop_time)
+        selectcols = self._sanitise_columns(columns, selectcols, baseparams)
         
         if 'stream_id' not in selectcols:
             selectcols.append('stream_id')
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
 
-        return self._generic_select(table, stream_ids, start_time, 
-                stop_time, selectcols, None, 'timestamp', 0)
+        params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
 
-    def _generic_select(self, table, streams, start, stop, selcols, groupcols,
+        return self._generic_select(table, stream_ids, params, selectcols, 
+                None, 'timestamp', 0)
+
+    def _generic_select(self, table, streams, params, selcols, groupcols,
             tscol, binsize):
 
         selclause = "SELECT "
@@ -236,9 +242,8 @@ class DBSelector:
 
         orderclause = " ORDER BY %s " % (tscol)
 
-        sql = selclause + fromclause + tsclause + streamclause + groupclause \
+        sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause
-        params = tuple([start] + [stop] + streams)
 
         self.cursor.execute(sql, params)
         return self._form_datadict(selcols, tscol, binsize)
@@ -269,29 +274,35 @@ class DBSelector:
         
         if module == "amp" and subtype == "traceroute":
             # Special case for amp traceroute, as we use a parameterised
-            # function to select data rather than a single table
-            table = select_amp_traceroute(self, streams, start, stop) 
+            # function to select data rather than a single table 
+            table = "select_amp_traceroute(%s, %s, %s)"
+            params = [streams] + [start] + [stop]
         else:
             table = tname
+            params = []
+            
+        self.cursor.execute(
+                "SELECT * from information_schema.columns WHERE table_name=%s",
+                (tname,))
 
-        return table
+        columns = []
+        while True:
+            row = self.cursor.fetchone()
+            if row == None:
+                break
 
-    def _sanitise_columns(self, table, selcols):
+            columns.append(row['column_name'])
+        return table, params, columns
+
+    def _sanitise_columns(self, columns, selcols, params):
         # Don't let anyone try to select on columns that aren't actually
         # in the data table -- this is mainly to prevent a user from asking
         # us to select on the column containing the string ';drop table X;'
         # which would be very bad.
 
-        # Not sure if this is the best way to do this XXX
-
-        # 'table' comes from our database so should be ok
-        self.cursor.execute(
-                "SELECT * from %s LIMIT 1" % (table))
-
         sanitised = []
-        datacolnames = [cn[0] for cn in self.cursor.description]
         for cn in selcols:
-            if cn in datacolnames:
+            if cn in columns:
                 sanitised.append(cn)
         return sanitised
 
@@ -549,9 +560,10 @@ class DBSelector:
         if len(ntilecols) != 1:
             ntilecols = ntilecols[0:1]
 
-        table = self._get_data_table(col, stream_ids, start_time, stop_time)
-        ntilecols = self._sanitise_columns(table, ntilecols)
-        othercols = self._sanitise_columns(table, othercols)
+        table, baseparams, columns = \
+                self._get_data_table(col, stream_ids, start_time, stop_time)
+        ntilecols = self._sanitise_columns(columns, ntilecols, baseparams)
+        othercols = self._sanitise_columns(columns, othercols, baseparams)
 
         labeledntilecols, ntileaggfuncs = \
                 self._apply_aggregation(ntilecols, ntile_aggregator)
@@ -629,7 +641,7 @@ class DBSelector:
         sql += "binstart FROM (%s) AS agg GROUP BY binstart, stream_id" % (sql_agg)
             
         # Execute our query!
-        params = tuple([start_time] + [stop_time] + stream_ids)
+        params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
 
         self.cursor.execute(sql, params)
         return self._form_datadict(qcols, "binstart", binsize)
