@@ -35,7 +35,7 @@ from sqlalchemy.schema import DDLElement, DropTable, ForeignKeyConstraint, \
 from sqlalchemy.sql import table
 from sqlalchemy.ext import compiler
 
-from libnntsc.logger import *
+from libnntscclient.logger import *
 
 class CreateView(DDLElement):
     def __init__(self, name, selectable):

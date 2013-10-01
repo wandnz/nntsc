@@ -43,14 +43,12 @@ def print_usage(prog):
     print
     sys.exit(0)
 
-clean_db = False
-disabled = []
+clean_db        = False
+enabled_modules = []
 
 opts, rest = getopt.getopt(sys.argv[1:],'D:C:Fh')
 
 for o,a in opts:
-    if o == "-D":
-        disabled.append(a)
     if o == '-C':
         conf_fname = a
     if o == '-F':
@@ -66,7 +64,10 @@ dbconf = get_nntsc_db_config(nntsc_conf)
 if dbconf == {}:
     sys.exit(1)
 
-modules = import_parsers(disabled)
+for module in nntsc_conf.options('modules'):
+    if nntsc_conf.get('modules', module) == "yes":
+        enabled_modules.append(module)
+modules = import_parsers(enabled_modules)
 
 if dbconf["name"] == "":
     print >> sys.stderr, "No database name specified in the config file. Please edit your config file (%s)" % (conf_fname)
@@ -75,7 +76,7 @@ if dbconf["name"] == "":
 db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
 db.build_databases(modules, new=clean_db)
 
-if 'rrd' not in disabled:
+if 'rrd' in enabled_modules:
 
     rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
     if rrd_conf == "NNTSCConfigError":
