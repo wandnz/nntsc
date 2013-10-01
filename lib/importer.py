@@ -24,14 +24,12 @@ import os, sys
 
 import libnntsc.parsers
 
-def import_parsers(disabled):
-	from libnntsc.parsers import *
-	modules = {}
+def import_parsers(enabled):
+    modules = {}
 
-	for i in libnntsc.parsers.__all__:
-		name = i
-		if name in disabled:
-			continue
-		modules[name] = sys.modules['libnntsc.parsers.' + name]
-	return modules
+    for module in enabled:
+        __import__('libnntsc.parsers.%s' % module)
+        modules[module] = sys.modules['libnntsc.parsers.' + module]
+    return modules
 
+# vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
