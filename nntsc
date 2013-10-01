@@ -9,13 +9,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -38,13 +38,12 @@ class DataCollector():
     def start_module(self, name, mod, conf):
         try:
             streams = self.db.select_streams_by_module(name)
-            
+
             pipe_recv, pipe_send = Pipe(False)
-            
+
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
                     pipe_send))
             p.daemon = True
-
 
             self.exporter.register_source(pipe_recv)
             self.processes.append(p)
@@ -59,7 +58,6 @@ class DataCollector():
         self.exportonly = exportonly
 
     def configure(self):
-
         nntsc_conf = load_nntsc_config(self.config)
         if nntsc_conf == 0:
             sys.exit(1)
@@ -72,19 +70,18 @@ class DataCollector():
             logger.log("No database name specified in the NNTSC configuration file")
             sys.exit(1)
 
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 
+        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
         self.exporter.configure(self.config)
 
         self.processes = []
-        self.config =nntsc_conf 
+        self.config = nntsc_conf
 
     def run(self):
         if self.backgrounded:
             logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
 
-        
         self.configure()
         logger.log("Starting NNTSC Collector")
         if not self.exportonly:
@@ -92,7 +89,7 @@ class DataCollector():
                 self.start_module(m[0], m[1], self.config)
             for p in self.processes:
                 p.start()
-       
+
         self.exporter.run()
 
         for p in self.processes:
@@ -103,7 +100,6 @@ class DataCollector():
 
     def get_processes(self):
         return self.processes
-
 
 def cleanup():
     logger.log("Calling cleanup function\n")
@@ -121,7 +117,7 @@ if __name__ == '__main__':
     parser.add_argument("-E", "--exportonly", help="Run the exporter only -- do not collect any new data", action="store_true")
 
     args = parser.parse_args()
-    
+
     if (args.configfile == None):
         print >> sys.stderr, "Must provide a config file using -C!"
         sys.exit(1)
@@ -129,21 +125,21 @@ if __name__ == '__main__':
         config = args.configfile
 
     listen_port = args.port
-         
+
     if args.background:
-        
-        if args.pidfile == None:    
+
+        if args.pidfile == None:
             pidfile = None
         else:
             pidfile = PidFile(args.pidfile)
-    
+
         context = daemon.DaemonContext()
         context.pidfile = pidfile
 
         with context:
             dc = DataCollector(listen_port, config, True, args.exportonly)
             dc.run()
-    
+
     else:
         dc = DataCollector(listen_port, config, False, args.exportonly)
         try:
@@ -152,6 +148,5 @@ if __name__ == '__main__':
             cleanup()
         except:
             raise
-
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
