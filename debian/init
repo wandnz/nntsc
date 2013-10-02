@@ -12,6 +12,8 @@
 PATH=/usr/local/bin:/usr/local/sbin:/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/bin/nntsc
 NAME=nntsc
+USER=""     # Change this in /etc/default/nntsc
+GROUP=""    # Change this in /etc/default/nntsc
 
 # These should get overridden by the contents of /etc/default/nntsc
 CONF=/etc/nntsc/nntsc.conf
@@ -33,13 +35,12 @@ if [ ! "$START_DAEMON" -gt 0 ]; then
     exit 0
 fi
 
-
 set -e
 
 case "$1" in
   start)
   	echo "Starting $NAME"
-	start-stop-daemon --quiet --start --exec $DAEMON \
+	start-stop-daemon --quiet --start --chuid $USER:$GROUP --exec $DAEMON \
 		-- -P $PIDFILE -C $CONF -b
 
 	if [ $? -ne 0 ]; then
