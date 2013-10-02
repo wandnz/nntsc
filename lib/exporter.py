@@ -28,7 +28,7 @@ from socket import *
 from multiprocessing import Pipe
 import threading, select
 
-from libnntsc.database import Database
+from libnntsc.dbselect import DBSelector
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
@@ -41,7 +41,7 @@ class NNTSCClient(threading.Thread):
         self.parent = parent
         self.pipeend = pipeend
         self.recvbuf = ""
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
+        self.db = DBSelector(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
     def export_hist_block(self, name, streamid, block, more, freq,
@@ -109,10 +109,6 @@ class NNTSCClient(threading.Thread):
 
         stream_schema, data_schema = self.db.get_collection_schema(col_id)
 
-        # We just want the column names
-        stream_schema = map(lambda a: a.name, stream_schema)
-        data_schema = map(lambda a: a.name, data_schema)
-
         schema_pick = pickle.dumps((col_id, stream_schema, data_schema))
 
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(schema_pick))
@@ -120,7 +116,7 @@ class NNTSCClient(threading.Thread):
         try:
             self.sock.send(header + schema_pick)
         except error, msg:
-            log("Error sending schemas to client fd %d" % (self.sock.fileno(), msg[1]))
+            log("Error sending schemas to client fd %d: %s" % (self.sock.fileno(), msg[1]))
             return -1
         return 0
 
@@ -173,17 +169,34 @@ class NNTSCClient(threading.Thread):
         if end == 0:
             end = None
 
-        for s in streams:
+        # Get any historical data that we've been asked for
+        if start < now:
+            hist, freq = self.db.select_data(name, streams, cols, start, end)
 
+        history = {}
+        done = []
+
+        for item in hist:
+            if item["stream_id"] not in history:
+                history[item["stream_id"]] = []
+            history[item["stream_id"]].append(item)
+
+
+        for s in streams:
             # If live data is going to be required, add to the sub list
             if (end == None or end > now):
                 self.parent.register_stream(s, self.sock, cols, start, end, name)
 
-            # Send any historical data that we've been asked for
-            if start < now:
-                hist, freq = self.db.select_data(name, [s], cols, start, end)
-                if self.send_history(s, name, hist, freq, "raw") == -1:
+            # Send the history for this stream
+            if s in history:
+                assert(s in freq)
+                if self.send_history(s, name, history[s], freq[s], "raw") == -1:
                     return -1
+            else:
+                # No history, send an empty list so our client doesn't get
+                # stuck waiting for the data
+                if self.send_history(s, name, [], 0, "raw") == -1:
+                    return -1    
         return 0
 
 
@@ -225,17 +238,37 @@ class NNTSCClient(threading.Thread):
         if end == 0:
             end = None
 
-        for s in streams:
-            agghist, freq = self.db.select_aggregated_data(name, [s], aggcols,
-                    start, end, groupcols, binsize, fname)
-            if self.send_history(s, name, agghist, freq, fname) == -1:
+        agghist, frequencies = self.db.select_aggregated_data(name, streams,
+                aggcols, start, end, groupcols, binsize, fname)
+
+        done = []
+        history = {}
+
+        for item in agghist:
+            if item["stream_id"] not in history:
+                history[item["stream_id"]] = []
+            history[item["stream_id"]].append(item)
+
+        # send everything that we got data for
+        for stream_id,items in history.iteritems():
+            freq = frequencies[stream_id]
+            if self.send_history(stream_id, name, items, freq, fname) == -1:
                 return -1
+            done.append(stream_id)
+
+        # send empty lists for those that we didn't get data for
+        for stream_id in streams:
+            if stream_id not in done:
+                freq = 0
+                if self.send_history(stream_id,name,[],freq,fname) == -1:
+                    return -1
 
         return 0
 
     def percentile(self, pcntmsg):
         tup = pickle.loads(pcntmsg)
-        name, start, end, streams, aggcols, groupcols, binsize, fname = tup
+        name, start, end, streams, binsize, ntilecols, othercols, \
+                ntileagg, otheragg = tup
         now = int(time.time())
 
         if start == None:
@@ -245,11 +278,16 @@ class NNTSCClient(threading.Thread):
         if end == 0:
             end = None
 
+
+        # TODO Make this query multiple streams at once
+        # Also support separate aggregation functions for aggcols and groupcols
         for s in streams:
-            agghist, freq = self.db.select_percentile_data(name, [s], aggcols,
-                    start, end, groupcols, binsize, fname)
-            if self.send_history(s, name, agghist, freq, fname) == -1:
+            agghist, freq = self.db.select_percentile_data(name, [s], ntilecols,
+                    othercols, start, end, binsize, ntileagg, otheragg)
+            assert(s in freq)
+            if self.send_history(s, name, agghist, freq[s], ntileagg) == -1:
                 return -1
+
 
         return 0
 
