@@ -4,7 +4,7 @@ from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import text
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 
 class PartitionedTable:
     def __init__(self, db, basetable, freq, indexcols, partcol="timestamp"):

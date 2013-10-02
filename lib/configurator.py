@@ -21,7 +21,7 @@
 
 
 import ConfigParser, sys
-import libnntsc.logger as logger
+import libnntscclient.logger as logger
 
 def load_nntsc_config(filename):
     # load in config file with database settings

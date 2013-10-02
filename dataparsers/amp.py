@@ -40,16 +40,6 @@ class AmpModule:
         if dbconf == {}:
             sys.exit(1)
 
-        self.disable = get_nntsc_config_bool(nntsc_config, "amp", "disable")
-        if self.disable == "NNTSCConfigError":
-            logger.log("Invalid disable option for AMP")
-            sys.exit(1)
-
-        if self.disable == True:
-            return
-
-        self.disable = False    # just to be safe
-
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
@@ -155,8 +145,6 @@ class AmpModule:
     def run(self):
         """ Run forever, calling the process_data callback for each message """
 
-        if self.disable:
-            return
         logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
 
         try:
