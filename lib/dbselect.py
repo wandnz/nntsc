@@ -63,7 +63,7 @@ class DBSelector:
 
         self.cursor.execute(
                 "SELECT streamtable, datatable from collections WHERE id=%s",
-                (colid))
+                (colid,))
         
         tables = self.cursor.fetchone()
 
@@ -246,7 +246,7 @@ class DBSelector:
                 + orderclause
 
         self.cursor.execute(sql, params)
-        return self._form_datadict(selcols, tscol, binsize)
+        return self._form_datadict(selcols, tscol, binsize, streams)
 
     def _generate_where(self, streams):
         tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
@@ -320,7 +320,7 @@ class DBSelector:
 
         # Ensure we have one aggregator per column
         if None in aggfuncs or len(aggfuncs) != len(selectors):
-            return []
+            return [], []
 
         index = 0
         rename = False
@@ -343,7 +343,7 @@ class DBSelector:
 
         return aggcols, aggfuncs
 
-    def _form_datadict(self, selectcols, tscol, size):
+    def _form_datadict(self, selectcols, tscol, size, streams):
         """ Converts a result object into a list of dictionaries, one
             for each row. The dictionary is a map of column names to
             values.
@@ -453,21 +453,25 @@ class DBSelector:
 
         frequencies = {}
 
-        for stream, freqdata in perstream.items():
+        for streamid in streams:
+            if streamid not in perstream:
+                frequencies[streamid] = 0
+                continue
+
             if perstream[streamid]['total_diffs'] == 0:
                 if size < 300:
                     freq = 300
                 else:
                     freq = size
                 
-                frequencies[stream] = freq
+                frequencies[streamid] = freq
                 continue
 
             # If this check passes, we requested a binsize greater than the
             # measurement frequency (case 1, above)
             if perstream[streamid]['perfectbins'] / \
                     float(perstream[streamid]['total_diffs']) > 0.9:
-                frequencies[stream] = size
+                frequencies[streamid] = size
                 continue
 
             # If we get here, then our binsize is more than likely smaller
@@ -491,7 +495,7 @@ class DBSelector:
                 if count >= 0.5 * perstream[streamid]['total_diffs']:
                     freq = td
                     break
-            frequencies[stream] = freq
+            frequencies[streamid] = freq
             
         return data, frequencies
 
@@ -519,7 +523,7 @@ class DBSelector:
         #   FROM (
         #       SELECT max(timestamp) AS recent,
         #           binstart,
-        #           avg(rtt) AS rtt_avg,
+        #           coalesce(avg(rtt), ARRAY[]::text[]) AS rtt_avg,
         #           avg(loss) AS loss_avg,
         #           stream_id
         #       FROM (
@@ -539,7 +543,7 @@ class DBSelector:
         #       ) AS ntiles
         #       GROUP BY binstart, ntile, stream_id ORDER BY binstart, rtt_avg
         #   ) AS agg
-        #   GROUP BY binstart, stream_id"
+        #   GROUP BY binstart, stream_id ORDER BY binstart"
         #
         # We only support percentiles across a single column at the moment.
         # If more than one column is in the list, we ignore every one except
@@ -549,7 +553,7 @@ class DBSelector:
         # aggregation functions can be something other than 'avg' if desired.
 
         if type(binsize) is not int:
-            return [], 0
+            return [], {}
 
         if stop_time == None:
             stop_time = int(time.time())
@@ -569,7 +573,7 @@ class DBSelector:
                 self._apply_aggregation(ntilecols, ntile_aggregator)
         labeledothercols, otheraggfuncs = \
                 self._apply_aggregation(othercols, other_aggregator)
-        
+       
         # Constructing the innermost SELECT query, which lists the ntile for
         # each measurement
         sql_ntile = """ SELECT stream_id, timestamp, 
@@ -625,9 +629,15 @@ class DBSelector:
         # names
         for i in range(0, len(labeledntilecols)):
             labelsplit = labeledntilecols[i].split("AS")
-           
+        
+            # This is nasty -- we often end up with null entries at the end
+            # of our array as part of the ntile process. We can drop these by
+            # casting the array to a string and then back again.
+            # The coalesce will ensure we return an empty array in cases where
+            # we have no data.
+
             # XXX Need unique names if we ever support mulitple ntiles 
-            sql += "array_agg(%s) AS values, " % (labelsplit[1].strip())
+            sql += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ','), ','), ARRAY[]::text[]) AS values, " % (labelsplit[1].strip())
             qcols.append("values")
          
         for i in range(0, len(labeledothercols)):
@@ -638,13 +648,13 @@ class DBSelector:
                     labelsplit[1].strip(), othercols[i])
             qcols.append(othercols[i])
 
-        sql += "binstart FROM (%s) AS agg GROUP BY binstart, stream_id" % (sql_agg)
+        sql += "binstart FROM (%s) AS agg GROUP BY binstart, stream_id ORDER BY binstart" % (sql_agg)
             
         # Execute our query!
         params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
 
         self.cursor.execute(sql, params)
-        return self._form_datadict(qcols, "binstart", binsize)
+        return self._form_datadict(qcols, "binstart", binsize, stream_ids)
 
             
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
