@@ -106,7 +106,7 @@ def data_tables(db):
             testtable.c.traceroute_test_id,
             testtable.c.length, testtable.c.error_type,
             testtable.c.error_code, testtable.c.packet_size,
-            fh.c.path_ttl,
+            fh.c.path_ttl, fh.c.hop_rtt,
             fh.c.hop_address]).select_from(testtable.join(fh))
 
     dataview = db.create_view(DATA_VIEW_NAME, viewquery)
@@ -268,18 +268,21 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
             return -1
         ttl += 1
 
-    # make the result pushed here look like the data view
-    data_view = db.metadata.tables[DATA_VIEW_NAME]
-    result = db.conn.execute(data_view.select().where(
-                data_view.c.traceroute_test_id==test_id))
-    if result.rowcount < 1:
-        return -1
-
-    for row in result:
         data = {}
-        for k,v in row.items():
-            data[k] = v
+        data['stream_id'] = stream
+        data['timestamp'] = ts
+        data['traceroute_test_id'] = test_id
+        data['length'] = test_info['length']
+        data['error_type'] = test_info['error_type']
+        data['error_code'] = test_info['error_code']
+        data['packet_size'] = test_info['packet_size']
+        data['path_ttl'] = ttl
+        data['hop_address'] = hop['address']
+        data['hop_rtt'] = hop['rtt']
+
+        #print "Exporting amp traceroute data"
         exp.send((0, ("amp_traceroute", stream, ts, data)))
+        #print "Exported amp traceroute data"
 
     return 0
 
