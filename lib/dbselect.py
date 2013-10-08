@@ -30,6 +30,9 @@ class DBSelector:
             return
 
     def __del__(self):
+        self.close()
+
+    def close(self):
         if self.conn:
             self.conn.commit()
         
@@ -37,6 +40,9 @@ class DBSelector:
             self.cursor.close()
         if self.conn:
             self.conn.close()
+        
+        self.cursor = None
+        self.conn = None
 
 
     def list_collections(self):
@@ -156,7 +162,7 @@ class DBSelector:
         #    the column in position 0, etc.
 
         if type(binsize) is not int:
-            return [], 0
+            return
 
         if stop_time == None:
             stop_time = int(time.time())
@@ -192,8 +198,9 @@ class DBSelector:
             tscol = "binstart"
 
         params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
-        return self._generic_select(table, stream_ids, params,
-                labeled_aggcols + labeled_groupcols, groupcols, tscol, binsize)
+        for resultrow in self._generic_select(table, stream_ids, params,
+                labeled_aggcols + labeled_groupcols, groupcols, tscol, binsize):
+            yield resultrow
 
     def select_data(self, col, stream_ids, selectcols, start_time=None, 
             stop_time=None):
@@ -214,8 +221,12 @@ class DBSelector:
 
         params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
 
-        return self._generic_select(table, stream_ids, params, selectcols, 
-                None, 'timestamp', 0)
+        for resultrow in self._generic_select(table, stream_ids, params, 
+                selectcols, None, 'timestamp', 0):
+            yield resultrow
+
+        #return self._generic_select(table, stream_ids, params, selectcols, 
+        #        None, 'timestamp', 0)
 
     def _generic_select(self, table, streams, params, selcols, groupcols,
             tscol, binsize):
@@ -240,13 +251,21 @@ class DBSelector:
                 if i != len(groupcols) - 1:
                     groupclause += ", "
 
-        orderclause = " ORDER BY %s " % (tscol)
+        orderclause = " ORDER BY stream_id, %s " % (tscol)
 
         sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause
 
         self.cursor.execute(sql, params)
-        return self._form_datadict(selcols, tscol, binsize, streams)
+
+        while True:
+            row = self.cursor.fetchone()
+            if row == None:
+                break
+
+            yield (row, tscol, binsize)
+
+        #return self._form_datadict(selcols, tscol, binsize, streams)
 
     def _generate_where(self, streams):
         tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
@@ -553,7 +572,7 @@ class DBSelector:
         # aggregation functions can be something other than 'avg' if desired.
 
         if type(binsize) is not int:
-            return [], {}
+            return
 
         if stop_time == None:
             stop_time = int(time.time())
@@ -654,7 +673,13 @@ class DBSelector:
         params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
 
         self.cursor.execute(sql, params)
-        return self._form_datadict(qcols, "binstart", binsize, stream_ids)
+        while True:
+            row = self.cursor.fetchone()
+            if row == None:
+                break
+
+            yield (row, "binstart", binsize)
+        
 
             
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

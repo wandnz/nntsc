@@ -33,6 +33,345 @@ from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
 
+pipefill = 0
+MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
+
+class DBWorker(threading.Thread):
+    def __init__(self, parent, pipeend, dbconf, lock, cv):
+        threading.Thread.__init__(self)
+        self.dbconf = dbconf
+        self.parent = parent
+        self.pipeend = pipeend
+        self.lock = lock
+        self.cv = cv
+
+    def process_job(self, job):
+        jobtype = job[0]
+        jobdata = job[1]
+
+        if jobtype == NNTSC_REQUEST:
+            self.process_request(jobdata)
+            return 1
+
+        if jobtype == NNTSC_AGGREGATE:
+            self.aggregate(jobdata)
+            return 1
+
+        if jobtype == NNTSC_PERCENTILE:
+            self.percentile(jobdata)
+            return 1
+
+        if jobtype == NNTSC_SUBSCRIBE:
+            self.subscribe(jobdata)
+            return 1
+
+        return 0
+   
+    def aggregate(self, aggmsg):
+        tup = pickle.loads(aggmsg)
+        name, start, end, streams, aggcols, groupcols, binsize, aggfunc = tup
+        now = int(time.time())
+        
+        if end == 0:
+            end = None
+
+        if start == None or start >= now:
+            for s in streams:
+                result = ({s:[]}, {s:0}, name, [s], fname, False)
+                self.pipesend((NNTSC_HISTORY, result))
+            return
+
+        if end == None:
+            stoppoint = int(time.time())
+        else:
+            stoppoint = end
+
+        while start < stoppoint:
+            queryend = start + MAX_HISTORY_QUERY
+
+            if queryend >= stoppoint:
+                queryend = stoppoint
+                more = False
+            else:
+                more = True
+
+            generator = self.db.select_aggregated_data(name, streams, aggcols, 
+                    start, end, groupcols, binsize, aggfunc)
+
+            self._query_history(generator, name, start, queryend, 
+                    streams, more)
+            start = queryend + 1
+
+            # If we were asked for data up until "now", make sure we account 
+            # for the time taken to make earlier queries otherwise we'll 
+            # miss any new data inserted while we were querying previous
+            # weeks of data
+            if end == None:
+                stoppoint = int(time.time())
+
+    def percentile(self, pcntmsg):
+        tup = pickle.loads(pcntmsg)
+        name, start, end, streams, binsize, ntilecols, othercols, \
+                ntileagg, otheragg = tup
+        now = int(time.time())
+
+        if end == 0:
+            end = None
+
+        if start == None or start >= now:
+            for s in streams:
+                result = ({s:[]}, {s:0}, name, [s], ntileagg, False)
+                self.pipesend((NNTSC_HISTORY, result))
+            return
+
+        if end == None:
+            stoppoint = int(time.time())
+        else:
+            stoppoint = end
+
+        while start < stoppoint:
+            queryend = start + MAX_HISTORY_QUERY
+
+            if queryend >= stoppoint:
+                queryend = stoppoint
+                more = False
+            else:
+                more = True
+
+            generator = self.db.select_percentile_data(name, streams, ntilecols, 
+                    othercols, start, end, binsize, ntileagg, otheragg)
+
+            self._query_history(generator, name, start, queryend, 
+                    streams, more)
+            start = queryend + 1
+
+            # If we were asked for data up until "now", make sure we account 
+            # for the time taken to make earlier queries otherwise we'll 
+            # miss any new data inserted while we were querying previous
+            # weeks of data
+            if end == None:
+                stoppoint = int(time.time())
+
+    
+    def subscribe(self, submsg):
+        name, start, end, cols, streams = pickle.loads(submsg)
+        now = int(time.time())
+
+        if start == 0 or start == None:
+            start = now
+        if end == 0:
+            end = None
+        
+        if (end == None or end > now):
+            sub = True
+        else:
+            sub = False
+        
+        
+        if start >= now:
+            # No historical data, send empty history for all streams
+            for s in streams:
+                result = ({s:[]}, {s:0}, name, [s], "raw", sub)
+                self.pipeend.send((NNTSC_HISTORY, result))
+
+            return
+            
+        if end == None:
+            stoppoint = int(time.time())
+        else:
+            stoppoint = end
+
+        while start < stoppoint:
+            queryend = start + MAX_HISTORY_QUERY
+
+            if queryend >= stoppoint:
+                queryend = stoppoint
+                more = False
+            else:
+                more = True
+
+            generator = self.db.select_data(name, streams, cols, start, end)
+
+            self._query_history(generator, name, start, queryend,
+                    streams, more)
+            start = queryend + 1
+
+            # If we were asked for data up until "now", make sure we account 
+            # for the time taken to make earlier queries otherwise we'll 
+            # miss any new data inserted while we were querying previous
+            # weeks of data
+            if end == None:
+                stoppoint = int(time.time())
+
+        if sub:
+            for s in streams:
+                self.pipeend.send((NNTSC_SUBSCRIBE, (s, start, end, cols, name)))  
+
+    def _query_history(self, rowgen, name, start, end, streams, more):
+
+        currstream = -1
+        historysize = 0
+
+        observed = set([])
+
+        # Get any historical data that we've been asked for
+        for row, tscol, binsize in rowgen:
+            
+            # Limit the amount of history we export at any given time
+            # to prevent us from using too much memory during processing
+            if row['stream_id'] != currstream:
+                if currstream != -1:
+
+                    # Export the history to the pipe
+                    freq = self._calc_frequency(freqstats, binsize)
+                    result = ({ currstream : history },
+                            { currstream : freq },
+                            name, [currstream], "raw", more)
+                    self.pipeend.send((NNTSC_HISTORY, result))
+                    #print "Sent history for", currstream, freq, start, end, more
+
+                # Reset all our counters etc.
+                freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
+                            'totaldiffs':0, 'tsdiffs':{} }
+                currstream = row['stream_id']
+                
+                history = []
+                historysize = 0
+                observed.add(currstream)
+      
+            # Extract info needed for measurement frequency calculations
+            if freqstats['lastts'] == 0:
+                freqstats['lastts'] = row['timestamp']
+                freqstats['lastbin'] = row[tscol]
+            elif freqstats['lastts'] != row['timestamp']:
+                tsdiff = row['timestamp'] - freqstats['lastts']
+                bindiff = row[tscol] - freqstats['lastbin']
+            
+                if bindiff == binsize:
+                    freqstats['perfectbins'] += 1
+                
+                if tsdiff in freqstats['tsdiffs']:
+                    freqstats['tsdiffs'][tsdiff] += 1
+                else:
+                    freqstats['tsdiffs'][tsdiff] = 1
+
+                freqstats['totaldiffs'] += 1
+                freqstats['lastts'] = row['timestamp']
+                freqstats['lastbin'] = row[tscol]
+
+            # Convert the row into a nice dictionary and add it to the 
+            # history to be exported
+            datadict = {}
+            for k,v in row.items():
+                datadict[k] = v
+            history.append(datadict)
+            historysize += 1
+                                
+        if historysize != 0:    
+            # Make sure we write out the last stream
+            freq = self._calc_frequency(freqstats, binsize)
+            result = ({ currstream : history },
+                    { currstream : freq },
+                    name, [currstream], "raw", more)
+            self.pipeend.send((NNTSC_HISTORY, result))
+            #print "Sent last history for", currstream, freq, start, end, more
+       
+        # Also remember to export empty history for any streams that had
+        # no data in the request period
+        allstreams = set(streams)
+
+        missing = allstreams - observed
+        for m in missing:
+            result = ({m : []}, {m : 0}, name, [m], "raw", more)
+            self.pipeend.send((NNTSC_HISTORY, result))
+            #print "Sent empty history for", m, start, end, more
+
+   
+    def process_request(self, reqmsg):
+        req_hdr = struct.unpack(nntsc_req_fmt,
+                reqmsg[0:struct.calcsize(nntsc_req_fmt)])
+
+        if req_hdr[0] == NNTSC_REQ_COLLECTION:
+            # Requesting the collection list
+            cols = self.db.list_collections()
+
+            shrink = []
+            for c in cols:
+                shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
+
+            self.pipeend.send((NNTSC_COLLECTIONS, shrink))
+
+        if req_hdr[0] == NNTSC_REQ_SCHEMA:
+            col_id = req_hdr[1]
+            stream_schema, data_schema = self.db.get_collection_schema(col_id)
+
+            result = (col_id, stream_schema, data_schema)
+            self.pipeend.send((NNTSC_SCHEMAS, result ))
+
+
+        if req_hdr[0] == NNTSC_REQ_STREAMS:
+            col = req_hdr[1]
+            startstream = req_hdr[2]
+            streams = self.db.select_streams_by_collection(col, startstream)
+            self.pipeend.send((NNTSC_STREAMS, (col, streams)))
+
+    def run(self):
+        running = 1
+
+        while running:
+            self.cv.acquire()
+
+            while len(self.parent.jobs) == 0:
+                #print "Waiiiiiting", self.pipeend.fileno()
+                self.cv.wait()
+
+            job = self.parent.jobs[0]
+            self.parent.jobs = self.parent.jobs[1:]
+            self.cv.release()
+            
+            self.db = DBSelector(self.dbconf["name"], self.dbconf["user"], 
+                    self.dbconf["pass"], self.dbconf["host"])
+            if self.process_job(job) == 0:
+                break
+            self.db.close()
+
+        self.db.close()
+        self.pipeend.close()
+
+    def _calc_frequency(self, freqdata, binsize):
+
+        # No measurements were observed, use the binsize if sane
+        if freqdata['totaldiffs'] == 0:
+            if binsize < 300:
+                return 300
+            else:
+                return binsize
+       
+        # 90% of the timestamp differences match the binsize, so just use it 
+        if freqdata['perfectbins'] / float(freqdata['totaldiffs']) > 0.9:
+            return binsize
+        
+        # Set some sensible defaults -- don't set the default binsize too small
+        if binsize < 300:
+            freq = 300
+        else:
+            freq = binsize
+        
+        # Find a suitable mode amongst the timestamp differences. Make sure 
+        # the mode is reasonably strong -- shouldn't be much variation in
+        # timestamp differences unless your measurements are patchy.
+        for td, count in freqdata['tsdiffs'].items():
+            if count >= 0.5 * freqdata['totaldiffs']:
+                freq = td
+                break
+
+            # If there is no strong mode, go with the smallest somewhat
+            # prominent value
+            if count >= 0.2 * freqdata['totaldiffs'] and td < freq:
+                freq = td
+
+        return freq 
+
 class NNTSCClient(threading.Thread):
     def __init__(self, sock, parent, pipeend, dbconf):
         threading.Thread.__init__(self)
@@ -41,8 +380,20 @@ class NNTSCClient(threading.Thread):
         self.parent = parent
         self.pipeend = pipeend
         self.recvbuf = ""
-        self.db = DBSelector(dbconf["name"], dbconf["user"], dbconf["pass"],
-                dbconf["host"])
+        self.jobs = []
+        self.joblock = threading.Lock()
+        self.jobcv = threading.Condition(self.joblock)
+
+        self.workers = []
+        for i in range(0, 5):
+            pipe_recv, pipe_send = Pipe(False)
+            
+            worker = DBWorker(self, pipe_send, dbconf, self.joblock, self.jobcv)
+            worker.daemon = True
+            worker.start()
+
+            self.workers.append((pipe_recv, worker, pipe_send))
+
 
     def export_hist_block(self, name, streamid, block, more, freq,
             aggname):
@@ -58,46 +409,10 @@ class NNTSCClient(threading.Thread):
 
         return 0
 
-
-    def send_history(self, streamid, name, hist, freq, aggname):
-
-        tosend = []
-        c = 0
-
-        # If there is no data to send, just push out an empty list and
-        # return.
-        if len(hist) == 0:
-            return self.export_hist_block(name, streamid, tosend,
-                    False, freq, aggname)
-
-        for h in hist:
-
-            tosend.append(h)
-            c += 1
-
-            if (c >= 1000):
-                if h != hist[-1]:
-                    more = True
-                else:
-                    more = False
-
-                if self.export_hist_block(name, streamid, tosend,
-                            more, freq, aggname) == -1:
-                    return -1
-                c = 0
-                tosend = []
-
-        if c != 0:
-            return self.export_hist_block(name, streamid, tosend, False,
-                    freq, aggname)
-        return 0
-
     def send_collections(self, cols):
+
         col_pickle = pickle.dumps(cols)
-        msglen = len(col_pickle)
-
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_COLLECTIONS, msglen)
-
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_COLLECTIONS, len(col_pickle))
         try:
             self.sock.send(header + col_pickle)
         except error, msg:
@@ -105,12 +420,9 @@ class NNTSCClient(threading.Thread):
             return -1
         return 0
 
-    def send_schema(self, col_id):
+    def send_schema(self, schema):
 
-        stream_schema, data_schema = self.db.get_collection_schema(col_id)
-
-        schema_pick = pickle.dumps((col_id, stream_schema, data_schema))
-
+        schema_pick = pickle.dumps(schema)
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(schema_pick))
 
         try:
@@ -133,12 +445,11 @@ class NNTSCClient(threading.Thread):
 
         return 0
 
-    def send_streams(self, col, startstream):
+    def send_streams(self, streamresult):
 
-        #log("Sending streams to client for collection %d" % (col))
+        col = streamresult[0]
+        streams = streamresult[1]
         self.parent.register_collection(self.sock, col)
-
-        streams = self.db.select_streams_by_collection(col, startstream)
 
         if len(streams) == 0:
             return self.export_streams_msg(col, False, [])
@@ -160,137 +471,30 @@ class NNTSCClient(threading.Thread):
             i = end
         return 0
 
-    def subscribe(self, submsg):
-        name, start, end, cols, streams = pickle.loads(submsg)
+    def send_history(self, subresult):
+        history, freq, name, streams, aggfunc, more = subresult
         now = int(time.time())
 
-        if start == 0 or start == None:
-            start = now
-        if end == 0:
-            end = None
-
-        # Get any historical data that we've been asked for
-        if start < now:
-            hist, freq = self.db.select_data(name, streams, cols, start, end)
-
-        history = {}
-        done = []
-
-        for item in hist:
-            if item["stream_id"] not in history:
-                history[item["stream_id"]] = []
-            history[item["stream_id"]].append(item)
-
-
         for s in streams:
-            # If live data is going to be required, add to the sub list
-            if (end == None or end > now):
-                self.parent.register_stream(s, self.sock, cols, start, end, name)
 
             # Send the history for this stream
             if s in history:
                 assert(s in freq)
-                if self.send_history(s, name, history[s], freq[s], "raw") == -1:
+                if self.export_hist_block(name, s, history[s], more, freq[s], 
+                            aggfunc) == -1:
                     return -1
             else:
                 # No history, send an empty list so our client doesn't get
                 # stuck waiting for the data
-                if self.send_history(s, name, [], 0, "raw") == -1:
+                if self.export_hist_block(name, s, [], False, 0, aggfunc) == -1:
                     return -1    
         return 0
 
 
-    def process_request(self, reqmsg):
-        req_hdr = struct.unpack(nntsc_req_fmt,
-                reqmsg[0:struct.calcsize(nntsc_req_fmt)])
+    def subscribe_stream(self, submsg):
 
-        if req_hdr[0] == NNTSC_REQ_COLLECTION:
-            # Requesting the collection list
-            cols = self.db.list_collections()
-
-            shrink = []
-            for c in cols:
-                shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
-
-            return self.send_collections(shrink)
-
-        if req_hdr[0] == NNTSC_REQ_SCHEMA:
-            col_id = req_hdr[1]
-            return self.send_schema(col_id)
-
-
-        if req_hdr[0] == NNTSC_REQ_STREAMS:
-            col_id = req_hdr[1]
-            start = req_hdr[2]
-            return self.send_streams(col_id, start)
-
-        return 0
-
-    def aggregate(self, aggmsg):
-        tup = pickle.loads(aggmsg)
-        name, start, end, streams, aggcols, groupcols, binsize, fname = tup
-        now = int(time.time())
-
-        if start == None:
-            return 0
-        if start > now:
-            return 0
-        if end == 0:
-            end = None
-
-        agghist, frequencies = self.db.select_aggregated_data(name, streams,
-                aggcols, start, end, groupcols, binsize, fname)
-
-        done = []
-        history = {}
-
-        for item in agghist:
-            if item["stream_id"] not in history:
-                history[item["stream_id"]] = []
-            history[item["stream_id"]].append(item)
-
-        # send everything that we got data for
-        for stream_id,items in history.iteritems():
-            freq = frequencies[stream_id]
-            if self.send_history(stream_id, name, items, freq, fname) == -1:
-                return -1
-            done.append(stream_id)
-
-        # send empty lists for those that we didn't get data for
-        for stream_id in streams:
-            if stream_id not in done:
-                freq = 0
-                if self.send_history(stream_id,name,[],freq,fname) == -1:
-                    return -1
-
-        return 0
-
-    def percentile(self, pcntmsg):
-        tup = pickle.loads(pcntmsg)
-        name, start, end, streams, binsize, ntilecols, othercols, \
-                ntileagg, otheragg = tup
-        now = int(time.time())
-
-        if start == None:
-            return 0
-        if start > now:
-            return 0
-        if end == 0:
-            end = None
-
-
-        # TODO Make this query multiple streams at once
-        # Also support separate aggregation functions for aggcols and groupcols
-        for s in streams:
-            agghist, freq = self.db.select_percentile_data(name, [s], ntilecols,
-                    othercols, start, end, binsize, ntileagg, otheragg)
-            assert(s in freq)
-            if self.send_history(s, name, agghist, freq[s], ntileagg) == -1:
-                return -1
-
-
-        return 0
-
+        stream, start, end, cols, name = submsg
+        self.parent.register_stream(stream, self.sock, cols, start, end, name)
 
     def client_message(self, msg):
 
@@ -298,25 +502,14 @@ class NNTSCClient(threading.Thread):
         header = struct.unpack(nntsc_hdr_fmt, msg[0:struct.calcsize(nntsc_hdr_fmt)])
         total_len = header[2] + struct.calcsize(nntsc_hdr_fmt)
         body = msg[struct.calcsize(nntsc_hdr_fmt):total_len]
-
+    
         if len(msg) < total_len:
             return msg, 1, error
 
-        if header[1] == NNTSC_REQUEST:
-            if self.process_request(body) == -1:
-                error = 1
-
-        if header[1] == NNTSC_AGGREGATE:
-            if self.aggregate(body) == -1:
-                error = 1
-
-        if header[1] == NNTSC_PERCENTILE:
-            if self.percentile(body) == -1:
-                error = 1
-
-        if header[1] == NNTSC_SUBSCRIBE:
-            if self.subscribe(body) == -1:
-                error = 1
+        self.jobcv.acquire()
+        self.jobs.append((header[1], body))
+        self.jobcv.notify()
+        self.jobcv.release()
 
         return msg[total_len:], 0, error
 
@@ -343,14 +536,14 @@ class NNTSCClient(threading.Thread):
 
             if halt or error == 1:
                 break
-
+    
         if error != 1:
             self.recvbuf = buf
         if error == 1:
             return 0
 
     def receive_live(self):
-
+        global pipefill
         fd = self.pipeend.fileno()
 
         try:
@@ -367,7 +560,36 @@ class NNTSCClient(threading.Thread):
                     return 0
                 totalsent += sent
 
+        pipefill -= totalsent
+        print "Successfully reflected live data", pipefill
         return totalsent
+
+    def receive_worker(self, socket):
+        fd = socket.fileno()
+
+        try:
+            response, result = socket.recv()
+        except EOFError as msg:
+            log("Error receiving query result from DBWorker %d: %s" % (fd, msg))
+            return 0
+
+        if response == NNTSC_COLLECTIONS:
+            return self.send_collections(result)                    
+
+        if response == NNTSC_SCHEMAS:
+            return self.send_schema(result)
+
+        if response == NNTSC_STREAMS:
+            return self.send_streams(result)
+
+        if response == NNTSC_HISTORY:
+            return self.send_history(result)
+
+        if response == NNTSC_SUBSCRIBE:
+            return self.subscribe_stream(result)
+
+        assert(0)
+        return -1
 
     def run(self):
         running = 1
@@ -375,22 +597,33 @@ class NNTSCClient(threading.Thread):
         while running:
             input = [self.sock, self.pipeend]
 
+            for w in self.workers:
+                input.append(w[0])
+
             inpready, outready, exready = select.select(input, [], [])
             for s in inpready:
                 if s == self.sock:
                     if self.receive_client() == 0:
                         running = 0
                         break
-                if s == self.pipeend:
+                elif s == self.pipeend:
                     if self.receive_live() == 0:
                         running = 0
                         break
-
+                else:
+                    # Must be a query result from a DBWorker
+                    if self.receive_worker(s) == -1:
+                        running = 0
+                        break
         #log("Closing client thread on fd %d" % self.sock.fileno())
         self.parent.deregister_client(self.sock)
         self.pipeend.close()
         self.sock.close()
 
+        for w in self.workers:
+            w[0].close()
+            w[2].close()
+            
 
 class NNTSCExporter:
     def __init__(self, port):
@@ -406,8 +639,10 @@ class NNTSCExporter:
     def deregister_client(self, sock):
 
         #log("Dropping client on fd %d" % (sock.fileno()))
-        del self.client_sockets[sock]
-        del self.client_threads[sock]
+        if sock in self.client_sockets:
+            del self.client_sockets[sock]
+        if sock in self.client_threads:
+            del self.client_threads[sock]
 
     def drop_source(self, sock):
         log("Dropping source on fd %d" % (sock.fileno()))
@@ -430,6 +665,7 @@ class NNTSCExporter:
         return results
 
     def register_stream(self, s, sock, cols, start, end, name):
+        print "Registered new stream: ", s, start, end
         if self.subscribers.has_key(s):
             self.subscribers[s].append((sock, cols, start, end, name))
         else:
@@ -484,6 +720,7 @@ class NNTSCExporter:
         return 0
 
     def export_live_data(self, received, fd):
+        global pipefill
 
         try:
             name, stream_id, timestamp, values = received
@@ -497,7 +734,6 @@ class NNTSCExporter:
             log("Values should expressed as a dictionary")
             self.drop_source(sock)
             return
-
 
         if stream_id in self.subscribers.keys():
             active = []
@@ -520,19 +756,22 @@ class NNTSCExporter:
                 if sock in self.client_sockets:
                     pipesend = self.client_sockets[sock]
 
-                    try:
-                        pipesend.send(header + contents)
-                    except IOError, msg:
-                        log("Error sending live data to pipe for client: %s" % (msg[1]))
-                        self.deregister_client(sock)
-                    else:
-                        if results != {}:
-                            active.append((sock, columns, start, end, col))
+                    print "Pushing onto client pipe", stream_id, col
+                    pipesend.send(header + contents)
+                    pipefill += len(header + contents)
+                    
+                    #    log("Error sending live data to pipe for client: %s" % (msg[1]))
+                    #    self.deregister_client(sock)
+                    #else:
+                    if results != {}:
+                        active.append((sock, columns, start, end, col))
+                    print "Send successful", pipefill
             self.subscribers[stream_id] = active
 
         return 0
 
     def receive_source(self, fd, evtype, sock, data):
+        
         try:
             obj = sock.recv()
         except EOFError, msg:
