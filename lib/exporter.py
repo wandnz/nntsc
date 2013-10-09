@@ -34,38 +34,39 @@ from libnntscclient.protocol import *
 from libnntscclient.logger import *
 
 pipefill = 0
-MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
+MAX_HISTORY_QUERY = (24 * 60 * 60 * 7 * 4)
+MAX_WORKERS = 2
 
 class DBWorker(threading.Thread):
-    def __init__(self, parent, pipeend, dbconf, lock, cv):
+    def __init__(self, parent, pipeend, dbconf, lock, cv, threadid):
         threading.Thread.__init__(self)
         self.dbconf = dbconf
         self.parent = parent
         self.pipeend = pipeend
         self.lock = lock
         self.cv = cv
+        self.threadid = threadid
 
     def process_job(self, job):
         jobtype = job[0]
         jobdata = job[1]
 
+        if jobtype == -1:
+            return -1
+
         if jobtype == NNTSC_REQUEST:
-            self.process_request(jobdata)
-            return 1
+            return self.process_request(jobdata)
 
         if jobtype == NNTSC_AGGREGATE:
-            self.aggregate(jobdata)
-            return 1
+            return self.aggregate(jobdata)
 
         if jobtype == NNTSC_PERCENTILE:
-            self.percentile(jobdata)
-            return 1
+            return self.percentile(jobdata)
 
         if jobtype == NNTSC_SUBSCRIBE:
-            self.subscribe(jobdata)
-            return 1
+            return self.subscribe(jobdata)
 
-        return 0
+        return -1
    
     def aggregate(self, aggmsg):
         tup = pickle.loads(aggmsg)
@@ -78,8 +79,12 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             for s in streams:
                 result = ({s:[]}, {s:0}, name, [s], fname, False)
-                self.pipesend((NNTSC_HISTORY, result))
-            return
+                try:
+                    self.pipeend.send((NNTSC_HISTORY, result))
+                except IOError as e:
+                    log("Failed to return empty history: %s\n" % (e))
+                    return -1
+            return 0
 
         if end == None:
             stoppoint = int(time.time())
@@ -98,8 +103,9 @@ class DBWorker(threading.Thread):
             generator = self.db.select_aggregated_data(name, streams, aggcols, 
                     start, end, groupcols, binsize, aggfunc)
 
-            self._query_history(generator, name, start, queryend, 
-                    streams, more)
+            if self._query_history(generator, name, start, queryend, 
+                    streams, [], more, False) == -1:
+                return -1
             start = queryend + 1
 
             # If we were asked for data up until "now", make sure we account 
@@ -108,6 +114,8 @@ class DBWorker(threading.Thread):
             # weeks of data
             if end == None:
                 stoppoint = int(time.time())
+
+        return 0
 
     def percentile(self, pcntmsg):
         tup = pickle.loads(pcntmsg)
@@ -121,8 +129,12 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             for s in streams:
                 result = ({s:[]}, {s:0}, name, [s], ntileagg, False)
-                self.pipesend((NNTSC_HISTORY, result))
-            return
+                try:
+                    self.pipeend.send((NNTSC_HISTORY, result))
+                except IOError as e:
+                    log("Failed to return empty history: %s\n" % (e))
+                    return -1
+            return 0
 
         if end == None:
             stoppoint = int(time.time())
@@ -141,8 +153,9 @@ class DBWorker(threading.Thread):
             generator = self.db.select_percentile_data(name, streams, ntilecols, 
                     othercols, start, end, binsize, ntileagg, otheragg)
 
-            self._query_history(generator, name, start, queryend, 
-                    streams, more)
+            if self._query_history(generator, name, start, queryend, 
+                    streams, [], more, False) == -1:
+                return -1
             start = queryend + 1
 
             # If we were asked for data up until "now", make sure we account 
@@ -151,7 +164,8 @@ class DBWorker(threading.Thread):
             # weeks of data
             if end == None:
                 stoppoint = int(time.time())
-
+        
+        return 0
     
     def subscribe(self, submsg):
         name, start, end, cols, streams = pickle.loads(submsg)
@@ -172,9 +186,22 @@ class DBWorker(threading.Thread):
             # No historical data, send empty history for all streams
             for s in streams:
                 result = ({s:[]}, {s:0}, name, [s], "raw", sub)
-                self.pipeend.send((NNTSC_HISTORY, result))
+                try:
+                    self.pipeend.send((NNTSC_HISTORY, result))
+                except IOError as e:
+                    log("Failed to return empty history: %s\n" % (e))
+                    return -1
 
-            return
+                # Subscribe to all streams
+                if sub:
+                    try:
+                        self.pipeend.send((NNTSC_SUBSCRIBE, \
+                                (s, start, end, cols, name)))  
+                    except IOError as e:
+                        log("Failed to subscribe to %s: %s" % (s, e))
+                        return -1
+
+            return 0
             
         if end == None:
             stoppoint = int(time.time())
@@ -192,8 +219,14 @@ class DBWorker(threading.Thread):
 
             generator = self.db.select_data(name, streams, cols, start, end)
 
-            self._query_history(generator, name, start, queryend,
-                    streams, more)
+            if (self._query_history(generator, name, start, queryend,
+                    streams, cols, more, sub)) == -1:
+                return -1
+
+            # Don't subscribe to a stream more than once
+            if sub == True:
+                sub = False
+
             start = queryend + 1
 
             # If we were asked for data up until "now", make sure we account 
@@ -203,11 +236,10 @@ class DBWorker(threading.Thread):
             if end == None:
                 stoppoint = int(time.time())
 
-        if sub:
-            for s in streams:
-                self.pipeend.send((NNTSC_SUBSCRIBE, (s, start, end, cols, name)))  
+        return 0
 
-    def _query_history(self, rowgen, name, start, end, streams, more):
+    def _query_history(self, rowgen, name, start, end, streams, cols, 
+            more, sub):
 
         currstream = -1
         historysize = 0
@@ -216,19 +248,41 @@ class DBWorker(threading.Thread):
 
         # Get any historical data that we've been asked for
         for row, tscol, binsize in rowgen:
-            
+                        
             # Limit the amount of history we export at any given time
             # to prevent us from using too much memory during processing
-            if row['stream_id'] != currstream:
+            if row['stream_id'] != currstream or historysize > 10000:
                 if currstream != -1:
+
+                    # We've reached the history limit, so make sure we
+                    # avoid duplicate subscriptions and set the 'more'
+                    # flag correctly
+                    if row['stream_id'] == currstream:
+                        thissub = False
+                        thismore = True
+                    else:
+                        thissub = sub
+                        thismore = more
 
                     # Export the history to the pipe
                     freq = self._calc_frequency(freqstats, binsize)
                     result = ({ currstream : history },
                             { currstream : freq },
-                            name, [currstream], "raw", more)
-                    self.pipeend.send((NNTSC_HISTORY, result))
-                    #print "Sent history for", currstream, freq, start, end, more
+                            name, [currstream], "raw", thismore)
+                    try:
+                        self.pipeend.send((NNTSC_HISTORY, result)) == 0
+                    except IOError as e:
+                        log("Failed to return history to client: %s" % (e))
+                        return -1
+        
+                    if thissub:
+                        s = currstream
+                        try:
+                            self.pipeend.send((NNTSC_SUBSCRIBE, \
+                                    (s, start, end, cols, name)))  
+                        except IOError as e:
+                            log("Subscribe failed for %s: %s" % (s, e))
+                            return -1
 
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
@@ -273,8 +327,11 @@ class DBWorker(threading.Thread):
             result = ({ currstream : history },
                     { currstream : freq },
                     name, [currstream], "raw", more)
-            self.pipeend.send((NNTSC_HISTORY, result))
-            #print "Sent last history for", currstream, freq, start, end, more
+            try:
+                self.pipeend.send((NNTSC_HISTORY, result)) == 0
+            except IOError as e:
+                log("Failed to return history to client: %s" % (e))
+                return -1
        
         # Also remember to export empty history for any streams that had
         # no data in the request period
@@ -283,9 +340,13 @@ class DBWorker(threading.Thread):
         missing = allstreams - observed
         for m in missing:
             result = ({m : []}, {m : 0}, name, [m], "raw", more)
-            self.pipeend.send((NNTSC_HISTORY, result))
-            #print "Sent empty history for", m, start, end, more
+            try:
+                self.pipeend.send((NNTSC_HISTORY, result)) == 0
+            except IOError as e:
+                log("Failed to return history to client: %s" % (e))
+                return -1
 
+        return 0
    
     def process_request(self, reqmsg):
         req_hdr = struct.unpack(nntsc_req_fmt,
@@ -322,16 +383,15 @@ class DBWorker(threading.Thread):
             self.cv.acquire()
 
             while len(self.parent.jobs) == 0:
-                #print "Waiiiiiting", self.pipeend.fileno()
                 self.cv.wait()
 
             job = self.parent.jobs[0]
             self.parent.jobs = self.parent.jobs[1:]
             self.cv.release()
-            
-            self.db = DBSelector(self.dbconf["name"], self.dbconf["user"], 
+           
+            self.db = DBSelector(self.threadid, self.dbconf["name"], self.dbconf["user"], 
                     self.dbconf["pass"], self.dbconf["host"])
-            if self.process_job(job) == 0:
+            if self.process_job(job) == -1:
                 break
             self.db.close()
 
@@ -385,10 +445,12 @@ class NNTSCClient(threading.Thread):
         self.jobcv = threading.Condition(self.joblock)
 
         self.workers = []
-        for i in range(0, 5):
+        for i in range(0, MAX_WORKERS):
             pipe_recv, pipe_send = Pipe(False)
-            
-            worker = DBWorker(self, pipe_send, dbconf, self.joblock, self.jobcv)
+            threadid = "client%d_thread%d" % (self.sock.fileno(), i)
+
+            worker = DBWorker(self, pipe_send, dbconf, self.joblock, 
+                    self.jobcv, threadid)
             worker.daemon = True
             worker.start()
 
@@ -602,12 +664,15 @@ class NNTSCClient(threading.Thread):
 
             inpready, outready, exready = select.select(input, [], [])
             for s in inpready:
-                if s == self.sock:
-                    if self.receive_client() == 0:
+                if s == self.pipeend:
+                    if self.receive_live() == 0:
                         running = 0
                         break
-                elif s == self.pipeend:
-                    if self.receive_live() == 0:
+                    # XXX This continue means that we prefer reading live 
+                    # data -- this may be a bad idea 
+                    continue
+                elif s == self.sock:
+                    if self.receive_client() == 0:
                         running = 0
                         break
                 else:
@@ -620,10 +685,15 @@ class NNTSCClient(threading.Thread):
         self.pipeend.close()
         self.sock.close()
 
+        # Add "halt" jobs to the job queue for each worker
+        self.jobcv.acquire()
+        for w in self.workers:
+            self.jobs.append((-1, None))
+        self.jobcv.notify_all()
+        self.jobcv.release()
+            
         for w in self.workers:
             w[0].close()
-            w[2].close()
-            
 
 class NNTSCExporter:
     def __init__(self, port):
@@ -665,7 +735,7 @@ class NNTSCExporter:
         return results
 
     def register_stream(self, s, sock, cols, start, end, name):
-        print "Registered new stream: ", s, start, end
+        #print "Registered new stream: ", s, start, end
         if self.subscribers.has_key(s):
             self.subscribers[s].append((sock, cols, start, end, name))
         else:

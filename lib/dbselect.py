@@ -5,7 +5,7 @@ import time, sys
 
 
 class DBSelector:
-    def __init__(self, dbname, dbuser, dbpass=None, dbhost=None):
+    def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None):
 
         connstr = "dbname=%s user=%s" % (dbname, dbuser)
         if dbpass != "" and dbpass != None:
@@ -18,42 +18,62 @@ class DBSelector:
         except psycopg2.DatabaseError as e:
             log("DBSelector: Error connecting to database: %s" % e)
             self.conn = None
-            self.cursor = None
+            self.basiccursor = None
+            self.datacursor = None
             return
 
         try:
-            self.cursor = self.conn.cursor(
+            self.basiccursor = self.conn.cursor(
                     cursor_factory=psycopg2.extras.DictCursor)
         except psycopg2.DatabaseError as e:
-            log("DBSelector: Failed to create cursor: %s" % e)
-            self.cursor = None
+            log("DBSelector: Failed to create basic cursor: %s" % e)
+            self.basiccursor = None
+            return
+        
+        self.datacursor = None
+        self.cursorname = "cursor_" + uniqueid 
+
+    def _reset_cursor(self):
+        if self.conn == None:
+            return
+
+        if self.datacursor:
+            self.datacursor.close()
+
+        try:
+            self.datacursor = self.conn.cursor(self.cursorname,
+                    cursor_factory=psycopg2.extras.DictCursor)
+        except psycopg2.DatabaseError as e:
+            log("DBSelector: Failed to create data cursor: %s" % e)
+            self.datacursor = None
             return
 
     def __del__(self):
         self.close()
 
     def close(self):
-        if self.conn:
-            self.conn.commit()
         
-        if self.cursor:
-            self.cursor.close()
+        if self.datacursor:
+            self.datacursor.close()
+        if self.basiccursor:
+            self.basiccursor.close()
         if self.conn:
             self.conn.close()
         
-        self.cursor = None
+        self.basiccursor = None
+        self.datacursor = None
         self.conn = None
 
 
     def list_collections(self):
-        if self.cursor == None:
+        if self.basiccursor == None:
             return []
         
         collections = []
 
-        self.cursor.execute("SELECT * from collections")
+        self.basiccursor.execute("SELECT * from collections")
         while True:
-            row = self.cursor.fetchone()
+            row = self.basiccursor.fetchone()
 
             if row == None:
                 break
@@ -64,26 +84,26 @@ class DBSelector:
         return collections
         
     def get_collection_schema(self, colid):
-        if self.cursor == None:
+        if self.basiccursor == None:
             return [], []
 
-        self.cursor.execute(
+        self.basiccursor.execute(
                 "SELECT streamtable, datatable from collections WHERE id=%s",
                 (colid,))
         
-        tables = self.cursor.fetchone()
+        tables = self.basiccursor.fetchone()
 
         # Parameterised queries don't work on the FROM clause -- our table
         # names *shouldn't* be an SQL injection risk, right?? XXX
-        self.cursor.execute(
+        self.basiccursor.execute(
                 "SELECT * from %s LIMIT 1" % (tables['streamtable']))
         
-        streamcolnames = [cn[0] for cn in self.cursor.description]
+        streamcolnames = [cn[0] for cn in self.basiccursor.description]
               
-        self.cursor.execute(
+        self.basiccursor.execute(
                 "SELECT * from %s LIMIT 1" % (tables['datatable']))
         
-        datacolnames = [cn[0] for cn in self.cursor.description]
+        datacolnames = [cn[0] for cn in self.basiccursor.description]
         return streamcolnames, datacolnames         
 
     def select_streams_by_module(self, mod):
@@ -96,11 +116,13 @@ class DBSelector:
         # Put all the dictionaries into a list
 
         # Find the collections matching this module
-        self.cursor.execute(
+        if self.basiccursor == None:
+            return []
+        self.basiccursor.execute(
                 "SELECT * from collections where module=%s", (mod,))
         streamtables = {}
         
-        cols = self.cursor.fetchall()
+        cols = self.basiccursor.fetchall()
 
         for c in cols:
             streamtables[c["id"]] = (c["streamtable"], c["modsubtype"])
@@ -109,10 +131,10 @@ class DBSelector:
         for cid, (tname, sub) in streamtables.items():
             sql = """ SELECT * FROM streams, %s WHERE streams.collection=%s 
                       AND streams.id = %s.stream_id """ % (tname, "%s", tname)
-            self.cursor.execute(sql, (cid,))
+            self.basiccursor.execute(sql, (cid,))
 
             while True:
-                row = self.cursor.fetchone()
+                row = self.basiccursor.fetchone()
                 if row == None:
                     break
                 row_dict = {"modsubtype":sub}
@@ -124,20 +146,22 @@ class DBSelector:
         return streams
 
     def select_streams_by_collection(self, coll, minid):
-        self.cursor.execute(
+        if self.basiccursor == None:
+            return []
+        self.basiccursor.execute(
                 "SELECT * from collections where id=%s", (coll,))
-        assert(self.cursor.rowcount == 1)
+        assert(self.basiccursor.rowcount == 1)
 
-        coldata = self.cursor.fetchone()
+        coldata = self.basiccursor.fetchone()
 
         tname = coldata['streamtable']
         sql = """SELECT * FROM streams, %s WHERE streams.id = %s.stream_id
                  AND streams.id > %s""" % (tname, tname, "%s")
-        self.cursor.execute(sql, (minid,))
+        self.basiccursor.execute(sql, (minid,))
 
         selected = []
         while True:
-            row = self.cursor.fetchone()
+            row = self.basiccursor.fetchone()
             if row == None:
                 break
             stream_dict = {}
@@ -163,7 +187,7 @@ class DBSelector:
 
         if type(binsize) is not int:
             return
-
+        
         if stop_time == None:
             stop_time = int(time.time())
         if start_time == None:
@@ -204,7 +228,6 @@ class DBSelector:
 
     def select_data(self, col, stream_ids, selectcols, start_time=None, 
             stop_time=None):
-
         if stop_time == None:
             stop_time = int(time.time())
         if start_time == None:
@@ -231,6 +254,10 @@ class DBSelector:
     def _generic_select(self, table, streams, params, selcols, groupcols,
             tscol, binsize):
 
+        self._reset_cursor()
+        if self.datacursor == None:
+            return
+
         selclause = "SELECT "
         for i in range(0, len(selcols)):
             selclause += selcols[i]
@@ -256,14 +283,15 @@ class DBSelector:
         sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause
 
-        self.cursor.execute(sql, params)
+        self.datacursor.execute(sql, params)
 
         while True:
-            row = self.cursor.fetchone()
-            if row == None:
+            fetched = self.datacursor.fetchmany(100)
+            if fetched == []:
                 break
 
-            yield (row, tscol, binsize)
+            for row in fetched:
+                yield (row, tscol, binsize)
 
         #return self._form_datadict(selcols, tscol, binsize, streams)
 
@@ -282,11 +310,13 @@ class DBSelector:
 
     def _get_data_table(self, col, streams, start, stop):
         
-        self.cursor.execute(
+        if self.basiccursor == None:
+            return
+        self.basiccursor.execute(
                 "SELECT * from collections where id=%s", (col,))
-        assert(self.cursor.rowcount == 1)
+        assert(self.basiccursor.rowcount == 1)
 
-        coldata = self.cursor.fetchone()
+        coldata = self.basiccursor.fetchone()
         tname = coldata['datatable']
         module = coldata['module']
         subtype = coldata['modsubtype']
@@ -294,19 +324,21 @@ class DBSelector:
         if module == "amp" and subtype == "traceroute":
             # Special case for amp traceroute, as we use a parameterised
             # function to select data rather than a single table 
-            table = "select_amp_traceroute(%s, %s, %s)"
-            params = [streams] + [start] + [stop]
+            #table = "select_amp_traceroute(%s, %s, %s)"
+            #params = [streams] + [start] + [stop]
+            table = tname
+            params = []
         else:
             table = tname
             params = []
             
-        self.cursor.execute(
+        self.basiccursor.execute(
                 "SELECT * from information_schema.columns WHERE table_name=%s",
                 (tname,))
 
         columns = []
         while True:
-            row = self.cursor.fetchone()
+            row = self.basiccursor.fetchone()
             if row == None:
                 break
 
@@ -523,6 +555,9 @@ class DBSelector:
             start_time = None, stop_time = None, binsize=0, 
             ntile_aggregator = "avg", other_aggregator = "avg"):
 
+        self._reset_cursor()
+        if self.datacursor == None:
+            return
         # This is a horrible looking function, but we are trying to construct
         # a pretty complicated query
         #
@@ -672,13 +707,15 @@ class DBSelector:
         # Execute our query!
         params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
 
-        self.cursor.execute(sql, params)
+        self.datacursor.execute(sql, params)
         while True:
-            row = self.cursor.fetchone()
-            if row == None:
+            fetched = self.datacursor.fetchmany(100)
+
+            if fetched == []:
                 break
 
-            yield (row, "binstart", binsize)
+            for row in fetched:
+                yield (row, "binstart", binsize)
         
 
             
