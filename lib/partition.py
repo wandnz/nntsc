@@ -38,6 +38,18 @@ class PartitionedTable:
             if end > self.lastend:
                 self.lastend = end
 
+        # If no trigger function exists for this table, create one
+
+        triggers = db.conn.execute("""SELECT * from information_schema.triggers WHERE trigger_name = '%s'""" % (self.triggername))
+
+        assert(triggers.rowcount <= 1)
+        if triggers.rowcount == 1:
+            return
+
+        triggersql = text("""CREATE TRIGGER %s BEFORE INSERT ON %s
+                FOR EACH ROW EXECUTE PROCEDURE %s();""" % 
+                (self.triggername, self.base, self.base + "_trigfunc"))
+        self.db.conn.execute(triggersql)
 
     def _create_table(self, partvalue):
         
@@ -118,20 +130,6 @@ class PartitionedTable:
                 LANGUAGE plpgsql;
                 """ % (self.base + "_trigfunc", self.base, name))
         self.db.conn.execute(trigfunc)
-
-
-        # Create the trigger if it doesn't exist
-        # XXX I really don't like this whole "drop and re-create" thing but
-        # there is no 'CREATE OR REPLACE' or 'IF NOT EXISTS' for trigger
-        # creation, which is ridiculous
-        self.db.conn.execute("DROP TRIGGER IF EXISTS %s ON %s;" % 
-                (self.triggername, self.base))
-        trigger = text("""CREATE TRIGGER %s BEFORE INSERT ON %s
-                FOR EACH ROW EXECUTE PROCEDURE %s();""" % 
-                (self.triggername, self.base, self.base + "_trigfunc"))
-        self.db.conn.execute(trigger)
-        
-
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

@@ -116,8 +116,24 @@ class AmpModule:
         self.channel.basic_qos(prefetch_count=1)
         self.channel.basic_consume(self.process_data, queue=self.queue)
 
+        #self.connection.add_on_close_callback(self.on_connection_closed)
+        #self.channel.add_on_close_callback(self.on_channel_closed)
+        #self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
+
         # TODO: Add some sort of callback in the event of the server going
         # away
+
+    def on_connection_closed(self, connection, reply_code, reply_text):
+        logger.log("Connection to RabbitMQ closed, trying again shortly: (%s) %s" % (reply_code, reply_text))
+
+    def on_channel_closed(self, channel, reply_code, reply_text):
+        logger.log("Channel %i was closed: (%s) %s" % (channel, reply_code, reply_text))
+        self.connection.close()
+
+    def on_consumer_cancelled(self, frame):
+        logger.log("Consumer was cancelled remotely, shutting down")
+        if self.channel:
+            self.channel.close()
 
     def process_data(self, channel, method, properties, body):
         """ Process a single message from the queue.
