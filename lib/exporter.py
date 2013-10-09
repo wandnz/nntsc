@@ -104,7 +104,7 @@ class DBWorker(threading.Thread):
                     start, end, groupcols, binsize, aggfunc)
 
             if self._query_history(generator, name, start, queryend, 
-                    streams, [], more, False) == -1:
+                    streams, [], more, -1) == -1:
                 return -1
             start = queryend + 1
 
@@ -154,7 +154,7 @@ class DBWorker(threading.Thread):
                     othercols, start, end, binsize, ntileagg, otheragg)
 
             if self._query_history(generator, name, start, queryend, 
-                    streams, [], more, False) == -1:
+                    streams, [], more, -1) == -1:
                 return -1
             start = queryend + 1
 
@@ -177,9 +177,9 @@ class DBWorker(threading.Thread):
             end = None
         
         if (end == None or end > now):
-            sub = True
+            subend = end
         else:
-            sub = False
+            subend = -1
         
         
         if start >= now:
@@ -220,12 +220,12 @@ class DBWorker(threading.Thread):
             generator = self.db.select_data(name, streams, cols, start, end)
 
             if (self._query_history(generator, name, start, queryend,
-                    streams, cols, more, sub)) == -1:
+                    streams, cols, more, subend)) == -1:
                 return -1
 
             # Don't subscribe to a stream more than once
-            if sub == True:
-                sub = False
+            if subend != -1:
+                subend = -1
 
             start = queryend + 1
 
@@ -236,10 +236,11 @@ class DBWorker(threading.Thread):
             if end == None:
                 stoppoint = int(time.time())
 
+        log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
 
     def _query_history(self, rowgen, name, start, end, streams, cols, 
-            more, sub):
+            more, subend):
 
         currstream = -1
         historysize = 0
@@ -258,10 +259,10 @@ class DBWorker(threading.Thread):
                     # avoid duplicate subscriptions and set the 'more'
                     # flag correctly
                     if row['stream_id'] == currstream:
-                        thissub = False
+                        thissub = -1
                         thismore = True
                     else:
-                        thissub = sub
+                        thissub = subend
                         thismore = more
 
                     # Export the history to the pipe
@@ -269,20 +270,9 @@ class DBWorker(threading.Thread):
                     result = ({ currstream : history },
                             { currstream : freq },
                             name, [currstream], "raw", thismore)
-                    try:
-                        self.pipeend.send((NNTSC_HISTORY, result)) == 0
-                    except IOError as e:
-                        log("Failed to return history to client: %s" % (e))
+                    if self._write_history(currstream, result, name, cols,
+                            start, thissub) == -1:
                         return -1
-        
-                    if thissub:
-                        s = currstream
-                        try:
-                            self.pipeend.send((NNTSC_SUBSCRIBE, \
-                                    (s, start, end, cols, name)))  
-                        except IOError as e:
-                            log("Subscribe failed for %s: %s" % (s, e))
-                            return -1
 
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
@@ -327,12 +317,9 @@ class DBWorker(threading.Thread):
             result = ({ currstream : history },
                     { currstream : freq },
                     name, [currstream], "raw", more)
-            try:
-                self.pipeend.send((NNTSC_HISTORY, result)) == 0
-            except IOError as e:
-                log("Failed to return history to client: %s" % (e))
+            if self._write_history(currstream, result, name, cols,
+                    start, subend) == -1:
                 return -1
-       
         # Also remember to export empty history for any streams that had
         # no data in the request period
         allstreams = set(streams)
@@ -340,12 +327,27 @@ class DBWorker(threading.Thread):
         missing = allstreams - observed
         for m in missing:
             result = ({m : []}, {m : 0}, name, [m], "raw", more)
-            try:
-                self.pipeend.send((NNTSC_HISTORY, result)) == 0
-            except IOError as e:
-                log("Failed to return history to client: %s" % (e))
+            if self._write_history(m, result, name, cols,
+                    start, subend) == -1:
                 return -1
 
+        return 0
+  
+    def _write_history(self, stream, result, name, cols, start, subend):
+        try:
+            self.pipeend.send((NNTSC_HISTORY, result))
+        except IOError as e:
+            log("Failed to return history to client: %s" % (e))
+            return -1
+        
+        if subend != -1:
+            try:
+                self.pipeend.send((NNTSC_SUBSCRIBE, \
+                        (stream, start, subend, cols, name)))  
+            except IOError as e:
+                log("Subscribe failed for %s: %s" % (stream, e))
+                return -1
+      
         return 0
    
     def process_request(self, reqmsg):
@@ -360,21 +362,35 @@ class DBWorker(threading.Thread):
             for c in cols:
                 shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
 
-            self.pipeend.send((NNTSC_COLLECTIONS, shrink))
+            try:
+                self.pipeend.send((NNTSC_COLLECTIONS, shrink))
+            except IOError as e:
+                log("Sending collections failed: %s" % (e))
+                return -1
 
         if req_hdr[0] == NNTSC_REQ_SCHEMA:
             col_id = req_hdr[1]
             stream_schema, data_schema = self.db.get_collection_schema(col_id)
 
             result = (col_id, stream_schema, data_schema)
-            self.pipeend.send((NNTSC_SCHEMAS, result ))
+            try:
+                self.pipeend.send((NNTSC_SCHEMAS, result ))
+            except IOError as e:
+                log("Sending schemas failed: %s" % (e))
+                return -1
 
 
         if req_hdr[0] == NNTSC_REQ_STREAMS:
             col = req_hdr[1]
             startstream = req_hdr[2]
             streams = self.db.select_streams_by_collection(col, startstream)
-            self.pipeend.send((NNTSC_STREAMS, (col, streams)))
+            try:
+                self.pipeend.send((NNTSC_STREAMS, (col, streams)))
+            except IOError as e:
+                log("Sending streams failed: %s" % (e))
+                return -1
+
+        return 0
 
     def run(self):
         running = 1
@@ -623,7 +639,7 @@ class NNTSCClient(threading.Thread):
                 totalsent += sent
 
         pipefill -= totalsent
-        print "Successfully reflected live data", pipefill
+        #print "Successfully reflected live data", pipefill
         return totalsent
 
     def receive_worker(self, socket):
@@ -826,7 +842,7 @@ class NNTSCExporter:
                 if sock in self.client_sockets:
                     pipesend = self.client_sockets[sock]
 
-                    print "Pushing onto client pipe", stream_id, col
+                    #print "Pushing onto client pipe", stream_id, col
                     pipesend.send(header + contents)
                     pipefill += len(header + contents)
                     
@@ -835,7 +851,7 @@ class NNTSCExporter:
                     #else:
                     if results != {}:
                         active.append((sock, columns, start, end, col))
-                    print "Send successful", pipefill
+                    #print "Send successful", pipefill
             self.subscribers[stream_id] = active
 
         return 0
