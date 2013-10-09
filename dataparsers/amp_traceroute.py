@@ -21,8 +21,9 @@
 
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index, Sequence
-from sqlalchemy.sql import text
+    String, MetaData, ForeignKey, UniqueConstraint, Index, Sequence, \
+    ForeignKeyConstraint
+from sqlalchemy.sql import and_, or_, not_, text
 from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
@@ -32,7 +33,6 @@ import libnntscclient.logger as logger
 
 STREAM_TABLE_NAME="streams_amp_traceroute"
 DATA_VIEW_NAME="data_amp_traceroute"
-HOP_TABLE_NAME="internal_amp_traceroute_hop"
 
 amp_trace_streams = {}
 test_partitions = None
@@ -75,39 +75,29 @@ def data_tables(db):
         extend_existing=True,
     )
 
-    hoptable = Table("internal_amp_traceroute_hop", db.metadata,
-        Column('hop_id', Integer, primary_key=True),
-        Column('hop_address', postgresql.INET, nullable=False),
-        UniqueConstraint('hop_address'),
-        extend_existing=True,
-    )
-
-    Index('index_amp_traceroute_hop_address', hoptable.c.hop_address)
 
     pathtable = Table("internal_amp_traceroute_path", db.metadata,
+        Column('teststart', Integer, nullable=False),
         Column('test_id', Integer,
                 ForeignKey("internal_amp_traceroute_test.traceroute_test_id",
                     ondelete="CASCADE")),
-        Column('hop_id', Integer,
-                ForeignKey("internal_amp_traceroute_hop.hop_id",
-                    ondelete="CASCADE")),
+        Column('hop_address', postgresql.INET, nullable=False),
         Column('path_ttl', Integer, nullable=False),
         Column('hop_rtt', Integer, nullable=True),
         extend_existing=True,
     )
 
     # This view is kinda tricky
-    fullhops = select([pathtable.c.test_id, pathtable.c.path_ttl,
-            pathtable.c.hop_rtt,
-            hoptable.c.hop_address]).select_from(hoptable.join(pathtable))
-    fh = fullhops.alias()
+    fh = pathtable.alias()
 
     viewquery = select([testtable.c.stream_id, testtable.c.timestamp,
             testtable.c.traceroute_test_id,
             testtable.c.length, testtable.c.error_type,
             testtable.c.error_code, testtable.c.packet_size,
             fh.c.path_ttl, fh.c.hop_rtt,
-            fh.c.hop_address]).select_from(testtable.join(fh))
+            fh.c.hop_address]).select_from(testtable.join(fh, \
+            and_(fh.c.teststart == testtable.c.timestamp, \
+            fh.c.test_id == testtable.c.traceroute_test_id)))
 
     dataview = db.create_view(DATA_VIEW_NAME, viewquery)
 
@@ -173,26 +163,6 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     return streamid
 
 
-def get_or_create_hop_id(db, address):
-    """ Get the hop id for a hop if it exists, otherwise create it """
-
-    hop_table = db.metadata.tables[HOP_TABLE_NAME]
-    try:
-        item = db.conn.execute(hop_table.select().where(
-                    hop_table.c.hop_address==address))
-        # hop exists with this address, return the hop id
-        if item.rowcount == 1:
-            return item.fetchone()["hop_id"]
-
-        # hop with this address doesn't exist, create it
-        item = db.conn.execute(hop_table.insert(), hop_address=address)
-        return item.inserted_primary_key[0]
-    except IntegrityError, e:
-        db.rollback_transaction()
-        logger.log(e)
-        return -1
-
-
 def insert_data(db, exp, stream, ts, test_info, hop_info):
     """ Insert data for a single traceroute test into the database """
     global test_partitions, path_partitions
@@ -244,23 +214,19 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
         logger.log(e)
         return -1
 
+    db.commit_transaction()
+
     if path_partitions == None:
         path_partitions = PartitionedTable(db, "internal_amp_traceroute_path",
-                100000, ["test_id"], "test_id")
-    path_partitions.update(test_id)
+                60 * 60 * 24 * 7, ["test_id", "teststart"], "teststart")
+    path_partitions.update(ts)
 
     # insert each hop along the path
     ttl = 1
     for hop in hop_info:
-        # create hop if not already present and get hop id
-        hop_id = get_or_create_hop_id(db, hop["address"])
-        if hop_id < 0:
-            return -1;
-
-        # link this point in the path to this hop
         try:
-            db.conn.execute(path_table.insert(), stream_id=stream, timestamp=ts,
-                    test_id=test_id, hop_id=hop_id, path_ttl=ttl,
+            db.conn.execute(path_table.insert(), teststart=ts,
+                    test_id=test_id, hop_address=hop["address"], path_ttl=ttl,
                     hop_rtt=hop["rtt"])
         except IntegrityError, e:
             db.rollback_transaction()
