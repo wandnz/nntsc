@@ -3,6 +3,12 @@ import psycopg2.extras
 from libnntscclient.logger import *
 import time, sys
 
+# Class used for querying the NNTSC database. 
+# Uses psycopg2 rather than SQLAlchemy for the following reasons:
+#  * simple to understand and use
+#  * supports parameterised queries
+#  * named cursors allow us to easily deal with large result sets
+#  * documentation that makes sense
 
 class DBSelector:
     def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None):
@@ -22,6 +28,13 @@ class DBSelector:
             self.datacursor = None
             return
 
+        # The basiccursor is used for all "short" queries that are
+        # unlikely to produce a large result. The full result will be 
+        # sent to us and held in memory.
+        #
+        # The main advantage of using a client-side cursor is that
+        # we can re-use it without having to recreate it after each
+        # query.
         try:
             self.basiccursor = self.conn.cursor(
                     cursor_factory=psycopg2.extras.DictCursor)
@@ -30,6 +43,16 @@ class DBSelector:
             self.basiccursor = None
             return
         
+        # The datacursor is used for querying the time series data tables.
+        # It is a named server-side cursor which means that the results
+        # will be sent back to the DBSelector in small chunks as required.
+        #
+        # Because the cursor is on the database itself, it uses a minimal
+        # amount of memory even for large result sets. There will be some
+        # additional overhead due to periodically fetching more results 
+        # from the database but in most use cases, the database and the 
+        # DBSelector are located on the same host so this should not be
+        # a major issue.
         self.datacursor = None
         self.cursorname = "cursor_" + uniqueid 
 
@@ -37,6 +60,8 @@ class DBSelector:
         if self.conn == None:
             return
 
+        # Re-create the datacursor as it seems you can't just re-use a
+        # a named cursor for multiple queries. 
         if self.datacursor:
             self.datacursor.close()
 
@@ -66,6 +91,9 @@ class DBSelector:
 
 
     def list_collections(self):
+        """ Fetches all of the collections that are supported by this
+            instance of NNTSC.
+        """
         if self.basiccursor == None:
             return []
         
@@ -84,6 +112,13 @@ class DBSelector:
         return collections
         
     def get_collection_schema(self, colid):
+        """ Fetches the column names for both the stream and data tables
+            for the given collection.
+
+            Returns a tuple where the first item is the list of column
+            names from the streams table and the second item is the list
+            of column names from the data table.
+        """
         if self.basiccursor == None:
             return [], []
 
@@ -107,6 +142,19 @@ class DBSelector:
         return streamcolnames, datacolnames         
 
     def select_streams_by_module(self, mod):
+        """ Fetches all streams that belong to collections that have a common
+            parent module, e.g. amp, lpi or rrd.
+
+            For example, passing "amp" into this function would give you
+            all amp-icmp and amp-traceroute streams.
+
+            Note that if you want the streams for a single collection, you
+            should use select_streams_by_collection.
+
+            Returns a list of streams, where each stream is a dictionary
+            describing all of the stream parameters.
+        """
+
         # Find all streams for a given parent collection, e.g. amp, lpi
         #
         # For each stream:
@@ -146,6 +194,21 @@ class DBSelector:
         return streams
 
     def select_streams_by_collection(self, coll, minid):
+        """ Fetches all streams that belong to a given collection.
+
+            For example, passing "amp-icmp" into this function would give you
+            all amp-icmp streams.
+
+            Only streams with an id number greater than 'minid' will be
+            returned. This is useful for getting all of the new streams that
+            have been created since the last time you called this function,
+            as stream ids are assigned sequentially.
+
+            To get all streams for a collection, set minid to 0.
+            
+            Returns a list of streams, where each stream is a dictionary
+            describing all of the stream parameters.
+        """
         if self.basiccursor == None:
             return []
         self.basiccursor.execute(
@@ -176,33 +239,84 @@ class DBSelector:
             start_time = None, stop_time = None, groupcols = None, 
             binsize = 0, aggregator="avg"):
 
-        # 'aggregator' can take many forms:
-        #    It can be a string (in which case, the aggregation function will 
-        #    be applied to all of the aggcols).
-        #    It can be a list with one string in it (same result as above).
-        #    It can be a list with multiple strings. In this case, there must
-        #    be one entry in the aggregator list for every entry in the
-        #    aggcols list -- the aggregator in position 0 will be applied to 
-        #    the column in position 0, etc.
+        """ Queries the database for time series data, splits the time
+            series into bins and applies the given aggregation function(s)
+            to each time bin.
+
+            This function is mainly used for fetching data for display
+            on a graph, as you probably don't want to plot every individual
+            data point when the graph scale is measured in days. Instead,
+            this function can be used to return the average value for each
+            hour, for example.
+
+            Parameters:
+                col -- the id of the collection to query
+                stream_ids -- a list of stream ids to get data for
+                aggcols -- a list of data columns to aggregate
+                start_time -- a timestamp describing the start of the
+                              time period that data is required for. If
+                              None, this is set to 1 day before the stop
+                              time
+                stop_time -- a timestamp describing the end of the time
+                             period that data is required for. If None,
+                             this is set to the current time.
+                groupcols -- a list of data columns to group the results by.
+                             'stream_id' will always be added to this list
+                             if not present.
+                binsize -- the size of each time bin. If 0 (the default),
+                           the entire data series will aggregated into a 
+                           single summary value.
+                aggregator -- the aggregator function(s) to be applied to the
+                              aggcols. If this is a string, the described
+                              function will be applied to all columns. If
+                              this is a list with one string in it, the same
+                              thing happens. If this is a list with multiple
+                              strings, then each string describes the function
+                              to apply to the column in the matching position
+                              in the aggcols list. 
+
+                              In the last case, there MUST be an entry in the
+                              aggregator list for every column provided in
+                              aggcols.
+            
+            This function is a generator function and will yield a tuple each
+            time it is iterated over. The tuple contains a row from the result
+            set, the name of the column describing the start of each bin and
+            the binsize.
+
+            Example usage -- get the hourly average of 'value' for streams
+            1, 2 and 3 from collection 1 for a given week:
+
+                for row, tscol, binsize in db.select_aggregated_data(1, 
+                        [1,2,3], ['value'], 1380758400, 1381363200, None, 
+                        60 * 60, "avg"):
+                    process_row(row)
+        """
 
         if type(binsize) is not int:
             return
         
+        # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())
         if start_time == None:
             start_time = stop_time - (24 * 60 * 60)
 
+        # Find the data table for the requested collection
         table, baseparams, columns = \
-                self._get_data_table(col, stream_ids, start_time, stop_time)
+                self._get_data_table(col, stream_ids)
+
+        # Make sure stream_id is included in our group by clause -- we need
+        # to keep them separate when aggregating
         if groupcols == None:
             groupcols = ['stream_id']
         elif 'stream_id' not in groupcols:
             groupcols.append('stream_id')
         
+        # Make sure we only query for columns that exist in the data table
         # XXX Could we do this in one sanitise call?
-        groupcols = self._sanitise_columns(columns, groupcols, baseparams) 
-        aggcols = self._sanitise_columns(columns, aggcols, baseparams)
+        groupcols = self._sanitise_columns(columns, groupcols) 
+        aggcols = self._sanitise_columns(columns, aggcols)
 
         labeled_aggcols, aggfuncs = self._apply_aggregation(aggcols, aggregator)
         labeled_groupcols = list(groupcols)
@@ -215,6 +329,8 @@ class DBSelector:
             labeled_aggcols.append("min(timestamp) AS min_timestamp")
             tscol = "min_timestamp"
         else:
+            # We're going to (probably) have multiple bins, so we also
+            # want to group measurements into the appropriate bin
             labeled_groupcols.append(\
                     "(timestamp - (timestamp %%%% %u)) AS binstart" \
                     % (binsize)) 
@@ -228,15 +344,54 @@ class DBSelector:
 
     def select_data(self, col, stream_ids, selectcols, start_time=None, 
             stop_time=None):
+
+        """ Queries the database for time series data.
+
+            This function will return all measurements for the given
+            streams that fall between the start and end time. 
+
+            Parameters:
+                col -- the id of the collection to query
+                stream_ids -- a list of stream ids to get data for
+                selectcols -- a list of data columns to select on. If not
+                              included, 'stream_id' and 'timestamp' will
+                              be added to this list before running the
+                              query
+                start_time -- a timestamp describing the start of the
+                              time period that data is required for. If
+                              None, this is set to 1 day before the stop
+                              time
+                stop_time -- a timestamp describing the end of the time
+                             period that data is required for. If None,
+                             this is set to the current time.
+            
+            This function is a generator function and will yield a tuple each
+            time it is iterated over. The tuple contains a row from the result
+            set, the name of the timestamp column and the binsize (which is 
+            always zero in this case).
+
+            Example usage -- get the contents of the 'value' column for streams
+            1, 2 and 3 from collection 1 for a given week:
+
+                for row, tscol, binsize in db.select_data(1, [1,2,3], 
+                        ['value'], 1380758400, 1381363200):
+                    process_row(row)
+        """
+        
+        # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())
         if start_time == None:
             start_time = stop_time - (24 * 60 * 60)
 
+        # Find the data table for the requested collection
         table, baseparams, columns = \
-                self._get_data_table(col, stream_ids, start_time, stop_time)
-        selectcols = self._sanitise_columns(columns, selectcols, baseparams)
+                self._get_data_table(col, stream_ids)
+
+        # Make sure we only query for columns that are in the data table
+        selectcols = self._sanitise_columns(columns, selectcols)
         
+        # These columns are important so include them regardless
         if 'stream_id' not in selectcols:
             selectcols.append('stream_id')
         if 'timestamp' not in selectcols:
@@ -248,12 +403,14 @@ class DBSelector:
                 selectcols, None, 'timestamp', 0):
             yield resultrow
 
-        #return self._generic_select(table, stream_ids, params, selectcols, 
-        #        None, 'timestamp', 0)
 
     def _generic_select(self, table, streams, params, selcols, groupcols,
             tscol, binsize):
+        """ Generator function that constructs and executes the SQL query
+            required for both select_data and select_aggregated_data.
+        """
 
+        # Make sure our datacursor is usable
         self._reset_cursor()
         if self.datacursor == None:
             return
@@ -269,6 +426,8 @@ class DBSelector:
         
         whereclause = self._generate_where(streams)
 
+        # Form the "GROUP BY" section of our query (if asking
+        # for aggregated data)
         if groupcols == None or len(groupcols) == 0:
             groupclause = ""
         else:
@@ -278,6 +437,7 @@ class DBSelector:
                 if i != len(groupcols) - 1:
                     groupclause += ", "
 
+        # Order the results both chronologically and by stream id
         orderclause = " ORDER BY stream_id, %s " % (tscol)
 
         sql = selclause + fromclause + whereclause + groupclause \
@@ -286,6 +446,8 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         while True:
+            # fetchmany seems to be recommended over repeated calls to
+            # fetchone
             fetched = self.datacursor.fetchmany(100)
             if fetched == []:
                 break
@@ -293,9 +455,11 @@ class DBSelector:
             for row in fetched:
                 yield (row, tscol, binsize)
 
-        #return self._form_datadict(selcols, tscol, binsize, streams)
 
     def _generate_where(self, streams):
+        """ Forms a WHERE clause for an SQL query that encompasses all
+            streams in the provided list
+        """
         tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
 
         assert(len(streams) > 0)
@@ -308,8 +472,15 @@ class DBSelector:
 
         return tsclause + streamclause
 
-    def _get_data_table(self, col, streams, start, stop):
+    def _get_data_table(self, col, streams):
+        """ Finds the data table for a given collection
         
+            Returns a tuple containing three items:
+             1. the name of the data table
+             2. a list of query parameters required for that table
+             3. a list of columns present in the table
+           
+        """
         if self.basiccursor == None:
             return
         self.basiccursor.execute(
@@ -321,17 +492,15 @@ class DBSelector:
         module = coldata['module']
         subtype = coldata['modsubtype']
         
-        if module == "amp" and subtype == "traceroute":
-            # Special case for amp traceroute, as we use a parameterised
-            # function to select data rather than a single table 
-            #table = "select_amp_traceroute(%s, %s, %s)"
-            #params = [streams] + [start] + [stop]
-            table = tname
-            params = []
-        else:
-            table = tname
-            params = []
+        table = tname
+        
+        # Params is always empty -- this is a holdover from when one 
+        # of our data tables was a procedure which required parameters.
+        params = []
             
+        # This is the quickest way to get the column names -- don't
+        # try querying the data table itself because that could be slow
+        # if the table is, for example, a complicated view.
         self.basiccursor.execute(
                 "SELECT * from information_schema.columns WHERE table_name=%s",
                 (tname,))
@@ -345,7 +514,18 @@ class DBSelector:
             columns.append(row['column_name'])
         return table, params, columns
 
-    def _sanitise_columns(self, columns, selcols, params):
+    def _sanitise_columns(self, columns, selcols):
+        """ Removes columns from the provided list if they are not present
+            in the list of columns available for a table.
+
+            Parameters:
+                columns -- the column list to be sanitised
+                selcols -- the list of available columns for the table
+            
+            Returns:
+                A list of columns with any bogus entries removed
+        """
+        
         # Don't let anyone try to select on columns that aren't actually
         # in the data table -- this is mainly to prevent a user from asking
         # us to select on the column containing the string ';drop table X;'
@@ -358,7 +538,38 @@ class DBSelector:
         return sanitised
 
     def _apply_aggregation(self, selectors, aggregator):
+       
+        """ Given a list of columns and a list of aggregation functions
+            to apply to those columns, produces a list of SQL AS clauses
+            describing how to apply the appropriate aggregation to each
+            column.
+
+            Returns a tuple with 2 items:
+             1. The list of aggregations as SQL AS clauses, e.g. 
+                "avg(foo) AS foo_avg"
+             2. The list of aggregation functions being applied to
+                each column.
+
+            Parameters:
+                selectors -- the list of columns to apply aggregation to
+                aggregator -- the aggregation function(s) to apply. This may
+                              be a string if one aggregation function is to
+                              be applied to all columns. Otherwise, it should
+                              be a list of strings.
+
+            See in-code comment for a more detailed description of how 
+            'aggregator' may be specified.
+        """
         
+        # 'aggregator' can take many forms:
+        #    It can be a string (in which case, the aggregation function will 
+        #    be applied to all of the aggcols).
+        #    It can be a list with one string in it (same result as above).
+        #    It can be a list with multiple strings. In this case, there must
+        #    be one entry in the aggregator list for every entry in the
+        #    aggcols list -- the aggregator in position 0 will be applied to 
+        #    the column in position 0, etc.
+
         if type(aggregator) is str:
             # Only one aggregator, use it for all columns
             aggfuncs = [aggregator] * len(selectors)
@@ -394,170 +605,68 @@ class DBSelector:
 
         return aggcols, aggfuncs
 
-    def _form_datadict(self, selectcols, tscol, size, streams):
-        """ Converts a result object into a list of dictionaries, one
-            for each row. The dictionary is a map of column names to
-            values.
-
-            Also applies some heuristics across the returned result to try
-            and determine the size of each bin (if data has been aggregated).
-        """
-        data = []
-        perstream = {}
-
-        # Long and complicated explanation follows....
-        #
-        # We need to know the 'binsize' so that we can determine whether
-        # there are missing measurements in the returned result. This is
-        # useful for leaving gaps in our graphs where data was missing.
-        #
-        # The database will give us results that are binned according to the
-        # requested binsize, but this binsize may be smaller than the
-        # measurement frequency. If it is, we can't use the requested binsize
-        # to determine whether a measurement is missing because there will be
-        # empty bins simply because no measurement fell within that time
-        # period.
-        #
-        # Instead, we actually want to know the measurement frequency or
-        # the binsize, whichever is bigger. The problem is that we don't have
-        # any obvious way of knowing the measurement frequency, so we have to
-        # infer it.
-        #
-        # Each row in the result object corresponds to a bin. For
-        # non-aggregated data, the bin will always only cover one data
-        # measurement.
-        #
-        # There are two timestamps associated with each result row:
-        #
-        #   'binstart' is the timestamp where a bin begins and is calculated
-        #   based on the requested bin size. For non-aggregated data, this is
-        #   the same as the timestamp of the data point.
-        #
-        #   'timestamp' is the timestamp of the *last* measurement included in
-        #   the bin. This is the timestamp we use for plotting graphs.
-        #
-        #
-        # There are two main cases to consider:
-        #   1. The requested binsize is greater than or equal to the
-        #      measurement frequency. In this case, use the requested binsize.
-        #   2. The requested binsize is smaller than the measurement frequency.
-        #      In this case, we need to use the measurement frequency.
-        #
-        # In case 1, the vast majority of bins are going to be separated by
-        # the requested binsize. So we can detect this case by looking at the
-        # number of occasions the time difference between bins (using
-        # 'binstart' matches the binsize that we requested.
-        #
-        # Case 2 is trickier. Once we rule out case 1, we need to guess what
-        # the measurement frequency is. Fortunately, we know that each bin
-        # can only contain 1 measurement at most, so we can use the
-        # 'timestamp' field from consecutive bins to infer the frequency.
-        # We collect these time differences and use the mode of these values
-        # as our measurement frequency. This will work even if the requested
-        # binsize is not a factor of the measurement frequency.
-        #
-        # XXX Potential pitfalls
-        # * What if there are a lot of non-consecutive missing measurements?
-        # * What if the test changes its measurement frequency?
-
-        while True:
-            r = self.cursor.fetchone()
-            if r == None:
-                break
-
-            streamid = r['stream_id']
-            if streamid not in perstream:
-                perstream[streamid] = { \
-                        'lastts': 0,
-                        'lastbin': 0,
-                        'perfectbins': 0,
-                        'total_diffs': 0,
-                        'tsdiffs': {}
-                }
-
-
-            # Collecting data for our binsize heuristics
-            if perstream[streamid]['lastts'] == 0:
-                perstream[streamid]['lastts'] = r['timestamp']
-                perstream[streamid]['lastbin'] = r[tscol]
-            elif perstream[streamid]['lastts'] != r['timestamp']:
-                tsdiff = r['timestamp'] - perstream[streamid]['lastts']
-                bindiff = r[tscol] - perstream[streamid]['lastbin']
-
-                # Difference between bins matches our requested binsize
-                if bindiff == size:
-                    perstream[streamid]['perfectbins'] +=1
-
-                if tsdiff in perstream[streamid]['tsdiffs']:
-                    perstream[streamid]['tsdiffs'][tsdiff] += 1
-                else:
-                    perstream[streamid]['tsdiffs'][tsdiff] = 1
-
-                perstream[streamid]['total_diffs'] += 1
-                perstream[streamid]['lastts'] = r['timestamp']
-                perstream[streamid]['lastbin'] = r[tscol]
-
-            datadict = {}
-            for k,v in r.items():
-                datadict[k] = v
-            data.append(datadict)
-
-        frequencies = {}
-
-        for streamid in streams:
-            if streamid not in perstream:
-                frequencies[streamid] = 0
-                continue
-
-            if perstream[streamid]['total_diffs'] == 0:
-                if size < 300:
-                    freq = 300
-                else:
-                    freq = size
-                
-                frequencies[streamid] = freq
-                continue
-
-            # If this check passes, we requested a binsize greater than the
-            # measurement frequency (case 1, above)
-            if perstream[streamid]['perfectbins'] / \
-                    float(perstream[streamid]['total_diffs']) > 0.9:
-                frequencies[streamid] = size
-                continue
-
-            # If we get here, then our binsize is more than likely smaller
-            # than our measurement frequency. Now, we need to try and figure
-            # out what that frequency was...
-
-            # Try and set a sensible default frequency. In particular, let's
-            # not set the frequency too low, otherwise our graphs will end up
-            # lots of gaps if we get it wrong.
-            if size < 300:
-                freq = 300
-            else:
-                freq = size
-
-            # Find a suitable mode in all the timestamp differences.
-            # I require a strong mode, i.e. at least half the differences
-            # must be equal to the mode, as there shouldn't be a lot of
-            # variation in the time differences (unless your measurements are
-            # very patchy).
-            for td, count in perstream[streamid]['tsdiffs'].items():
-                if count >= 0.5 * perstream[streamid]['total_diffs']:
-                    freq = td
-                    break
-            frequencies[streamid] = freq
-            
-        return data, frequencies
-
-
     def select_percentile_data(self, col, stream_ids, ntilecols, othercols, 
             start_time = None, stop_time = None, binsize=0, 
             ntile_aggregator = "avg", other_aggregator = "avg"):
+        """ Queries the database for time series data, splits the time
+            series into bins and calculates the percentiles for the data
+            within each bin.
+            
+            This function is mainly used for converting conventional time
+            series data into a suitable format for display on a 
+            smokeping-style graph. The percentiles are used to draw 'smoke'
+            in addition to the median to show variation within the bin.
+            
+            "other" is used to describe columns that should be fetched in
+            addition to the percentile columns. The data values for these
+            columns will be aggregated into bins as though they had been
+            fetched using select_aggregated_data, i.e. there will be just
+            one value per bin rather than an array, as with percentile
+            columns.
 
-        self._reset_cursor()
-        if self.datacursor == None:
-            return
+            Parameters:
+                col -- the id of the collection to query
+                stream_ids -- a list of stream ids to get data for
+                ntilecols -- a list of data columns to fetch as percentiles
+                othercols -- a list of data columns to fetch as aggregated
+                             data
+                start_time -- a timestamp describing the start of the
+                              time period that data is required for. If
+                              None, this is set to 1 day before the stop
+                              time
+                stop_time -- a timestamp describing the end of the time
+                             period that data is required for. If None,
+                             this is set to the current time.
+                binsize -- the size of each time bin. If 0 (the default),
+                           the entire data series will aggregated into a 
+                           single summary value.
+                ntile_aggregator -- the aggregator function(s) to be applied 
+                                    to the percentile columns
+                other_aggregator -- the aggregator function(s) to be applied
+                                    to the aggregate columns
+        
+            At present, we only allow support one column being fetched as
+            percentile data. 
+            
+            There may be multiple 'other' columns, though. Specifying 
+            aggregation functions for them (i.e. the other_aggregator
+            parameter) works exactly the same as it does in
+            select_aggregated_data.
+                
+            This function is a generator function and will yield a tuple each
+            time it is iterated over. The tuple contains a row from the result
+            set, the name of the column describing the start of each bin and
+            the binsize.
+
+            Example usage -- get the hourly percentiles of 'value' for streams
+            1, 2 and 3 from collection 1 for a given week:
+
+                for row, tscol, binsize in db.select_percentile_data(1, 
+                        [1,2,3], ['value'], [], 1380758400, 1381363200,  
+                        60 * 60, "avg", "avg"):
+                    process_row(row)
+        """
+
         # This is a horrible looking function, but we are trying to construct
         # a pretty complicated query
         #
@@ -608,7 +717,13 @@ class DBSelector:
 
         if type(binsize) is not int:
             return
+        
+        # Make sure we have a usable cursor
+        self._reset_cursor()
+        if self.datacursor == None:
+            return
 
+        # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())
         if start_time == None:
@@ -618,11 +733,14 @@ class DBSelector:
         if len(ntilecols) != 1:
             ntilecols = ntilecols[0:1]
 
+        # Find the data table and make sure we are only querying for
+        # valid columns
         table, baseparams, columns = \
-                self._get_data_table(col, stream_ids, start_time, stop_time)
-        ntilecols = self._sanitise_columns(columns, ntilecols, baseparams)
-        othercols = self._sanitise_columns(columns, othercols, baseparams)
+                self._get_data_table(col, stream_ids)
+        ntilecols = self._sanitise_columns(columns, ntilecols)
+        othercols = self._sanitise_columns(columns, othercols)
 
+        # Convert our column and aggregator lists into useful bits of SQL
         labeledntilecols, ntileaggfuncs = \
                 self._apply_aggregation(ntilecols, ntile_aggregator)
         labeledothercols, otheraggfuncs = \
@@ -708,7 +826,9 @@ class DBSelector:
         params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
 
         self.datacursor.execute(sql, params)
+
         while True:
+            # fetchmany is generally recommended over fetchone 
             fetched = self.datacursor.fetchmany(100)
 
             if fetched == []:

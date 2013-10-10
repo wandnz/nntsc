@@ -33,7 +33,44 @@ from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
 
-pipefill = 0
+# There are 3 classes defined in this file that form a hierarchy for
+# exporting live and/or historical data to clients.
+#
+# The hierarchy is as follows:
+#
+# NNTSC has 1 instance of the NNTSCExporter class. It listens for new
+# client connections and ensures that any new live data is passed on
+# to any clients that have subscribed to it. The NNTSC dataparsers
+# register themselves as sources to the NNTSCExporter on start-up and
+# send all new data to the exporter via a pipe. If this pipe fills up,
+# the dataparser can no longer deal with new measurements so it is 
+# *vital* that this pipe is not ignored for any length of time.
+#
+# When a new client connects, a new instance of NNTSCClient is created
+# which runs in a separate thread. This thread deals with reading requests 
+# for data from the client and sending
+# the responses back to the client. It also handles forwarding any live
+# data that the NNTSCExporter passes on to it -- this particular task
+# has higher priority than the others. The code for packing and unpacking
+# NNTSC protocol messages is all contained within this class.
+#
+# Whenever a NNTSCClient receives a request for data that requires a 
+# database query, e.g. historical data or a list of streams, the job is
+# farmed out to an instance of the DBWorker class. Each NNTSCClient will
+# own a number of DBWorker threads (equal to MAX_WORKERS) which can 
+# query the database without affecting processing of live data or new 
+# client requests. When the query completes, the results are returned 
+# back to the NNTSCClient instance via yet another pipe for subsequent
+# transmission to the client that requested them. Before doing so, the
+# DBWorker thread will also run over the results, transforming them into
+# a nice dictionary mapping column names to values and estimating the
+# measurement frequency (which is required by most client applications).
+#
+# In summary:
+#   1 NNTSCExporter
+#   1 NNTSCClient thread per connected client
+#   MAX_WORKERS DBWorker threads per NNTSCClient
+
 MAX_HISTORY_QUERY = (24 * 60 * 60 * 7 * 4)
 MAX_WORKERS = 2
 
@@ -332,7 +369,9 @@ class DBWorker(threading.Thread):
                 return -1
 
         return 0
-  
+ 
+    # Nice little helper function that pushes history data onto the pipe
+    # back to our NNTSCClient
     def _write_history(self, stream, result, name, cols, start, subend):
         try:
             self.pipeend.send((NNTSC_HISTORY, result))
@@ -350,6 +389,9 @@ class DBWorker(threading.Thread):
       
         return 0
    
+    # Processes the job for a basic NNTSC request, i.e. asking for the
+    # collections, schemas or streams rather than querying for time
+    # series data
     def process_request(self, reqmsg):
         req_hdr = struct.unpack(nntsc_req_fmt,
                 reqmsg[0:struct.calcsize(nntsc_req_fmt)])
@@ -397,24 +439,86 @@ class DBWorker(threading.Thread):
 
         while running:
             self.cv.acquire()
-
+            
+            # Wait for a job to become available
             while len(self.parent.jobs) == 0:
                 self.cv.wait()
-
+        
+            # Grab the first job available
             job = self.parent.jobs[0]
             self.parent.jobs = self.parent.jobs[1:]
             self.cv.release()
            
+            # Don't have a db connection open for the lifetime of
+            # this thread if we aren't using it otherwise we run the
+            # risk of inactive threads preventing us from contacting
+            # the database
             self.db = DBSelector(self.threadid, self.dbconf["name"], self.dbconf["user"], 
                     self.dbconf["pass"], self.dbconf["host"])
             if self.process_job(job) == -1:
                 break
             self.db.close()
 
+        # Thread is over, tidy up
         self.db.close()
         self.pipeend.close()
 
     def _calc_frequency(self, freqdata, binsize):
+
+        # Long and complicated explanation follows....
+        #
+        # We need to know the 'binsize' so that we can determine whether
+        # there are missing measurements in the returned result. This is
+        # useful for leaving gaps in our graphs where data was missing.
+        #
+        # The database will give us results that are binned according to the
+        # requested binsize, but this binsize may be smaller than the
+        # measurement frequency. If it is, we can't use the requested binsize
+        # to determine whether a measurement is missing because there will be
+        # empty bins simply because no measurement fell within that time
+        # period.
+        #
+        # Instead, we actually want to know the measurement frequency or
+        # the binsize, whichever is bigger. The problem is that we don't have
+        # any obvious way of knowing the measurement frequency, so we have to
+        # infer it.
+        #
+        # Each row in the result object corresponds to a bin. For
+        # non-aggregated data, the bin will always only cover one data
+        # measurement.
+        #
+        # There are two timestamps associated with each result row:
+        #
+        #   'binstart' is the timestamp where a bin begins and is calculated
+        #   based on the requested bin size. For non-aggregated data, this is
+        #   the same as the timestamp of the data point.
+        #
+        #   'timestamp' is the timestamp of the *last* measurement included in
+        #   the bin. This is the timestamp we use for plotting graphs.
+        #
+        #
+        # There are two main cases to consider:
+        #   1. The requested binsize is greater than or equal to the
+        #      measurement frequency. In this case, use the requested binsize.
+        #   2. The requested binsize is smaller than the measurement frequency.
+        #      In this case, we need to use the measurement frequency.
+        #
+        # In case 1, the vast majority of bins are going to be separated by
+        # the requested binsize. So we can detect this case by looking at the
+        # number of occasions the time difference between bins (using
+        # 'binstart' matches the binsize that we requested.
+        #
+        # Case 2 is trickier. Once we rule out case 1, we need to guess what
+        # the measurement frequency is. Fortunately, we know that each bin
+        # can only contain 1 measurement at most, so we can use the
+        # 'timestamp' field from consecutive bins to infer the frequency.
+        # We collect these time differences and use the mode of these values
+        # as our measurement frequency. This will work even if the requested
+        # binsize is not a factor of the measurement frequency.
+
+        # XXX Potential pitfalls
+        # * What if there are a lot of non-consecutive missing measurements?
+        # * What if the test changes its measurement frequency?
 
         # No measurements were observed, use the binsize if sane
         if freqdata['totaldiffs'] == 0:
@@ -461,6 +565,7 @@ class NNTSCClient(threading.Thread):
         self.jobcv = threading.Condition(self.joblock)
 
         self.workers = []
+        # Create some worker threads for handling the database queries
         for i in range(0, MAX_WORKERS):
             pipe_recv, pipe_send = Pipe(False)
             threadid = "client%d_thread%d" % (self.sock.fileno(), i)
@@ -584,6 +689,7 @@ class NNTSCClient(threading.Thread):
         if len(msg) < total_len:
             return msg, 1, error
 
+        # Put the job on our joblist for one of the worker threads to handle
         self.jobcv.acquire()
         self.jobs.append((header[1], body))
         self.jobcv.notify()
@@ -621,7 +727,6 @@ class NNTSCClient(threading.Thread):
             return 0
 
     def receive_live(self):
-        global pipefill
         fd = self.pipeend.fileno()
 
         try:
@@ -638,8 +743,6 @@ class NNTSCClient(threading.Thread):
                     return 0
                 totalsent += sent
 
-        pipefill -= totalsent
-        #print "Successfully reflected live data", pipefill
         return totalsent
 
     def receive_worker(self, socket):
@@ -651,6 +754,8 @@ class NNTSCClient(threading.Thread):
             log("Error receiving query result from DBWorker %d: %s" % (fd, msg))
             return 0
 
+        # A worker has completed a job, let's form up a response to
+        # send to our client
         if response == NNTSC_COLLECTIONS:
             return self.send_collections(result)                    
 
@@ -666,7 +771,7 @@ class NNTSCClient(threading.Thread):
         if response == NNTSC_SUBSCRIBE:
             return self.subscribe_stream(result)
 
-        assert(0)
+        # Response type was invalid
         return -1
 
     def run(self):
@@ -707,7 +812,8 @@ class NNTSCClient(threading.Thread):
             self.jobs.append((-1, None))
         self.jobcv.notify_all()
         self.jobcv.release()
-            
+        
+        # Make sure we close our end of the pipe to each thread
         for w in self.workers:
             w[0].close()
 
@@ -806,7 +912,6 @@ class NNTSCExporter:
         return 0
 
     def export_live_data(self, received, fd):
-        global pipefill
 
         try:
             name, stream_id, timestamp, values = received
@@ -844,14 +949,12 @@ class NNTSCExporter:
 
                     #print "Pushing onto client pipe", stream_id, col
                     pipesend.send(header + contents)
-                    pipefill += len(header + contents)
                     
                     #    log("Error sending live data to pipe for client: %s" % (msg[1]))
                     #    self.deregister_client(sock)
                     #else:
                     if results != {}:
                         active.append((sock, columns, start, end, col))
-                    #print "Send successful", pipefill
             self.subscribers[stream_id] = active
 
         return 0
@@ -873,8 +976,6 @@ class NNTSCExporter:
             ret = self.export_new_stream(contents, sock.fileno())
 
         return ret
-
-
 
 
     def accept_connection(self, fd, evtype, sock, data):
