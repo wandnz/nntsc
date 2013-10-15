@@ -51,6 +51,8 @@ class DataCollector():
             raise
 
     def __init__(self, listen_port, config, backgrounded, exportonly):
+        if backgrounded:
+            logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
         self.config = config
 
         # Work out which modules to blacklist
@@ -87,11 +89,9 @@ class DataCollector():
         self.config = nntsc_conf
 
     def run(self):
-        if self.backgrounded:
-            logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
 
-        self.configure()
         logger.log("Starting NNTSC Collector")
+        self.configure()
         if not self.exportonly:
             for m in self.modules.items():
                 self.start_module(m[0], m[1], self.config)
