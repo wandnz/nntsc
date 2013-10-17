@@ -775,6 +775,7 @@ class Database:
             start_time=None, stop_time=None, groupcols=None, binsize=0,
             aggregator="avg"):
 
+        #print "SELECT AGGREGATED:", stream_ids
         coll_t = self.metadata.tables['collections']
         res = select([coll_t.c.datatable]).select_from(coll_t).where(coll_t.c.id == collection).execute()
 
