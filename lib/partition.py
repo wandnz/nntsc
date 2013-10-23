@@ -4,6 +4,7 @@ from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import text
+import time
 import libnntscclient.logger as logger
 
 class PartitionedTable:
@@ -37,6 +38,10 @@ class PartitionedTable:
 
             if end > self.lastend:
                 self.lastend = end
+
+        #TODO: Is this the right thing to do?
+        if len(self.existing) == 0:
+            self.update(int(time.time()))
 
         # If no trigger function exists for this table, create one
 
