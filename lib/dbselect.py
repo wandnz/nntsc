@@ -463,11 +463,11 @@ class DBSelector:
         tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
 
         assert(len(streams) > 0)
-        streamclause = " AND ("
+        streamclause = "AND stream_id IN ("
         for i in range(0, len(streams)):
-            streamclause += "stream_id = %s"
+            streamclause += "%s"
             if i != len(streams) - 1:
-                streamclause += " OR "
+                streamclause += ", "
         streamclause += ")"
 
         return tsclause + streamclause
