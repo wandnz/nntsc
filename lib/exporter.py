@@ -289,13 +289,13 @@ class DBWorker(threading.Thread):
 
             # Limit the amount of history we export at any given time
             # to prevent us from using too much memory during processing
-            if row['stream_id'] != currstream or historysize > 10000:
+            if row['label'] != currstream or historysize > 10000:
                 if currstream != -1:
 
                     # We've reached the history limit, so make sure we
                     # avoid duplicate subscriptions and set the 'more'
                     # flag correctly
-                    if row['stream_id'] == currstream:
+                    if row['label'] == currstream:
                         thissub = -1
                         thismore = True
                     else:
@@ -314,7 +314,7 @@ class DBWorker(threading.Thread):
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
                             'totaldiffs':0, 'tsdiffs':{} }
-                currstream = row['stream_id']
+                currstream = row['label']
 
                 history = []
                 historysize = 0

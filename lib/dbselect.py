@@ -418,6 +418,10 @@ class DBSelector:
         selclause = "SELECT "
         for i in range(0, len(selcols)):
             selclause += selcols[i]
+            # rename stream_id to label so it matches the results if we are
+            # querying and aggregating across many stream ids
+            if selcols[i] == "stream_id":
+                selclause += " AS label"
 
             if i != len(selcols) - 1:
                 selclause += ", "
@@ -442,7 +446,6 @@ class DBSelector:
 
         sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause
-
         self.datacursor.execute(sql, params)
 
         while True:
@@ -605,7 +608,7 @@ class DBSelector:
 
         return aggcols, aggfuncs
 
-    def select_percentile_data(self, col, stream_ids, ntilecols, othercols,
+    def select_percentile_data(self, col, labels, ntilecols, othercols,
             start_time = None, stop_time = None, binsize=0,
             ntile_aggregator = "avg", other_aggregator = "avg"):
         """ Queries the database for time series data, splits the time
@@ -733,6 +736,9 @@ class DBSelector:
         if len(ntilecols) != 1:
             ntilecols = ntilecols[0:1]
 
+        # TODO cast to a set to make unique entries?
+        all_streams = reduce(lambda x, y: x+y, labels.values())
+
         # Find the data table and make sure we are only querying for
         # valid columns
         table, baseparams, columns = self._get_data_table(col)
@@ -747,9 +753,16 @@ class DBSelector:
 
         # Constructing the innermost SELECT query, which lists the ntile for
         # each measurement
-        sql_ntile = """ SELECT stream_id, timestamp,
+
+        # Use a CASE statement to combine all the streams within a label
+        case = "CASE"
+        for label,stream_ids in labels.iteritems():
+            case += " WHEN stream_id in (%s) THEN '%s'" % (
+                ",".join(str(x) for x in stream_ids), label)
+        case += " END";
+        sql_ntile = """ SELECT %s as label, timestamp,
                         timestamp - (timestamp %%%% %d) AS binstart, """ \
-                % (binsize)
+                % (case, binsize)
 
         initcols = ntilecols + othercols
         for i in range(0, len(initcols)):
@@ -764,14 +777,14 @@ class DBSelector:
 
         sql_ntile += " FROM %s " % (table)
 
-        where_clause = self._generate_where(stream_ids)
+        where_clause = self._generate_where(all_streams)
 
         sql_ntile += where_clause
         sql_ntile += " ORDER BY binstart "
 
         # Constructing the middle SELECT query, which will aggregate across
         # each ntile to find the average value within each ntile
-        sql_agg = "SELECT stream_id, max(timestamp) AS recent, "
+        sql_agg = "SELECT label, max(timestamp) AS recent, "
 
         for l in labeledntilecols:
             sql_agg += l + ", "
@@ -779,7 +792,7 @@ class DBSelector:
             sql_agg += l + ", "
 
         sql_agg += "binstart FROM ( %s ) AS ntiles" % (sql_ntile)
-        sql_agg += " GROUP BY stream_id, binstart, ntile ORDER BY binstart, "
+        sql_agg += " GROUP BY label, binstart, ntile ORDER BY binstart, "
 
         # Extracting the labels for the ntile columns for the ORDER BY clause
         for i in range(0, len(labeledntilecols)):
@@ -793,8 +806,8 @@ class DBSelector:
         # Finally, construct the outermost SELECT which will collapse the
         # ntiles into an array so we get one row per bin with all of the
         # ntiles in a single "values" column
-        qcols = ["timestamp", "binstart", "stream_id"]
-        sql = "SELECT stream_id, max(recent) AS timestamp, "
+        qcols = ["timestamp", "binstart", "label"]
+        sql = "SELECT label, max(recent) AS timestamp, "
 
         # Again, horrible label splitting so that we use the right column
         # names
@@ -821,11 +834,10 @@ class DBSelector:
 
         # make sure the outer query is sorted by stream_id then binsize, so
         # that we get all the time sorted data for each stream_id in turn
-        sql += "binstart FROM (%s) AS agg GROUP BY binstart, stream_id ORDER BY stream_id, binstart" % (sql_agg)
+        sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
         # Execute our query!
-        params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
-
+        params = tuple(baseparams + [start_time] + [stop_time] + all_streams)
         self.datacursor.execute(sql, params)
 
         while True:
