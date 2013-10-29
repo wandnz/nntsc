@@ -138,7 +138,7 @@ class DBWorker(threading.Thread):
                 more = True
 
             generator = self.db.select_aggregated_data(name, streams, aggcols,
-                    start, end, groupcols, binsize, aggfunc)
+                    start, queryend, groupcols, binsize, aggfunc)
 
             if self._query_history(generator, name, start, queryend,
                     streams, [], more, -1) == -1:
