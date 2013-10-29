@@ -304,7 +304,7 @@ class DBSelector:
 
         # Find the data table for the requested collection
         table, baseparams, columns = \
-                self._get_data_table(col, stream_ids)
+                self._get_data_table(col)
 
         # Make sure stream_id is included in our group by clause -- we need
         # to keep them separate when aggregating
@@ -386,7 +386,7 @@ class DBSelector:
 
         # Find the data table for the requested collection
         table, baseparams, columns = \
-                self._get_data_table(col, stream_ids)
+                self._get_data_table(col)
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
@@ -472,7 +472,7 @@ class DBSelector:
 
         return tsclause + streamclause
 
-    def _get_data_table(self, col, streams):
+    def _get_data_table(self, col):
         """ Finds the data table for a given collection
 
             Returns a tuple containing three items:
@@ -735,8 +735,7 @@ class DBSelector:
 
         # Find the data table and make sure we are only querying for
         # valid columns
-        table, baseparams, columns = \
-                self._get_data_table(col, stream_ids)
+        table, baseparams, columns = self._get_data_table(col)
         ntilecols = self._sanitise_columns(columns, ntilecols)
         othercols = self._sanitise_columns(columns, othercols)
 
