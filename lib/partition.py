@@ -39,10 +39,6 @@ class PartitionedTable:
             if end > self.lastend:
                 self.lastend = end
 
-        #TODO: Is this the right thing to do?
-        if len(self.existing) == 0:
-            self.update(int(time.time()))
-
         # If no trigger function exists for this table, create one
 
         triggers = db.conn.execute("""SELECT * from information_schema.triggers WHERE trigger_name = '%s'""" % (self.triggername))
@@ -51,6 +47,24 @@ class PartitionedTable:
         if triggers.rowcount == 1:
             return
 
+        # Create a dummy procedure for the trigger which will get replaced
+        # with a valid one as soon as we see the first datapoint
+        #
+        # XXX This dummy function will essentially discard the row being
+        # inserted (because of the RETURN NULL). This shouldn't be a problem
+        # because this will be replaced as soon as update() is called, but 
+        # perhaps it would be a bit nicer if we inserted into the parent table
+        # by default instead?
+        trigfunc = text("""CREATE OR REPLACE FUNCTION %s()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    RETURN NULL;
+                END;
+                $$
+                LANGUAGE plpgsql;
+                """ % (self.base + "_trigfunc"))
+        self.db.conn.execute(trigfunc)
+        
         triggersql = text("""CREATE TRIGGER %s BEFORE INSERT ON %s
                 FOR EACH ROW EXECUTE PROCEDURE %s();""" % 
                 (self.triggername, self.base, self.base + "_trigfunc"))
