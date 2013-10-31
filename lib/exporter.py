@@ -188,7 +188,7 @@ class DBWorker(threading.Thread):
                 more = True
 
             generator = self.db.select_percentile_data(name, streams, ntilecols,
-                    othercols, start, end, binsize, ntileagg, otheragg)
+                    othercols, start, queryend, binsize, ntileagg, otheragg)
 
             if self._query_history(generator, name, start, queryend,
                     streams, [], more, -1) == -1:
