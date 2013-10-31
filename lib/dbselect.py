@@ -371,6 +371,8 @@ class DBSelector:
         for col in groupcols:
             sql += ", " + col
 
+        sql += " ORDER BY label, timestamp"
+
         # XXX add binsize here so its not a hardcoded param!
         # Execute our query!
         params = tuple(all_streams + [start_time] + [stop_time] + all_streams)
