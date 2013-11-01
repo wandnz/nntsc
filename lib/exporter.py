@@ -359,7 +359,8 @@ class DBWorker(threading.Thread):
                 return -1
         # Also remember to export empty history for any streams that had
         # no data in the request period
-        allstreams = set(streams)
+        # XXX convert to string to work temporarily with old style stream_ids
+        allstreams = set([str(x) for x in streams])
 
         missing = allstreams - observed
         for m in missing:
