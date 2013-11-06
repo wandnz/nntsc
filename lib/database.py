@@ -157,7 +157,7 @@ class Database:
                 Column('id', Integer, primary_key=True),
                 Column('collection', Integer, ForeignKey('collections.id'),
                         nullable=False),
-                Column('name', String, nullable=False, unique=True),
+                Column('name', String, nullable=False),
                 Column('lasttimestamp', Integer, nullable=False),
                 Column('firsttimestamp', Integer, nullable=True),
             )
