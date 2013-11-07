@@ -35,9 +35,10 @@ DATA_TABLE_NAME="data_amp_dns"
 
 amp_dns_streams = {}
 partitions = None
-    
+
 streamkeys = ['target', 'instance', 'address', 'query', 'query_type',
     'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid', 'source']
+flagnames = ['rd', 'tc', 'aa', 'qr', 'cd', 'ad', 'ra']
 
 def result_to_key(res):
     key = (str(res['source']), str(res['target']), str(res['instance']),
@@ -45,18 +46,19 @@ def result_to_key(res):
             str(res['query_class']), str(res['udp_payload_size']), 
             str(res['recurse']), str(res['dnssec']), str(res['nsid']))
 
+    return key
 
 def create_existing_stream(s):
 
     key = result_to_key(s)
     amp_dns_streams[key] = s['stream_id']
 
-def insert_stream(db, exp, source, data, timestamp):
-    name = "dns %s:%s:%s" % (source, data['target'], data['query'])
+def insert_stream(db, exp, data, timestamp):
+    name = "dns %s:%s:%s" % (data['source'], data['target'], data['query'])
 
-    props = {"name":name, "source":source}
+    props = {"name":name}
     
-    for k,v in data:
+    for k,v in data.items():
         if k in streamkeys:
             props[k] = v
 
@@ -68,7 +70,7 @@ def insert_stream(db, exp, source, data, timestamp):
 
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid,
-            source=source, **data)
+            **data)
     except IntegrityError, e:
         db.rollback_transaction()
         logger.log(e)
@@ -123,8 +125,8 @@ def data_table(db):
         Column('total_answer', Integer, nullable=False),
         Column('total_authority', Integer, nullable=False),
         Column('total_additional', Integer, nullable=False),
-        Column('opcode', Integer, nullable=False),
-        Column('rcode', Integer, nullable=False),
+        Column('opcode', String, nullable=False),
+        Column('rcode', String, nullable=False),
         Column('ttl', Integer, nullable=False),
         Column('flag_rd', Boolean, nullable=False),
         Column('flag_tc', Boolean, nullable=False),
@@ -157,41 +159,54 @@ def insert_data(db, exp, stream, ts, result):
     exp.send((0, ("amp_dns", stream, ts, result)))
     return 0
 
-def split_result(res):
+def split_result(alldata, result):
 
     stream = {}
     data = {}
 
-    for k,v in res:
+    for k, v in alldata.items():
+        if k == "results":
+            continue
+        stream[k] = v
+
+    for k, v in result.items():
         if k in streamkeys:
             stream[k] = v
+
+        elif k == "flags":
+            for f, fval in v.items():
+                if f in flagnames:
+                    data["flag_" + f] = fval
+                else:
+                    data[f] = fval
         else:
             data[k] = v
 
     return stream, data
     
 def process_data(db, exp, timestamp, data, source):
-    
-    for d in data:
-        streamresult, dataresult = split_result(d)
+  
+    for r in data['results']:
+        streamresult, dataresult = split_result(data, r)
+   
+        # Source is not part of the AMP result itself
+        streamresult['source'] = source
 
-    # Source is not part of the AMP result itself
-    streamresult['source'] = source
+        key = result_to_key(streamresult)
+        if key in amp_dns_streams:
+            stream_id = amp_dns_streams[key]
+            
+        else:
+            stream_id = insert_stream(db, exp, streamresult, timestamp)
+            if stream_id == -1:
+                logger.log("AMPModule: Cannot create stream for:")
+                logger.log("AMPModule: %s %s %s %s\n" % ("dns", source, 
+                        streamresult['target'], streamresult['query']))
+                return -1
+            amp_dns_streams[key] = stream_id
 
-    key = result_to_key(streamresult)
-    if key in amp_dns_streams:
-        stream_id = amp_dns_streams[key]
-        
-    else:
-        stream_id = insert_stream(db, exp, source, streamresult, timestamp)
-        if stream_id == -1:
-            logger.log("AMPModule: Cannot create stream for:")
-            logger.log("AMPModule: %s %s %s %s\n" % ("dns", source, 
-                    streamresult['target'], streamresult['query']))
-            return -1
-        amp_dns_streams[key] = stream_id
+        insert_data(db, exp, stream_id, timestamp, dataresult)
 
-    insert_data(db, exp, stream_id, timestamp, dataresult)
     db.update_timestamp(stream_id, timestamp)
 
     return 0

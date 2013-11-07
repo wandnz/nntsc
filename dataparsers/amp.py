@@ -57,7 +57,7 @@ class AmpModule:
                 key = amp_icmp.create_existing_stream(i)
             elif testtype == "traceroute":
                 key = amp_traceroute.create_existing_stream(i)
-            elif testype == "dns":
+            elif testtype == "dns":
                 key = amp_dns.create_existing_stream(i)
 
         # Parse connection info
