@@ -99,12 +99,6 @@ when the AMP module is first instantiated"""
     else:
         amp_icmp_sources[src] = {streamid: 0}
 
-def data_stream_key(data, source):
-    """Extract the stream key from the data received from the AMP
-message broker"""
-
-    return (source, data["target"], sizestr)
-
 def insert_stream(db, exp, source, dest, size, address, timestamp):
 
     name = "icmp %s:%s:%s:%s" % (source, dest, address, size)
