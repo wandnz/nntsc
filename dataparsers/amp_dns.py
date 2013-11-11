@@ -36,12 +36,12 @@ DATA_TABLE_NAME="data_amp_dns"
 amp_dns_streams = {}
 partitions = None
 
-streamkeys = ['target', 'instance', 'address', 'query', 'query_type',
+streamkeys = ['destination', 'instance', 'address', 'query', 'query_type',
     'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid', 'source']
 flagnames = ['rd', 'tc', 'aa', 'qr', 'cd', 'ad', 'ra']
 
 def result_to_key(res):
-    key = (str(res['source']), str(res['target']), str(res['instance']),
+    key = (str(res['source']), str(res['destination']), str(res['instance']),
             str(res['address']), str(res['query']), str(res['query_type']),
             str(res['query_class']), str(res['udp_payload_size']), 
             str(res['recurse']), str(res['dnssec']), str(res['nsid']))
@@ -54,7 +54,7 @@ def create_existing_stream(s):
     amp_dns_streams[key] = s['stream_id']
 
 def insert_stream(db, exp, data, timestamp):
-    name = "dns %s:%s:%s" % (data['source'], data['target'], data['query'])
+    name = "dns %s:%s:%s" % (data['source'], data['destination'], data['query'])
 
     props = {"name":name}
     
@@ -89,7 +89,7 @@ def stream_table(db):
         Column('stream_id', Integer, ForeignKey("streams.id"),
             primary_key=True),
         Column('source', String, nullable=False),
-        Column('target', String, nullable=False),
+        Column('destination', String, nullable=False),
         Column('instance', String, nullable=False),
         Column('address', postgresql.INET, nullable=False),
         Column('query', String, nullable=False),
@@ -99,14 +99,14 @@ def stream_table(db):
         Column('recurse', Boolean, nullable=False),
         Column('dnssec', Boolean, nullable=False),
         Column('nsid', Boolean, nullable=False),
-        UniqueConstraint('source', 'target', 'address', 'query', 'query_type',
+        UniqueConstraint('source', 'destination', 'address', 'query', 'query_type',
                 'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid',
                 'instance'),
         useexisting=True,
     )
 
     Index('index_amp_dns_source', st.c.source)
-    Index('index_amp_dns_target', st.c.target)
+    Index('index_amp_dns_destination', st.c.destination)
     Index('index_amp_dns_query', st.c.query)
 
     return STREAM_TABLE_NAME
@@ -201,7 +201,7 @@ def process_data(db, exp, timestamp, data, source):
             if stream_id == -1:
                 logger.log("AMPModule: Cannot create stream for:")
                 logger.log("AMPModule: %s %s %s %s\n" % ("dns", source, 
-                        streamresult['target'], streamresult['query']))
+                        streamresult['destination'], streamresult['query']))
                 return -1
             amp_dns_streams[key] = stream_id
 
