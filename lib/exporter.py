@@ -138,7 +138,7 @@ class DBWorker(threading.Thread):
                 more = True
 
             generator = self.db.select_aggregated_data(name, streams, aggcols,
-                    start, end, groupcols, binsize, aggfunc)
+                    start, queryend, groupcols, binsize, aggfunc)
 
             if self._query_history(generator, name, start, queryend,
                     streams, [], more, -1) == -1:
@@ -188,7 +188,7 @@ class DBWorker(threading.Thread):
                 more = True
 
             generator = self.db.select_percentile_data(name, streams, ntilecols,
-                    othercols, start, end, binsize, ntileagg, otheragg)
+                    othercols, start, queryend, binsize, ntileagg, otheragg)
 
             if self._query_history(generator, name, start, queryend,
                     streams, [], more, -1) == -1:
@@ -289,13 +289,13 @@ class DBWorker(threading.Thread):
 
             # Limit the amount of history we export at any given time
             # to prevent us from using too much memory during processing
-            if row['stream_id'] != currstream or historysize > 10000:
+            if row['label'] != currstream or historysize > 10000:
                 if currstream != -1:
 
                     # We've reached the history limit, so make sure we
                     # avoid duplicate subscriptions and set the 'more'
                     # flag correctly
-                    if row['stream_id'] == currstream:
+                    if row['label'] == currstream:
                         thissub = -1
                         thismore = True
                     else:
@@ -314,7 +314,7 @@ class DBWorker(threading.Thread):
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
                             'totaldiffs':0, 'tsdiffs':{} }
-                currstream = row['stream_id']
+                currstream = row['label']
 
                 history = []
                 historysize = 0
@@ -359,7 +359,8 @@ class DBWorker(threading.Thread):
                 return -1
         # Also remember to export empty history for any streams that had
         # no data in the request period
-        allstreams = set(streams)
+        # XXX convert to string to work temporarily with old style stream_ids
+        allstreams = set([str(x) for x in streams])
 
         missing = allstreams - observed
         for m in missing:

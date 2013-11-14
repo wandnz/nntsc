@@ -235,7 +235,8 @@ class DBSelector:
             selected.append(stream_dict)
         return selected
 
-    def select_aggregated_data(self, col, stream_ids, aggcols,
+
+    def select_aggregated_data(self, col, labels, aggcols,
             start_time = None, stop_time = None, groupcols = None,
             binsize = 0, aggregator="avg"):
 
@@ -296,28 +297,39 @@ class DBSelector:
         if type(binsize) is not int:
             return
 
+        # Make sure we have a usable cursor
+        self._reset_cursor()
+        if self.datacursor == None:
+            return
+
         # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())
         if start_time == None:
             start_time = stop_time - (24 * 60 * 60)
 
-        # Find the data table for the requested collection
-        table, baseparams, columns = \
-                self._get_data_table(col, stream_ids)
+        # XXX for now, lets try to munge graph types that give a list of
+        # stream ids into the label dictionary format that we want
+        if type(labels) is list:
+            labels = { labels[0]: labels }
 
-        # Make sure stream_id is included in our group by clause -- we need
-        # to keep them separate when aggregating
-        if groupcols == None:
-            groupcols = ['stream_id']
-        elif 'stream_id' not in groupcols:
-            groupcols.append('stream_id')
+        # TODO cast to a set to make unique entries?
+        all_streams = reduce(lambda x, y: x+y, labels.values())
+
+        # Find the data table and make sure we are only querying for
+        # valid columns
+        table, columns = self._get_data_table(col)
+
+        # XXX get rid of stream_id, ideally it wouldnt even get to here
+        if "stream_id" in groupcols:
+            del groupcols[groupcols.index("stream_id")]
 
         # Make sure we only query for columns that exist in the data table
         # XXX Could we do this in one sanitise call?
         groupcols = self._sanitise_columns(columns, groupcols)
         aggcols = self._sanitise_columns(columns, aggcols)
 
+        # Convert our column and aggregator lists into useful bits of SQL
         labeled_aggcols, aggfuncs = self._apply_aggregation(aggcols, aggregator)
         labeled_groupcols = list(groupcols)
 
@@ -333,14 +345,53 @@ class DBSelector:
             # want to group measurements into the appropriate bin
             labeled_groupcols.append(\
                     "(timestamp - (timestamp %%%% %u)) AS binstart" \
-                    % (binsize)) 
+                    % (binsize))
             groupcols.append("binstart")
             tscol = "binstart"
 
-        params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
-        for resultrow in self._generic_select(table, stream_ids, params,
-                labeled_aggcols + labeled_groupcols, groupcols, tscol, binsize):
-            yield resultrow
+        # Constructing the innermost SELECT query, which lists the label for
+        # each measurement
+
+        # Use a CASE statement to combine all the streams within a label
+        case = self._generate_label_case(labels)
+        sql_agg = """ SELECT %s AS label, timestamp """ % (case)
+
+        uniquecols = list(set(aggcols))
+        for col in uniquecols:
+            sql_agg += ", " + col
+
+        sql_agg += " FROM %s " % (table)
+        sql_agg += self._generate_where(all_streams)
+
+        # Constructing the outer SELECT query, which will aggregate across
+        # each label to find the aggregate values
+        sql = "SELECT label"
+        for col in labeled_groupcols:
+            sql += "," + col
+        for col in labeled_aggcols:
+            sql += "," + col
+
+        sql += " FROM ( %s ) AS aggregates" % (sql_agg)
+        sql += " GROUP BY label"
+        for col in groupcols:
+            sql += ", " + col
+
+        sql += " ORDER BY label, timestamp"
+
+        # XXX add binsize here so its not a hardcoded param!
+        # Execute our query!
+        params = tuple(all_streams + [start_time] + [stop_time] + all_streams)
+        self.datacursor.execute(sql, params)
+
+        while True:
+            # fetchmany seems to be recommended over repeated calls to fetchone
+            fetched = self.datacursor.fetchmany(100)
+            if fetched == []:
+                break
+
+            for row in fetched:
+                yield (row, tscol, binsize)
+
 
     def select_data(self, col, stream_ids, selectcols, start_time=None,
             stop_time=None):
@@ -385,8 +436,7 @@ class DBSelector:
             start_time = stop_time - (24 * 60 * 60)
 
         # Find the data table for the requested collection
-        table, baseparams, columns = \
-                self._get_data_table(col, stream_ids)
+        table, columns = self._get_data_table(col)
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
@@ -397,7 +447,7 @@ class DBSelector:
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
 
-        params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
+        params = tuple([start_time] + [stop_time] + stream_ids)
 
         for resultrow in self._generic_select(table, stream_ids, params,
                 selectcols, None, 'timestamp', 0):
@@ -418,6 +468,10 @@ class DBSelector:
         selclause = "SELECT "
         for i in range(0, len(selcols)):
             selclause += selcols[i]
+            # rename stream_id to label so it matches the results if we are
+            # querying and aggregating across many stream ids
+            if selcols[i] == "stream_id":
+                selclause += " AS label"
 
             if i != len(selcols) - 1:
                 selclause += ", "
@@ -442,7 +496,6 @@ class DBSelector:
 
         sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause
-
         self.datacursor.execute(sql, params)
 
         while True:
@@ -456,6 +509,20 @@ class DBSelector:
                 yield (row, tscol, binsize)
 
 
+    def _generate_label_case(self, labels):
+        """ Forms a CASE statement for an SQL query that converts all stream
+            ids into the label to which they belong
+        """
+        case = "CASE"
+        for label,stream_ids in labels.iteritems():
+            #case += " WHEN stream_id in (%s) THEN '%s'" % (
+                #",".join(str(x) for x in stream_ids), label)
+            case += " WHEN stream_id in (%s) THEN '%s'" % (
+                ",".join(["%s"] * len(stream_ids)), label)
+        case += " END"
+        return case
+
+
     def _generate_where(self, streams):
         """ Forms a WHERE clause for an SQL query that encompasses all
             streams in the provided list
@@ -463,22 +530,21 @@ class DBSelector:
         tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
 
         assert(len(streams) > 0)
-        streamclause = " AND ("
+        streamclause = "AND stream_id IN ("
         for i in range(0, len(streams)):
-            streamclause += "stream_id = %s"
+            streamclause += "%s"
             if i != len(streams) - 1:
-                streamclause += " OR "
+                streamclause += ", "
         streamclause += ")"
 
         return tsclause + streamclause
 
-    def _get_data_table(self, col, streams):
+    def _get_data_table(self, col):
         """ Finds the data table for a given collection
 
             Returns a tuple containing three items:
              1. the name of the data table
-             2. a list of query parameters required for that table
-             3. a list of columns present in the table
+             2. a list of columns present in the table
 
         """
         if self.basiccursor == None:
@@ -494,10 +560,6 @@ class DBSelector:
 
         table = tname
 
-        # Params is always empty -- this is a holdover from when one
-        # of our data tables was a procedure which required parameters.
-        params = []
-
         # This is the quickest way to get the column names -- don't
         # try querying the data table itself because that could be slow
         # if the table is, for example, a complicated view.
@@ -512,7 +574,7 @@ class DBSelector:
                 break
 
             columns.append(row['column_name'])
-        return table, params, columns
+        return table, columns
 
     def _sanitise_columns(self, columns, selcols):
         """ Removes columns from the provided list if they are not present
@@ -605,7 +667,7 @@ class DBSelector:
 
         return aggcols, aggfuncs
 
-    def select_percentile_data(self, col, stream_ids, ntilecols, othercols,
+    def select_percentile_data(self, col, labels, ntilecols, othercols,
             start_time = None, stop_time = None, binsize=0,
             ntile_aggregator = "avg", other_aggregator = "avg"):
         """ Queries the database for time series data, splits the time
@@ -667,6 +729,7 @@ class DBSelector:
                     process_row(row)
         """
 
+        # TODO this SQL is out of date slightly
         # This is a horrible looking function, but we are trying to construct
         # a pretty complicated query
         #
@@ -733,10 +796,12 @@ class DBSelector:
         if len(ntilecols) != 1:
             ntilecols = ntilecols[0:1]
 
+        # TODO cast to a set to make unique entries?
+        all_streams = reduce(lambda x, y: x+y, labels.values())
+
         # Find the data table and make sure we are only querying for
         # valid columns
-        table, baseparams, columns = \
-                self._get_data_table(col, stream_ids)
+        table, columns = self._get_data_table(col)
         ntilecols = self._sanitise_columns(columns, ntilecols)
         othercols = self._sanitise_columns(columns, othercols)
 
@@ -748,9 +813,12 @@ class DBSelector:
 
         # Constructing the innermost SELECT query, which lists the ntile for
         # each measurement
-        sql_ntile = """ SELECT stream_id, timestamp,
+
+        # Use a CASE statement to combine all the streams within a label
+        case = self._generate_label_case(labels)
+        sql_ntile = """ SELECT %s as label, timestamp,
                         timestamp - (timestamp %%%% %d) AS binstart, """ \
-                % (binsize)
+                % (case, binsize) # XXX binsize is user data, make a param?
 
         initcols = ntilecols + othercols
         for i in range(0, len(initcols)):
@@ -765,14 +833,14 @@ class DBSelector:
 
         sql_ntile += " FROM %s " % (table)
 
-        where_clause = self._generate_where(stream_ids)
+        where_clause = self._generate_where(all_streams)
 
         sql_ntile += where_clause
         sql_ntile += " ORDER BY binstart "
 
         # Constructing the middle SELECT query, which will aggregate across
         # each ntile to find the average value within each ntile
-        sql_agg = "SELECT stream_id, max(timestamp) AS recent, "
+        sql_agg = "SELECT label, max(timestamp) AS recent, "
 
         for l in labeledntilecols:
             sql_agg += l + ", "
@@ -780,7 +848,7 @@ class DBSelector:
             sql_agg += l + ", "
 
         sql_agg += "binstart FROM ( %s ) AS ntiles" % (sql_ntile)
-        sql_agg += " GROUP BY stream_id, binstart, ntile ORDER BY binstart, "
+        sql_agg += " GROUP BY label, binstart, ntile ORDER BY binstart, "
 
         # Extracting the labels for the ntile columns for the ORDER BY clause
         for i in range(0, len(labeledntilecols)):
@@ -794,8 +862,8 @@ class DBSelector:
         # Finally, construct the outermost SELECT which will collapse the
         # ntiles into an array so we get one row per bin with all of the
         # ntiles in a single "values" column
-        qcols = ["timestamp", "binstart", "stream_id"]
-        sql = "SELECT stream_id, max(recent) AS timestamp, "
+        qcols = ["timestamp", "binstart", "label"]
+        sql = "SELECT label, max(recent) AS timestamp, "
 
         # Again, horrible label splitting so that we use the right column
         # names
@@ -822,11 +890,10 @@ class DBSelector:
 
         # make sure the outer query is sorted by stream_id then binsize, so
         # that we get all the time sorted data for each stream_id in turn
-        sql += "binstart FROM (%s) AS agg GROUP BY binstart, stream_id ORDER BY stream_id, binstart" % (sql_agg)
+        sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
         # Execute our query!
-        params = tuple(baseparams + [start_time] + [stop_time] + stream_ids)
-
+        params = tuple(all_streams + [start_time] + [stop_time] + all_streams)
         self.datacursor.execute(sql, params)
 
         while True:
