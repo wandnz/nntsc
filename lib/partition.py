@@ -4,6 +4,7 @@ from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import text
+import time
 import libnntscclient.logger as logger
 
 class PartitionedTable:
@@ -46,6 +47,24 @@ class PartitionedTable:
         if triggers.rowcount == 1:
             return
 
+        # Create a dummy procedure for the trigger which will get replaced
+        # with a valid one as soon as we see the first datapoint
+        #
+        # XXX This dummy function will essentially discard the row being
+        # inserted (because of the RETURN NULL). This shouldn't be a problem
+        # because this will be replaced as soon as update() is called, but 
+        # perhaps it would be a bit nicer if we inserted into the parent table
+        # by default instead?
+        trigfunc = text("""CREATE OR REPLACE FUNCTION %s()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    RETURN NULL;
+                END;
+                $$
+                LANGUAGE plpgsql;
+                """ % (self.base + "_trigfunc"))
+        self.db.conn.execute(trigfunc)
+        
         triggersql = text("""CREATE TRIGGER %s BEFORE INSERT ON %s
                 FOR EACH ROW EXECUTE PROCEDURE %s();""" % 
                 (self.triggername, self.base, self.base + "_trigfunc"))
