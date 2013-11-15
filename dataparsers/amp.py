@@ -26,7 +26,7 @@ from libnntsc.database import Database
 from libnntsc.configurator import *
 import pika
 from ampsave.importer import import_data_functions
-from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns
+from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns, amp_http
 import time
 import logging
 
@@ -59,6 +59,8 @@ class AmpModule:
                 key = amp_traceroute.create_existing_stream(i)
             elif testtype == "dns":
                 key = amp_dns.create_existing_stream(i)
+            elif testtype == "http":
+                key = amp_http.create_existing_stream(i)
 
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
@@ -156,6 +158,9 @@ class AmpModule:
                 elif test == "dns":
                     amp_dns.process_data(self.db, self.exporter, 
                             properties.timestamp, data, source)
+                elif test == "http":
+                    amp_http.process_data(self.db, self.exporter, 
+                            properties.timestamp, data, source)
             else:
                 logger.log("unknown test: '%s'" % (
                         properties.headers["x-amp-test-type"]))
@@ -184,7 +189,7 @@ def tables(db):
     amp_icmp.register(db)
     amp_traceroute.register(db)
     amp_dns.register(db)
-    #amp_http2.register(db)
+    amp_http.register(db)
     #amp_udpstream.register(db)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
