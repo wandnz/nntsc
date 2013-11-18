@@ -226,13 +226,15 @@ def insert_test(db, stream, timestamp, data):
         # the right way to do this, but we can't just RETURN it due to table
         # partitioning (see amp_traceroute for more detailed explanation).
 
-        query = text("""SELECT max(test_id) FROM %s WHERE stream_id=%s AND
-                test_starttime=%s AND test_servercount=%s AND
-                test_objectcount=%s AND test_duration=%s AND
-                test_bytecount=%s;""" % (TEST_TABLE_NAME, stream,
-                timestamp, data['server_count'], data['object_count'], 
-                data['duration'], data['bytes']))
-        result = db.conn.execute(query)
+        query = text("""SELECT max(test_id) FROM %s WHERE stream_id=:id AND
+                test_starttime=:start AND test_servercount=:servers AND
+                test_objectcount=:objects AND test_duration=:duration AND
+                test_bytecount=:bytes;""" % (TEST_TABLE_NAME))
+        
+        
+        result = db.conn.execute(query, id=stream, start=timestamp,
+                servers=data['server_count'], objects=data['object_count'],
+                duration=data['duration'], bytes=data['bytes'])
         assert(result.rowcount == 1)
         row = result.fetchone()
         test_id = row[0]
@@ -271,9 +273,9 @@ def insert_server(db, stream, timestamp, testid, server, index):
 
         # This should be unique enough without having to check the other
         # columns...
-        query = text("""SELECT max(server_id) FROM %s WHERE test_id=%d AND
-                server_index=%s;""" % (SERVER_TABLE_NAME, testid, index))
-        result = db.conn.execute(query)
+        query = text("""SELECT max(server_id) FROM %s WHERE test_id=:testid AND
+                server_index=:index;""" % (SERVER_TABLE_NAME))
+        result = db.conn.execute(query, index=index, testid=testid)
         assert(result.rowcount == 1)
         row = result.fetchone()
         server_id = row[0]
@@ -328,12 +330,13 @@ def insert_object(db, stream, timestamp, testid, serverid, obj):
 
         # This should be unique enough without having to check the other
         # columns...
-        query = text("""SELECT max(object_id) FROM %s WHERE test_id=%d AND
-                server_id=%d AND path='%s' AND obj_starttime=%s AND
-                obj_endtime=%s AND code=%s;""" % \
-                (OBJ_TABLE_NAME, testid, serverid, obj["path"], 
-                obj["start"], obj["end"], obj["code"]))
-        result = db.conn.execute(query)
+        query = text("""SELECT max(object_id) FROM %s WHERE test_id=:testid AND
+                server_id=:serverid AND path=:path AND obj_starttime=:start AND
+                obj_endtime=:end AND code=:code;""" % \
+                (OBJ_TABLE_NAME))
+        result = db.conn.execute(query, testid=testid, serverid=serverid,
+                start=obj['start'], end=obj['end'], code=obj['code'],
+                path=obj['path'])
         assert(result.rowcount == 1)
         row = result.fetchone()
         object_id = row[0]
