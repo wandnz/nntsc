@@ -42,9 +42,9 @@ flagnames = ['rd', 'tc', 'aa', 'qr', 'cd', 'ad', 'ra']
 
 def result_to_key(res):
     key = (str(res['source']), str(res['destination']), str(res['instance']),
-            str(res['address']), str(res['query']), str(res['query_type']),
+            res['address'], str(res['query']), str(res['query_type']),
             str(res['query_class']), str(res['udp_payload_size']), 
-            str(res['recurse']), str(res['dnssec']), str(res['nsid']))
+            res['recurse'], res['dnssec'], res['nsid'])
 
     return key
 
