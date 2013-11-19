@@ -796,6 +796,11 @@ class DBSelector:
         if len(ntilecols) != 1:
             ntilecols = ntilecols[0:1]
 
+        # XXX for now, lets try to munge graph types that give a list of
+        # stream ids into the label dictionary format that we want
+        if type(labels) is list:
+            labels = { labels[0]: labels }
+
         # TODO cast to a set to make unique entries?
         all_streams = reduce(lambda x, y: x+y, labels.values())
 
