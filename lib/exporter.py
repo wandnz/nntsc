@@ -846,7 +846,7 @@ class NNTSCExporter:
         # contain the columns that were asked for by the client
 
         # Always need these
-        results = {"stream_id":stream_id, "timestamp":ts}
+        results = {"label":stream_id, "timestamp":ts}
 
         for k,v in data.items():
             if k in cols:
