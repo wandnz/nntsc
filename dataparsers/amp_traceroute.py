@@ -198,13 +198,13 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
         #
         # In short, inserting into table partitions sucks in postgresql.
         query = text("""SELECT max(traceroute_test_id) FROM 
-                internal_amp_traceroute_test WHERE stream_id=%s AND
-                "timestamp"=%s AND length=%s AND
-                error_type=%s AND error_code=%s AND packet_size=%s;""" 
-                % (stream, ts, test_info['length'],
-                test_info['error_type'], test_info['error_code'], 
-                test_info['packet_size']))
-        result = db.conn.execute(query)
+                internal_amp_traceroute_test WHERE stream_id=:streamid AND
+                "timestamp"=:ts AND length=:length AND
+                error_type=:etype AND error_code=:ecode AND 
+                packet_size=:size;""") 
+        result = db.conn.execute(query, streamid=stream, ts=ts, 
+                length=test_info['length'], etype=test_info['error_type'],
+                ecode=test_info['error_code'], size=test_info['packet_size'])
 
         assert(result.rowcount == 1);
         row = result.fetchone()
