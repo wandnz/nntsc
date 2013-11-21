@@ -100,6 +100,9 @@ class DBWorker(threading.Thread):
         if jobtype == NNTSC_PERCENTILE:
             return self.percentile(jobdata)
 
+        if jobtype == NNTSC_COMMON:
+            return self.common(jobdata)
+
         if jobtype == NNTSC_SUBSCRIBE:
             return self.subscribe(jobdata)
 
@@ -189,6 +192,57 @@ class DBWorker(threading.Thread):
 
             generator = self.db.select_percentile_data(name, streams, ntilecols,
                     othercols, start, queryend, binsize, ntileagg, otheragg)
+
+            if self._query_history(generator, name, start, queryend,
+                    streams, [], more, -1) == -1:
+                return -1
+            start = queryend + 1
+
+            # If we were asked for data up until "now", make sure we account
+            # for the time taken to make earlier queries otherwise we'll
+            # miss any new data inserted while we were querying previous
+            # weeks of data
+            if end == None:
+                stoppoint = int(time.time())
+
+        return 0
+
+    def common(self, pcntmsg):
+        tup = pickle.loads(pcntmsg)
+        name, start, end, streams, binsize, commoncols, othercols, \
+                otheragg = tup
+        now = int(time.time())
+
+        if end == 0:
+            end = None
+
+        if start == None or start >= now:
+            for s in streams:
+                #result = ({s:[]}, {s:0}, name, [s], ntileagg, False)
+                result = ({s:[]}, {s:0}, name, [s], False)
+                try:
+                    self.pipeend.send((NNTSC_HISTORY, result))
+                except IOError as e:
+                    log("Failed to return empty history: %s\n" % (e))
+                    return -1
+            return 0
+
+        if end == None:
+            stoppoint = int(time.time())
+        else:
+            stoppoint = end
+
+        while start < stoppoint:
+            queryend = start + MAX_HISTORY_QUERY
+
+            if queryend >= stoppoint:
+                queryend = stoppoint
+                more = False
+            else:
+                more = True
+
+            generator = self.db.select_common_data(name, streams, commoncols,
+                    othercols, start, queryend, binsize, otheragg)
 
             if self._query_history(generator, name, start, queryend,
                     streams, [], more, -1) == -1:

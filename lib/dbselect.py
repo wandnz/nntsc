@@ -911,6 +911,182 @@ class DBSelector:
             for row in fetched:
                 yield (row, "binstart", binsize)
 
+    def select_common_data(self, col, labels, commoncols, othercols,
+            start_time = None, stop_time = None, binsize=0,
+            other_aggregator="most"):
+        """ Queries the database for time series data where multiple rows
+            exist for a single test and need to be condensed, with the most
+            common of those as the result.
 
+            This function is mainly used for converting traceroute data into
+            a suitable format for display on a rainbow style graph where the
+            different hops are stacked.
+
+            "other" is used to describe columns that should be fetched in
+            addition to the common columns. At the moment these data values
+            are aggregated with whatever aggregation function the user
+            specifies, which may or may not make sense depending on the value.
+
+            Parameters:
+                col -- the id of the collection to query
+                labels -- a dictionary of labels:streams to get data for
+                commoncols -- a list of data columns to fetch as percentiles
+                othercols -- a list of data columns to fetch as aggregated
+                             data
+                start_time -- a timestamp describing the start of the
+                              time period that data is required for. If
+                              None, this is set to 1 day before the stop
+                              time
+                stop_time -- a timestamp describing the end of the time
+                             period that data is required for. If None,
+                             this is set to the current time.
+                binsize -- the size of each time bin. If 0 (the default),
+                           the entire data series will aggregated into a
+                           single summary value.
+                other_aggregator -- the aggregator function(s) to be applied
+                                    to the aggregate columns
+
+            At present, we only allow support one column being fetched as
+            most common data.
+
+            There may be multiple 'other' columns, though. Specifying
+            aggregation functions for them (i.e. the other_aggregator
+            parameter) works exactly the same as it does in
+            select_aggregated_data.
+
+            This function is a generator function and will yield a tuple each
+            time it is iterated over. The tuple contains a row from the result
+            set, the name of the column describing the start of each bin and
+            the binsize.
+        """
+        # querying traceroute data should look something like this:
+        #
+        #   SELECT label,
+        #       max(recent) AS timestamp,
+        #       binstart,
+        #       string_to_array(most(commoncol), ',') AS commoncol,
+        #       most(length) AS length,
+        #       most(error_type) AS error_type,
+        #       most(error_code) AS error_code
+        #   FROM (
+        #       SELECT label,
+        #           max(timestamp) AS recent,
+        #           max(binstart) AS binstart,
+        #           array_to_string(array_agg(hop_address), ',') AS commoncol,
+        #           most(length) AS length,
+        #           most(error_type) AS error_type,
+        #           most(error_code) AS error_code
+        #       FROM (
+        #           SELECT CASE WHEN stream_id in (%s) THEN 'foo' END AS label,
+        #               timestamp,
+        #               timestamp - (timestamp %% 9000) AS binstart,
+        #               length,
+        #               error_type,
+        #               error_code,
+        #               hop_address
+        #           FROM data_amp_traceroute
+        #           WHERE timestamp >= %s AND timestamp <= %s AND
+        #               stream_id IN (%s)
+        #           ORDER BY timestamp, path_ttl ASC
+        #       ) AS sorted
+        #       GROUP BY label, timestamp
+        #   ) AS common
+        # GROUP BY label, binstart ORDER BY binstart
+
+        if type(binsize) is not int:
+            return
+
+        # Make sure we have a usable cursor
+        self._reset_cursor()
+        if self.datacursor == None:
+            return
+
+        # Set default time boundaries
+        if stop_time == None:
+            stop_time = int(time.time())
+        if start_time == None:
+            start_time = stop_time - (24 * 60 * 60)
+
+        # Let's just limit ourselves to 1 common data column for now, huh
+        if len(commoncols) != 1:
+            commoncols = commoncols[0:1]
+
+        # XXX for now, lets try to munge graph types that give a list of
+        # stream ids into the label dictionary format that we want
+        if type(labels) is list:
+            labels = { labels[0]: labels }
+
+        # TODO cast to a set to make unique entries?
+        all_streams = reduce(lambda x, y: x+y, labels.values())
+
+        # Find the data table and make sure we are only querying for
+        # valid columns
+        table, columns = self._get_data_table(col)
+        commoncols = self._sanitise_columns(columns, commoncols)
+        othercols = self._sanitise_columns(columns, othercols)
+
+        # Convert our column and aggregator lists into useful bits of SQL
+        labeledothercols, otheraggfuncs = \
+                self._apply_aggregation(othercols, other_aggregator)
+
+        # Constructing the innermost SELECT query, which will sort all the
+        # hop data so when we aggregate it, the path is in the right order.
+        # TODO can we avoid doing this extra select that doesn't reduce the
+        # amount of data? Would be great to go straight to one row per test.
+
+        # Use a CASE statement to combine all the streams within a label
+        case = self._generate_label_case(labels)
+        sql_sorted = """ SELECT %s as label, timestamp,
+                        timestamp - (timestamp %%%% %d) AS binstart, """ \
+                % (case, binsize) # XXX binsize is user data, make a param?
+        # add in any other columns that we should be selecting on, using the
+        # raw names rather than aggregated and labeled names
+        for column in othercols:
+            sql_sorted += "%s, " % column
+        sql_sorted += " %s FROM %s " % (commoncols[0], table)
+        sql_sorted += self._generate_where(all_streams)
+        sql_sorted += " ORDER BY timestamp, path_ttl ASC"
+
+
+        # Construct the middle SELECT query that will aggregate all rows from
+        # a single test run into a single row. The common column is compressed
+        # into a string concatenating them all together
+        sql_common = "SELECT label, max(timestamp) AS recent, "
+        sql_common += "max(binstart) AS binstart, "
+        sql_common += "array_to_string(array_agg(%s), ',') AS commoncol" % (
+                commoncols[0])
+        # add the other columns in, using the labeled versions as we are now
+        # aggregating data
+        for column in labeledothercols:
+            sql_common += ", %s" % column
+        sql_common += " FROM (%s) AS sorted " % (sql_sorted)
+        sql_common += "GROUP BY label, timestamp"
+
+
+        # Construct the outer SELECT query that will aggregate using the custom
+        # "most" aggregator, returning the most common value for the common
+        # column for each binning period
+        sql = "SELECT label, max(recent) AS timestamp, binstart, "
+        sql += "string_to_array(most(commoncol), ',') AS commoncol"
+        for column in labeledothercols:
+            sql += ", %s" % column
+        sql += " FROM ( %s ) AS common " % (sql_common)
+        sql += "GROUP BY label, binstart ORDER BY binstart"
+
+        # Execute our query!
+        params = tuple(all_streams + [start_time] + [stop_time] + all_streams)
+        self.datacursor.execute(sql, params)
+
+        while True:
+            # fetchmany is generally recommended over fetchone
+            fetched = self.datacursor.fetchmany(100)
+
+            if fetched == []:
+                break
+
+            for row in fetched:
+                yield (row, "binstart", binsize)
+
+        return
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

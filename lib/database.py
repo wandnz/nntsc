@@ -166,6 +166,31 @@ class Database:
 
             Index('index_streams_collection', streams.c.collection)
 
+        # Create a useful function to select a mode from any data
+        # http://scottrbailey.wordpress.com/2009/05/22/postgres-adding-custom-aggregates-most/
+        mostfunc = text("""
+            CREATE OR REPLACE FUNCTION _final_most(anyarray)
+                RETURNS anyelement AS
+            $BODY$
+                SELECT a
+                FROM unnest($1) a
+                GROUP BY 1 ORDER BY count(1) DESC
+                LIMIT 1;
+            $BODY$
+                LANGUAGE 'sql' IMMUTABLE;""")
+        self.conn.execute(mostfunc)
+
+        # aggregate function that applies _final_most to multiple rows of data
+        # TODO what if it already exists?
+        aggfunc = text("""
+            CREATE AGGREGATE most(anyelement) (
+                SFUNC=array_append,
+                STYPE=anyarray,
+                FINALFUNC=_final_most,
+                INITCOND='{}'
+            );""")
+        self.conn.execute(aggfunc)
+
         #self.metadata.create_all()
         #self.commit_transaction()
 
