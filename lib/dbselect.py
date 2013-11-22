@@ -393,7 +393,7 @@ class DBSelector:
                 yield (row, tscol, binsize)
 
 
-    def select_data(self, col, stream_ids, selectcols, start_time=None,
+    def select_data(self, col, labels, selectcols, start_time=None,
             stop_time=None):
 
         """ Queries the database for time series data.
@@ -440,16 +440,24 @@ class DBSelector:
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
+        
+        # XXX for now, lets try to munge graph types that give a list of
+        # stream ids into the label dictionary format that we want
+        if type(labels) is list:
+            labels = { labels[0]: labels }
 
+        # TODO cast to a set to make unique entries?
+        all_streams = reduce(lambda x, y: x+y, labels.values())
+
+        case = self._generate_label_case(labels)
         # These columns are important so include them regardless
-        if 'stream_id' not in selectcols:
-            selectcols.append('stream_id')
+        selectcols.append(case + " AS label")
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
 
-        params = tuple([start_time] + [stop_time] + stream_ids)
+        params = tuple(all_streams + [start_time] + [stop_time] + all_streams)
 
-        for resultrow in self._generic_select(table, stream_ids, params,
+        for resultrow in self._generic_select(table, all_streams, params,
                 selectcols, None, 'timestamp', 0):
             yield resultrow
 
@@ -492,7 +500,7 @@ class DBSelector:
                     groupclause += ", "
 
         # Order the results both chronologically and by stream id
-        orderclause = " ORDER BY stream_id, %s " % (tscol)
+        orderclause = " ORDER BY label, %s " % (tscol)
 
         sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause

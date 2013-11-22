@@ -205,7 +205,7 @@ class DBWorker(threading.Thread):
         return 0
 
     def subscribe(self, submsg):
-        name, start, end, cols, streams = pickle.loads(submsg)
+        name, start, end, cols, labels = pickle.loads(submsg)
         now = int(time.time())
 
         if start == 0 or start == None:
@@ -218,11 +218,17 @@ class DBWorker(threading.Thread):
         else:
             subend = -1
 
+        # Hax method for checking if we need to use aggregation
+        maxlabelstreams = 0
+        for lab, labdata in labels.items():
+            if len(labdata) > maxlabelstreams:
+                maxlabelstreams = len(labdata)
+
 
         if start >= now:
             # No historical data, send empty history for all streams
-            for s in streams:
-                result = ({s:[]}, {s:0}, name, [s], "raw", sub)
+            for lab, streams in labels.items():
+                result = ({lab:[]}, {lab:0}, name, [lab], "raw", sub)
                 try:
                     self.pipeend.send((NNTSC_HISTORY, result))
                 except IOError as e:
@@ -231,12 +237,13 @@ class DBWorker(threading.Thread):
 
                 # Subscribe to all streams
                 if sub:
-                    try:
-                        self.pipeend.send((NNTSC_SUBSCRIBE, \
-                                (s, start, end, cols, name)))
-                    except IOError as e:
-                        log("Failed to subscribe to %s: %s" % (s, e))
-                        return -1
+                    for s in streams:
+                        try:
+                            self.pipeend.send((NNTSC_SUBSCRIBE, \
+                                    (s, start, end, cols, name)))
+                        except IOError as e:
+                            log("Failed to subscribe to %s: %s" % (s, e))
+                            return -1
 
             return 0
 
@@ -247,17 +254,21 @@ class DBWorker(threading.Thread):
 
         while start < stoppoint:
             queryend = start + MAX_HISTORY_QUERY
-
+    
             if queryend >= stoppoint:
                 queryend = stoppoint
                 more = False
             else:
                 more = True
 
-            generator = self.db.select_data(name, streams, cols, start, end)
+            if maxlabelstreams > 1:
+                generator = self.db.select_aggregated_data(name, labels, 
+                        cols, start, end, [], 1, "avg")
+            else:
+                generator = self.db.select_data(name, labels, cols, start, end)
 
             if (self._query_history(generator, name, start, queryend,
-                    streams, cols, more, subend)) == -1:
+                    labels, cols, more, subend)) == -1:
                 return -1
 
             # Don't subscribe to a stream more than once
@@ -276,10 +287,10 @@ class DBWorker(threading.Thread):
         log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
 
-    def _query_history(self, rowgen, name, start, end, streams, cols,
+    def _query_history(self, rowgen, name, start, end, labels, cols,
             more, subend):
 
-        currstream = -1
+        currlabel = -1
         historysize = 0
 
         observed = set([])
@@ -289,13 +300,13 @@ class DBWorker(threading.Thread):
 
             # Limit the amount of history we export at any given time
             # to prevent us from using too much memory during processing
-            if row['label'] != currstream or historysize > 10000:
-                if currstream != -1:
+            if row['label'] != currlabel or historysize > 10000:
+                if currlabel != -1:
 
                     # We've reached the history limit, so make sure we
                     # avoid duplicate subscriptions and set the 'more'
                     # flag correctly
-                    if row['label'] == currstream:
+                    if row['label'] == currlabel:
                         thissub = -1
                         thismore = True
                     else:
@@ -304,21 +315,25 @@ class DBWorker(threading.Thread):
 
                     # Export the history to the pipe
                     freq = self._calc_frequency(freqstats, binsize)
-                    result = ({ currstream : history },
-                            { currstream : freq },
-                            name, [currstream], "raw", thismore)
-                    if self._write_history(currstream, result, name, cols,
+                    result = ({ currlabel : history },
+                            { currlabel : freq },
+                            name, [currlabel], "raw", thismore)
+
+                    assert(currlabel in labels)
+                    if self._write_history(labels[currlabel], result, name, 
+                                cols,
                             start, thissub) == -1:
                         return -1
 
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
                             'totaldiffs':0, 'tsdiffs':{} }
-                currstream = row['label']
+                currlabel = row['label']
+                assert(currlabel in labels)
 
                 history = []
                 historysize = 0
-                observed.add(currstream)
+                observed.add(currlabel)
 
             # Extract info needed for measurement frequency calculations
             if freqstats['lastts'] == 0:
@@ -351,21 +366,23 @@ class DBWorker(threading.Thread):
         if historysize != 0:
             # Make sure we write out the last stream
             freq = self._calc_frequency(freqstats, binsize)
-            result = ({ currstream : history },
-                    { currstream : freq },
-                    name, [currstream], "raw", more)
-            if self._write_history(currstream, result, name, cols,
+            result = ({ currlabel : history },
+                    { currlabel : freq },
+                    name, [currlabel], "raw", more)
+            if self._write_history(labels[currlabel], result, name, cols,
                     start, subend) == -1:
                 return -1
+
         # Also remember to export empty history for any streams that had
         # no data in the request period
         # XXX convert to string to work temporarily with old style stream_ids
-        allstreams = set([str(x) for x in streams])
+        allstreams = set(labels.keys())
 
         missing = allstreams - observed
         for m in missing:
             result = ({m : []}, {m : 0}, name, [m], "raw", more)
-            if self._write_history(m, result, name, cols,
+            assert (m in labels)
+            if self._write_history(labels[m], result, name, cols,
                     start, subend) == -1:
                 return -1
 
@@ -373,7 +390,7 @@ class DBWorker(threading.Thread):
 
     # Nice little helper function that pushes history data onto the pipe
     # back to our NNTSCClient
-    def _write_history(self, stream, result, name, cols, start, subend):
+    def _write_history(self, streams, result, name, cols, start, subend):
         try:
             self.pipeend.send((NNTSC_HISTORY, result))
         except IOError as e:
@@ -381,12 +398,13 @@ class DBWorker(threading.Thread):
             return -1
 
         if subend != -1:
-            try:
-                self.pipeend.send((NNTSC_SUBSCRIBE, \
-                        (stream, start, subend, cols, name)))
-            except IOError as e:
-                log("Subscribe failed for %s: %s" % (stream, e))
-                return -1
+            for s in streams:
+                try:
+                    self.pipeend.send((NNTSC_SUBSCRIBE, \
+                            (s, start, subend, cols, name)))
+                except IOError as e:
+                    log("Subscribe failed for %s: %s" % (s, e))
+                    return -1
 
         return 0
 
@@ -523,7 +541,7 @@ class DBWorker(threading.Thread):
 
         # No measurements were observed, use the binsize if sane
         if freqdata['totaldiffs'] == 0:
-            if binsize < 300:
+            if binsize != 0:
                 return 300
             else:
                 return binsize
