@@ -232,7 +232,6 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
             db.rollback_transaction()
             logger.log(e)
             return -1
-        ttl += 1
 
         data = {}
         data['stream_id'] = stream
@@ -249,6 +248,8 @@ def insert_data(db, exp, stream, ts, test_info, hop_info):
         #print "Exporting amp traceroute data"
         exp.send((0, ("amp_traceroute", stream, ts, data)))
         #print "Exported amp traceroute data"
+        
+        ttl += 1
 
     return 0
 
