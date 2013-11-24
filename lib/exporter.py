@@ -205,7 +205,7 @@ class DBWorker(threading.Thread):
         return 0
 
     def subscribe(self, submsg):
-        name, start, end, cols, labels = pickle.loads(submsg)
+        name, start, end, cols, labels, aggs = pickle.loads(submsg)
         now = int(time.time())
 
         if start == 0 or start == None:
@@ -217,13 +217,6 @@ class DBWorker(threading.Thread):
             subend = end
         else:
             subend = -1
-
-        # Hax method for checking if we need to use aggregation
-        maxlabelstreams = 0
-        for lab, labdata in labels.items():
-            if len(labdata) > maxlabelstreams:
-                maxlabelstreams = len(labdata)
-
 
         if start >= now:
             # No historical data, send empty history for all streams
@@ -261,9 +254,9 @@ class DBWorker(threading.Thread):
             else:
                 more = True
 
-            if maxlabelstreams > 1:
+            if aggs != []:
                 generator = self.db.select_aggregated_data(name, labels, 
-                        cols, start, end, [], 1, "avg")
+                        cols, start, end, [], 1, aggs)
             else:
                 generator = self.db.select_data(name, labels, cols, start, end)
 
