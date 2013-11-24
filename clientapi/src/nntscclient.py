@@ -57,12 +57,12 @@ class NNTSCClient:
 
         return 0
 
-    def subscribe_streams(self, name, columns, streams, start, end):
+    def subscribe_streams(self, name, columns, streams, start, end, aggs):
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_SUBSCRIBE on a closed socket!"
             return -1;
 
-        contents = pickle.dumps((name, start, end, columns, streams))
+        contents = pickle.dumps((name, start, end, columns, streams, aggs))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SUBSCRIBE, len(contents))
 
         try:
