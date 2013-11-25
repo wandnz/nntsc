@@ -173,6 +173,11 @@ class NNTSCClient:
             msgdict['streamid'] = stream_id
             msgdict['data'] = data
 
+        if header[1] == NNTSC_PUSH:
+            colid, timestamp = pickle.loads(self.buf[header_end:total_len])
+            msgdict['collection'] = colid
+            msgdict['timestamp'] = timestamp
+
         self.buf = self.buf[total_len:]
         return header[1], msgdict
 

@@ -879,6 +879,35 @@ class NNTSCExporter:
                 self.collections[col].append(sock)
         else:
             self.collections[col] = [sock]
+    
+    def export_push(self, received, fd):
+        try:
+            collid, timestamp = received
+        except ValueError:
+            log("Incorrect data format from source %d" % (fd))
+            log("Format should be (colid, timestamp)")
+            self.drop_source(sock)
+            return
+
+        pushdata = pickle.dumps((collid, collname, timestamp))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, len(pushdata))
+
+        active = []
+        for sock in self.collections[collid]:
+            if sock not in self.client_sockets:
+                continue
+
+            pipesend = self.client_sockets[sock]
+            try:
+                pipesend.send(header + pushdata)
+            except error, msg:
+                log("Error sending push to pipe for client fd %d: %s" % (sock.fileno(), msg[1]))
+                self.deregister_client(sock)
+            else:
+                active.append(sock)
+        self.collections[collid] = active
+
+        return 0
 
     def export_new_stream(self, received, fd):
 
@@ -934,7 +963,7 @@ class NNTSCExporter:
             log("Values should expressed as a dictionary")
             self.drop_source(sock)
             return
-
+   
         if stream_id in self.subscribers.keys():
             active = []
 
@@ -983,6 +1012,8 @@ class NNTSCExporter:
             ret = self.export_live_data(contents, sock.fileno())
         if msgtype == 1:
             ret = self.export_new_stream(contents, sock.fileno())
+        if msgtype == 2:
+            ret = self.export_push(contents, sock.fileno())
 
         return ret
 
