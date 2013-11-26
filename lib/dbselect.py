@@ -663,7 +663,7 @@ class DBSelector:
 
             # this isn't the greatest, but we have to treat this one different
             if aggfuncs[index] == "most_array":
-                colclause = "string_to_array("
+                colclause = "string_to_array(" + \
                     "most(array_to_string(%s,',')),',') AS %s" % (
                         colname, labelstr)
             else:
