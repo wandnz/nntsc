@@ -889,7 +889,12 @@ class NNTSCExporter:
             self.drop_source(sock)
             return
 
-        pushdata = pickle.dumps((collid, collname, timestamp))
+        # Only export PUSH if someone is subscribed to a stream from the
+        # collection in question
+        if collid not in self.collections:
+            return 0
+
+        pushdata = pickle.dumps((collid, timestamp))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, len(pushdata))
 
         active = []
