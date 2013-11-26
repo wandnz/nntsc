@@ -180,21 +180,22 @@ class Database:
                 LANGUAGE 'sql' IMMUTABLE;""")
         self.conn.execute(mostfunc)
 
-        # aggregate function that applies _final_most to multiple rows of data
-        # TODO what if it already exists?
-        aggfunc = text("""
-            CREATE AGGREGATE most(anyelement) (
-                SFUNC=array_append,
-                STYPE=anyarray,
-                FINALFUNC=_final_most,
-                INITCOND='{}'
-            );""")
-        self.conn.execute(aggfunc)
+        # we can't check IF EXISTS or use CREATE OR REPLACE, so just query it
+        mostcount = self.conn.execute(
+                """SELECT * from pg_proc WHERE proname='most';""")
+        assert(mostcount.rowcount <= 1)
 
-        #self.metadata.create_all()
-        #self.commit_transaction()
-
-        #print self.meta.tables.keys()
+        # if it doesn't exist, create the aggregate function that applies
+        # _final_most to multiple rows of data
+        if mostcount.rowcount == 0:
+            aggfunc = text("""
+                CREATE AGGREGATE most(anyelement) (
+                    SFUNC=array_append,
+                    STYPE=anyarray,
+                    FINALFUNC=_final_most,
+                    INITCOND='{}'
+                );""")
+            self.conn.execute(aggfunc)
 
         for base,mod in modules.items():
             mod.tables(self)
