@@ -109,26 +109,6 @@ class NNTSCClient:
 
         return 0
 
-    def request_common(self, col, streams, start, end, binsize, commoncols,
-            othercols=[], otheragg="avg"):
-
-        if self.sock == None:
-            print >> sys.stderr, "Cannot send NNTSC_COMMON on a closed socket!"
-            return -1;
-        contents = pickle.dumps((col, start, end, streams, binsize, commoncols,
-                    othercols, otheragg))
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_COMMON, len(contents))
-
-        try:
-            self.sock.sendall(header + contents)
-        except error, msg:
-            print >> sys.stderr, "Error sending NNTSC_COMMON for %s: %s" % (
-                col, msg[1])
-            return -1
-
-        return 0
-
-
     def receive_message(self):
         if self.sock == None:
             print >> sys.stderr, "Cannot receive messages on a closed socket!"
