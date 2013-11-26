@@ -48,6 +48,15 @@ class AmpModule:
         # the amp modules understand how to extract the test data from the blob
         self.amp_modules = import_data_functions()
 
+        self.collections = {}
+        cols = self.db.list_collections()
+
+        for c in cols:
+            if c['module'] == "amp":
+                self.collections[c['modsubtype']] = c['id']
+
+        print self.collections
+
         # set all the streams that we already know about for easy lookup of
         # their stream id when reporting data
         for i in tests:
@@ -166,6 +175,10 @@ class AmpModule:
                         properties.headers["x-amp-test-type"]))
             # TODO check if it all worked, don't ack if it fails
             self.db.commit_transaction()
+
+            if test in self.collections:
+                self.exporter.send((2, (self.collections[test], \
+                        properties.timestamp)))
         channel.basic_ack(delivery_tag = method.delivery_tag)
 
     def run(self):
