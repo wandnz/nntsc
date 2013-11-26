@@ -208,7 +208,9 @@ class NNTSCClient:
         labels = {}
 
         for s in streams:
-            labels[s] = [s]
+            # XXX Make the labels strings, otherwise we run into casting
+            # issues later on with Brendon's hax ampy code. 
+            labels[str(s)] = [s]
         return labels
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
