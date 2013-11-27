@@ -374,7 +374,6 @@ def create_existing_stream(data):
             str(data['pipelining_max_requests']), \
             data['caching'])
    
-    print "Creating existing:", key 
     amp_http_streams[key] = data['stream_id'] 
 
 def process_data(db, exp, timestamp, data, source):

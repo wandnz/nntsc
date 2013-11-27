@@ -138,7 +138,6 @@ def insert_data(db, exp, stream, ts, result):
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7,
                 ["timestamp", "stream_id", "packet_size"])
     partitions.update(ts)
-    db.commit_transaction()
 
     try:
         # sqlalchemy is again totally useless and makes it impossible to cast
@@ -156,6 +155,7 @@ def insert_data(db, exp, stream, ts, result):
         return -1
 
     exp.send((0, ("amp_traceroute", stream, ts, result)))
+    db.commit_transaction()
 
     return 0
 

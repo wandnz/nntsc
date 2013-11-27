@@ -57,12 +57,18 @@ class NNTSCClient:
 
         return 0
 
-    def subscribe_streams(self, name, columns, streams, start, end):
+    def subscribe_streams(self, name, columns, labels, start, end, aggs):
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_SUBSCRIBE on a closed socket!"
             return -1;
 
-        contents = pickle.dumps((name, start, end, columns, streams))
+        # Our "labels" are actually a list of streams, which is how we used to
+        # manage this sort of thing. Convert to the new label format for 
+        # backwards compatibility   
+        if type(labels) is list:
+            labels = self.convert_streams_to_labels(labels)
+
+        contents = pickle.dumps((name, start, end, columns, labels, aggs))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SUBSCRIBE, len(contents))
 
         try:
@@ -73,14 +79,21 @@ class NNTSCClient:
 
         return 0
 
-    def request_aggregate(self, col, streams, start, end, aggcolumns, binsize,
+    def request_aggregate(self, col, labels, start, end, aggcolumns, binsize,
             groupcolumns=[], aggfunc="avg"):
 
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_AGGREGATE on a closed socket!"
             return -1;
-        contents = pickle.dumps((col, start, end, streams, aggcolumns, groupcolumns,
-                binsize, aggfunc))
+        
+        # Our "labels" are actually a list of streams, which is how we used to
+        # manage this sort of thing. Convert to the new label format for 
+        # backwards compatibility   
+        if type(labels) is list:
+            labels = self.convert_streams_to_labels(labels)
+        
+        contents = pickle.dumps((col, start, end, labels, aggcolumns, 
+                groupcolumns, binsize, aggfunc))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_AGGREGATE, len(contents))
 
         try:
@@ -91,13 +104,22 @@ class NNTSCClient:
 
         return 0
 
-    def request_percentiles(self, col, streams, start, end, binsize, ntilecolumns,
-            othercolumns=[], ntileaggfunc="avg", otheraggfunc="avg"): 
+    def request_percentiles(self, col, labels, start, end, binsize, 
+            ntilecolumns, othercolumns=[], ntileaggfunc="avg", 
+            otheraggfunc="avg"): 
 
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_PERCENTILE on a closed socket!"
             return -1;
-        contents = pickle.dumps((col, start, end, streams, binsize, ntilecolumns, 
+        
+        # Our "labels" are actually a list of streams, which is how we used to
+        # manage this sort of thing. Convert to the new label format for 
+        # backwards compatibility   
+        if type(labels) is list:
+            labels = self.convert_streams_to_labels(labels)
+        
+        contents = pickle.dumps((col, start, end, labels, binsize, 
+                ntilecolumns, 
                 othercolumns, ntileaggfunc, otheraggfunc))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PERCENTILE, len(contents))
 
@@ -172,9 +194,22 @@ class NNTSCClient:
             msgdict['streamid'] = stream_id
             msgdict['data'] = data
 
+        if header[1] == NNTSC_PUSH:
+            colid, timestamp = pickle.loads(self.buf[header_end:total_len])
+            msgdict['collection'] = colid
+            msgdict['timestamp'] = timestamp
+
         self.buf = self.buf[total_len:]
         return header[1], msgdict
 
+    def convert_streams_to_labels(self, streams):
 
+        labels = {}
+
+        for s in streams:
+            # XXX Make the labels strings, otherwise we run into casting
+            # issues later on with Brendon's hax ampy code. 
+            labels[str(s)] = [s]
+        return labels
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

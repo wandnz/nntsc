@@ -307,11 +307,8 @@ class DBSelector:
             stop_time = int(time.time())
         if start_time == None:
             start_time = stop_time - (24 * 60 * 60)
-
-        # XXX for now, lets try to munge graph types that give a list of
-        # stream ids into the label dictionary format that we want
-        if type(labels) is list:
-            labels = { labels[0]: labels }
+        
+        assert(type(labels) is dict)
 
         # TODO cast to a set to make unique entries?
         all_streams = reduce(lambda x, y: x+y, labels.values())
@@ -340,20 +337,21 @@ class DBSelector:
             # Add minimum timestamp to help with determining frequency
             labeled_aggcols.append("min(timestamp) AS min_timestamp")
             tscol = "min_timestamp"
+            binparam = []
         else:
             # We're going to (probably) have multiple bins, so we also
             # want to group measurements into the appropriate bin
             labeled_groupcols.append(\
-                    "(timestamp - (timestamp %%%% %u)) AS binstart" \
-                    % (binsize))
+                    "(timestamp - (timestamp %% %s)) AS binstart")
             groupcols.append("binstart")
             tscol = "binstart"
+            binparam = [binsize]
 
         # Constructing the innermost SELECT query, which lists the label for
         # each measurement
 
         # Use a CASE statement to combine all the streams within a label
-        case = self._generate_label_case(labels)
+        case, caseparams = self._generate_label_case(labels)
         sql_agg = """ SELECT %s AS label, timestamp """ % (case)
 
         uniquecols = list(set(aggcols))
@@ -378,9 +376,10 @@ class DBSelector:
 
         sql += " ORDER BY label, timestamp"
 
-        # XXX add binsize here so its not a hardcoded param!
         # Execute our query!
-        params = tuple(all_streams + [start_time] + [stop_time] + all_streams)
+        # XXX Getting these parameters in the right order is a pain!
+        params = tuple(binparam + caseparams + [start_time] + [stop_time] + all_streams)
+
         self.datacursor.execute(sql, params)
 
         while True:
@@ -393,7 +392,7 @@ class DBSelector:
                 yield (row, tscol, binsize)
 
 
-    def select_data(self, col, stream_ids, selectcols, start_time=None,
+    def select_data(self, col, labels, selectcols, start_time=None,
             stop_time=None):
 
         """ Queries the database for time series data.
@@ -440,16 +439,23 @@ class DBSelector:
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
+        
+        # XXX for now, lets try to munge graph types that give a list of
+        # stream ids into the label dictionary format that we want
+        assert(type(labels) is dict)
 
+        # TODO cast to a set to make unique entries?
+        all_streams = reduce(lambda x, y: x+y, labels.values())
+
+        case, caseparams = self._generate_label_case(labels)
         # These columns are important so include them regardless
-        if 'stream_id' not in selectcols:
-            selectcols.append('stream_id')
+        selectcols.append(case + " AS label")
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
 
-        params = tuple([start_time] + [stop_time] + stream_ids)
+        params = tuple(caseparams + [start_time] + [stop_time] + all_streams)
 
-        for resultrow in self._generic_select(table, stream_ids, params,
+        for resultrow in self._generic_select(table, all_streams, params,
                 selectcols, None, 'timestamp', 0):
             yield resultrow
 
@@ -492,7 +498,7 @@ class DBSelector:
                     groupclause += ", "
 
         # Order the results both chronologically and by stream id
-        orderclause = " ORDER BY stream_id, %s " % (tscol)
+        orderclause = " ORDER BY label, %s " % (tscol)
 
         sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause
@@ -514,13 +520,18 @@ class DBSelector:
             ids into the label to which they belong
         """
         case = "CASE"
+        caseparams = []
         for label,stream_ids in labels.iteritems():
             #case += " WHEN stream_id in (%s) THEN '%s'" % (
                 #",".join(str(x) for x in stream_ids), label)
-            case += " WHEN stream_id in (%s) THEN '%s'" % (
-                ",".join(["%s"] * len(stream_ids)), label)
+            case += " WHEN stream_id in (%s)" % (
+                ",".join(["%s"] * len(stream_ids)))
+            case += " THEN %s"
+
+            caseparams += stream_ids
+            caseparams.append(label)
         case += " END"
-        return case
+        return case, caseparams
 
 
     def _generate_where(self, streams):
@@ -803,10 +814,7 @@ class DBSelector:
         if len(ntilecols) != 1:
             ntilecols = ntilecols[0:1]
 
-        # XXX for now, lets try to munge graph types that give a list of
-        # stream ids into the label dictionary format that we want
-        if type(labels) is list:
-            labels = { labels[0]: labels }
+        assert(type(labels) is dict)
 
         # TODO cast to a set to make unique entries?
         all_streams = reduce(lambda x, y: x+y, labels.values())
@@ -827,10 +835,9 @@ class DBSelector:
         # each measurement
 
         # Use a CASE statement to combine all the streams within a label
-        case = self._generate_label_case(labels)
-        sql_ntile = """ SELECT %s as label, timestamp,
-                        timestamp - (timestamp %%%% %d) AS binstart, """ \
-                % (case, binsize) # XXX binsize is user data, make a param?
+        case, caseparams = self._generate_label_case(labels)
+        sql_ntile = """ SELECT %s as label, """ % (case)
+        sql_ntile += "timestamp, timestamp - (timestamp %% %s) AS binstart, "
 
         initcols = ntilecols + othercols
         for i in range(0, len(initcols)):
@@ -905,7 +912,7 @@ class DBSelector:
         sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
         # Execute our query!
-        params = tuple(all_streams + [start_time] + [stop_time] + all_streams)
+        params = tuple(caseparams + [binsize] + [start_time] + [stop_time] + all_streams)
         self.datacursor.execute(sql, params)
 
         while True:
