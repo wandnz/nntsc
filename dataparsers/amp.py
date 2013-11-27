@@ -55,8 +55,6 @@ class AmpModule:
             if c['module'] == "amp":
                 self.collections[c['modsubtype']] = c['id']
 
-        print self.collections
-
         # set all the streams that we already know about for easy lookup of
         # their stream id when reporting data
         for i in tests:
