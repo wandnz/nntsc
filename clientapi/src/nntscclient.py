@@ -131,7 +131,6 @@ class NNTSCClient:
 
         return 0
 
-
     def receive_message(self):
         if self.sock == None:
             print >> sys.stderr, "Cannot receive messages on a closed socket!"
