@@ -20,19 +20,17 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index, Sequence, \
-    ForeignKeyConstraint
-from sqlalchemy.sql import and_, or_, not_, text
-from sqlalchemy.types import Integer, String, Float, Boolean
+from sqlalchemy import Table, Column, Integer, \
+    String, ForeignKey, UniqueConstraint, Index
+from sqlalchemy.sql import text
+from sqlalchemy.types import Integer, String
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql.expression import select, join, outerjoin, func, label
 from libnntsc.partition import PartitionedTable
 import libnntscclient.logger as logger
 
-STREAM_TABLE_NAME="streams_amp_traceroute"
-DATA_TABLE_NAME="data_amp_traceroute"
+STREAM_TABLE_NAME = "streams_amp_traceroute"
+DATA_TABLE_NAME = "data_amp_traceroute"
 
 amp_trace_streams = {}
 partitions = None
@@ -99,14 +97,6 @@ def create_existing_stream(stream_data):
     amp_trace_streams[key] = stream_data["stream_id"]
 
 
-def data_stream_key(data, source):
-    """ Extract the stream key from the data received from the AMP
-        message broker.
-    """
-
-    return (source, data["target"], sizestr)
-
-
 def insert_stream(db, exp, source, dest, size, address, timestamp):
     """ Insert a new traceroute stream into the streams table """
 
@@ -140,12 +130,9 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     return streamid
 
 
-#def insert_data(db, exp, stream, ts, test_info, hop_info):
 def insert_data(db, exp, stream, ts, result):
     """ Insert data for a single traceroute test into the database """
     global partitions
-
-    dt = db.metadata.tables[DATA_TABLE_NAME]
 
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7,
@@ -156,12 +143,12 @@ def insert_data(db, exp, stream, ts, result):
     try:
         # sqlalchemy is again totally useless and makes it impossible to cast
         # types on insert, so lets do it ourselves.
-        db.conn.execute(text("INSERT INTO data_amp_traceroute ("
+        db.conn.execute(text("INSERT INTO %s ("
                     "stream_id, timestamp, packet_size, length, error_type, "
                     "error_code, hop_rtt, path) VALUES ("
                     ":stream_id, :timestamp, :packet_size, :length, "
                     ":error_type, :error_code, CAST(:hop_rtt AS integer[]),"
-                    "CAST(:path AS inet[]))"),
+                    "CAST(:path AS inet[]))" % DATA_TABLE_NAME),
                     stream_id=stream, timestamp=ts, **result)
     except IntegrityError, e:
         db.rollback_transaction()
@@ -174,6 +161,7 @@ def insert_data(db, exp, stream, ts, result):
 
 
 def process_data(db, exp, timestamp, data, source):
+    """ Process data (which may have multiple paths) and insert into the DB """
     # For each path returned in the test data
     for d in data:
         if d["random"]:
