@@ -337,6 +337,7 @@ class DBSelector:
             # Add minimum timestamp to help with determining frequency
             labeled_aggcols.append("min(timestamp) AS min_timestamp")
             tscol = "min_timestamp"
+            binparam = []
         else:
             # We're going to (probably) have multiple bins, so we also
             # want to group measurements into the appropriate bin
@@ -344,6 +345,7 @@ class DBSelector:
                     "(timestamp - (timestamp %% %s)) AS binstart")
             groupcols.append("binstart")
             tscol = "binstart"
+            binparam = [binsize]
 
         # Constructing the innermost SELECT query, which lists the label for
         # each measurement
@@ -376,7 +378,7 @@ class DBSelector:
 
         # Execute our query!
         # XXX Getting these parameters in the right order is a pain!
-        params = tuple([binsize] + caseparams + [start_time] + [stop_time] + all_streams)
+        params = tuple(binparam + caseparams + [start_time] + [stop_time] + all_streams)
 
         self.datacursor.execute(sql, params)
 
@@ -903,7 +905,7 @@ class DBSelector:
         sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
         # Execute our query!
-        params = tuple([binsize] + caseparams + [start_time] + [stop_time] + all_streams)
+        params = tuple(caseparams + [binsize] + [start_time] + [stop_time] + all_streams)
         self.datacursor.execute(sql, params)
 
         while True:
