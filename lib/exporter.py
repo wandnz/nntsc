@@ -105,22 +105,35 @@ class DBWorker(threading.Thread):
 
         return -1
 
+    def subscribe_streams(self, streams, start, end, cols, name):
+        for s in streams:
+            try:
+                self.pipeend.send((NNTSC_SUBSCRIBE, \
+                        (s, start, end, cols, name)))
+            except IOError as e:
+                log("Failed to subscribe to %s: %s" % (s, e))
+                return -1
+
+        return 0
+
     def aggregate(self, aggmsg):
         tup = pickle.loads(aggmsg)
-        name, start, end, streams, aggcols, groupcols, binsize, aggfunc = tup
+        name, start, end, labels, aggcols, groupcols, binsize, aggfunc = tup
         now = int(time.time())
 
         if end == 0:
             end = None
 
         if start == None or start >= now:
-            for s in streams:
-                result = ({s:[]}, {s:0}, name, [s], fname, False)
+            # No historical data, send empty history for all streams
+            for lab, streams in labels.items():
+                result = ({lab:[]}, {lab:0}, name, [lab], "raw", False)
                 try:
                     self.pipeend.send((NNTSC_HISTORY, result))
                 except IOError as e:
                     log("Failed to return empty history: %s\n" % (e))
                     return -1
+                    
             return 0
 
         if end == None:
@@ -137,11 +150,11 @@ class DBWorker(threading.Thread):
             else:
                 more = True
 
-            generator = self.db.select_aggregated_data(name, streams, aggcols,
+            generator = self.db.select_aggregated_data(name, labels, aggcols,
                     start, queryend, groupcols, binsize, aggfunc)
 
             if self._query_history(generator, name, start, queryend,
-                    streams, [], more, -1) == -1:
+                    labels, [], more, -1) == -1:
                 return -1
             start = queryend + 1
 
@@ -156,7 +169,7 @@ class DBWorker(threading.Thread):
 
     def percentile(self, pcntmsg):
         tup = pickle.loads(pcntmsg)
-        name, start, end, streams, binsize, ntilecols, othercols, \
+        name, start, end, labels, binsize, ntilecols, othercols, \
                 ntileagg, otheragg = tup
         now = int(time.time())
 
@@ -164,13 +177,15 @@ class DBWorker(threading.Thread):
             end = None
 
         if start == None or start >= now:
-            for s in streams:
-                result = ({s:[]}, {s:0}, name, [s], ntileagg, False)
+            # No historical data, send empty history for all streams
+            for lab, streams in labels.items():
+                result = ({lab:[]}, {lab:0}, name, [lab], "raw", False)
                 try:
                     self.pipeend.send((NNTSC_HISTORY, result))
                 except IOError as e:
                     log("Failed to return empty history: %s\n" % (e))
                     return -1
+                    
             return 0
 
         if end == None:
@@ -187,11 +202,11 @@ class DBWorker(threading.Thread):
             else:
                 more = True
 
-            generator = self.db.select_percentile_data(name, streams, ntilecols,
+            generator = self.db.select_percentile_data(name, labels, ntilecols,
                     othercols, start, queryend, binsize, ntileagg, otheragg)
 
             if self._query_history(generator, name, start, queryend,
-                    streams, [], more, -1) == -1:
+                    labels, [], more, -1) == -1:
                 return -1
             start = queryend + 1
 
@@ -221,23 +236,16 @@ class DBWorker(threading.Thread):
         if start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                result = ({lab:[]}, {lab:0}, name, [lab], "raw", sub)
+                result = ({lab:[]}, {lab:0}, name, [lab], "raw", False)
                 try:
                     self.pipeend.send((NNTSC_HISTORY, result))
                 except IOError as e:
                     log("Failed to return empty history: %s\n" % (e))
                     return -1
 
-                # Subscribe to all streams
-                if sub:
-                    for s in streams:
-                        try:
-                            self.pipeend.send((NNTSC_SUBSCRIBE, \
-                                    (s, start, end, cols, name)))
-                        except IOError as e:
-                            log("Failed to subscribe to %s: %s" % (s, e))
-                            return -1
-
+                if self.subscribe_streams(streams, start, end, cols, name) == -1:
+                    return -1
+                    
             return 0
 
         if end == None:
@@ -254,6 +262,8 @@ class DBWorker(threading.Thread):
             else:
                 more = True
 
+            # Only aggregate the streams for each label if explicitly requested,
+            # otherwise fetch full historical data
             if aggs != []:
                 generator = self.db.select_aggregated_data(name, labels, 
                         cols, start, end, [], 1, aggs)
@@ -391,13 +401,8 @@ class DBWorker(threading.Thread):
             return -1
 
         if subend != -1:
-            for s in streams:
-                try:
-                    self.pipeend.send((NNTSC_SUBSCRIBE, \
-                            (s, start, subend, cols, name)))
-                except IOError as e:
-                    log("Subscribe failed for %s: %s" % (s, e))
-                    return -1
+            if self.subscribe_streams(streams, start, subend, cols, name) == -1:
+                return -1
 
         return 0
 
