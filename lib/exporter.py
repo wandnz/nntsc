@@ -71,7 +71,7 @@ from libnntscclient.logger import *
 #   1 NNTSCClient thread per connected client
 #   MAX_WORKERS DBWorker threads per NNTSCClient
 
-MAX_HISTORY_QUERY = (24 * 60 * 60 * 7 * 4)
+MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
 MAX_WORKERS = 2
 
 class DBWorker(threading.Thread):
