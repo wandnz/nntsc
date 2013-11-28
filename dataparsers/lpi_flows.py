@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -37,7 +37,7 @@ lpi_flows_streams = {}
 partitions = None
 
 def stream_table(db):
-    
+
     if STREAM_TABLE_NAME in db.metadata.tables:
         return STREAM_TABLE_NAME
 
@@ -77,7 +77,7 @@ def data_table(db):
 
 
 def create_existing_stream(stream_data):
-    
+
     key = (stream_data['source'], stream_data['user'], stream_data['dir'], \
             stream_data['freq'], stream_data['protocol'], stream_data['metric'])
 
@@ -144,7 +144,7 @@ def insert_data(db, exp, stream_id, ts, value):
         db.rollback_transaction()
         logger.log(e)
         return -1
-    
+
     exp.send((0, ("lpi_flows", stream_id, ts, {"flows":value})))
     return 0
 
@@ -186,6 +186,5 @@ def process_data(db, exp, protomap, data):
         insert_data(db, exp, stream_id, data['ts'], val)
         db.update_timestamp(stream_id, data['ts'])
     return 0
-        
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

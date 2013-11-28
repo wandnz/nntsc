@@ -34,8 +34,8 @@ def load_nntsc_config(filename):
     nntsc_config.set('multicast', 'port', '5007')
 
     if nntsc_config.read([filename]) == []:
-	    logger.log("Failed to load config file: %s" % (filename))
-	    return 0
+        logger.log("Failed to load config file: %s" % (filename))
+        return 0
 
     return nntsc_config
 

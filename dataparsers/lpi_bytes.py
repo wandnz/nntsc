@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -30,14 +30,14 @@ from libnntsc.partition import PartitionedTable
 
 import sys, string
 
-STREAM_TABLE_NAME="streams_lpi_bytes"
-DATA_TABLE_NAME="data_lpi_bytes"
+STREAM_TABLE_NAME = "streams_lpi_bytes"
+DATA_TABLE_NAME = "data_lpi_bytes"
 
 partitions = None
 lpi_bytes_streams = {}
 
 def stream_table(db):
-    
+
     if STREAM_TABLE_NAME in db.metadata.tables:
         return STREAM_TABLE_NAME
 
@@ -99,7 +99,7 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
         dirstr = "outgoing"
     if dir == "in":
         dirstr = "incoming"
- 
+
     namestr = "%s %s bytes for user %s -- measured from %s every %s seconds" \
             % (proto, dirstr, user, mon, freq)
 
@@ -125,12 +125,12 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
 
 def insert_data(db, exp, stream_id, ts, value):
     global partitions
-    
+
     dt = db.metadata.tables[DATA_TABLE_NAME]
 
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id"])
-    
+
     partitions.update(ts)
 
     try:
@@ -139,7 +139,7 @@ def insert_data(db, exp, stream_id, ts, value):
         db.rollback_transaction()
         logger.log(e)
         return -1
-    
+
     exp.send((0, ("lpi_bytes", stream_id, ts, {"bytes":value})))
     return 0
 
@@ -158,9 +158,9 @@ def process_data(db, exp, protomap, data):
         if stream_id == -1:
             if val == 0:
                 # Don't create a stream until we get a non-zero value
-                continue       
+                continue
 
-            stream_id = add_new_stream(db, exp, mon, user, dir, freq, 
+            stream_id = add_new_stream(db, exp, mon, user, dir, freq,
                     protomap[p], data['ts'])
 
             if stream_id == -1:
@@ -173,6 +173,5 @@ def process_data(db, exp, protomap, data):
         insert_data(db, exp, stream_id, data['ts'], val)
         db.update_timestamp(stream_id, data['ts'])
     return 0
-        
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

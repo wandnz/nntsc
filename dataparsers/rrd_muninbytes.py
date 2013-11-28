@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -27,8 +27,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 import libnntscclient.logger as logger
 from libnntsc.partition import PartitionedTable
 
-STREAM_TABLE_NAME="streams_rrd_muninbytes"
-DATA_TABLE_NAME="data_rrd_muninbytes"
+STREAM_TABLE_NAME = "streams_rrd_muninbytes"
+DATA_TABLE_NAME = "data_rrd_muninbytes"
 partitions = None
 
 def stream_table(db):
@@ -78,7 +78,7 @@ def data_table(db):
 def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
         rows, label):
 
-    props = {"name":name, "filename":filename, "switch":switch, 
+    props = {"name":name, "filename":filename, "switch":switch,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
@@ -92,7 +92,7 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid,
                 filename=filename, switch=switch, interface=interface,
-                direction=dir, minres=minres, highrows=rows, 
+                direction=dir, minres=minres, highrows=rows,
                 interfacelabel=label)
     except IntegrityError, e:
         db.rollback_transaction()

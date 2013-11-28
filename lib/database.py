@@ -40,7 +40,7 @@ from libnntscclient.logger import *
 class CreateView(DDLElement):
     def __init__(self, name, selectable):
         self.name = name
-        self.selectable=selectable
+        self.selectable = selectable
 
 class DropView(DDLElement):
     def __init__(self, name):
@@ -65,7 +65,7 @@ class Database:
         if dbpass == "":
             dbpass = None
 
-        connect_string = URL('postgresql',username=dbuser,password=dbpass, \
+        connect_string = URL('postgresql', username=dbuser, password=dbpass, \
                 host=dbhost, database=dbname)
 
         if debug:
@@ -197,7 +197,7 @@ class Database:
                 );""")
             self.conn.execute(aggfunc)
 
-        for base,mod in modules.items():
+        for base, mod in modules.items():
             mod.tables(self)
 
         self.metadata.create_all()
@@ -272,9 +272,9 @@ class Database:
                 if not fk['name']:
                     continue
                 fks.append(
-                    ForeignKeyConstraint((),(),name=fk['name'])
+                    ForeignKeyConstraint((), (), name=fk['name'])
                     )
-            t = Table(table_name,newmeta,*fks)
+            t = Table(table_name, newmeta, *fks)
             if table_name[0:5] == "part_":
                 partitions.append(t)
             else:
@@ -304,7 +304,7 @@ class Database:
         for row in result:
 
             col = {}
-            for k,v in row.items():
+            for k, v in row.items():
                 col[k] = v
             collections.append(col)
 
@@ -352,7 +352,7 @@ class Database:
 
             for row in result:
                 row_dict = {"modsubtype":sub}
-                for k,v in row.items():
+                for k, v in row.items():
                     if k == 'id':
                         continue
                     row_dict[k] = v
@@ -380,7 +380,7 @@ class Database:
 
         for row in result:
             stream_dict = {}
-            for k,v in row.items():
+            for k, v in row.items():
                 if k == "id":
                     continue
                 stream_dict[k] = v

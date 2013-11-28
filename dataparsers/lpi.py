@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -27,8 +27,7 @@ from libnntsc.parsers import lpi_users, lpi_packets
 
 import libnntscclient.logger as logger
 
-from socket import *
-import sys, struct, time
+import time
 
 class LPIModule:
     def __init__(self, existing, nntsc_conf, exp):
@@ -49,7 +48,7 @@ class LPIModule:
         if self.lpiserver == "NNTSCConfigError":
             self.enabled = False
             return
-        
+
         if self.lpiserver == "":
             logger.log("No LPI Server specified, disabling module")
             self.enabled = False
@@ -66,13 +65,13 @@ class LPIModule:
                 dbconf["host"])
 
         for s in existing:
-            
+
             if s['modsubtype'] == "bytes":
                 lpi_bytes.create_existing_stream(s)
             if s['modsubtype'] == "flows":
-                lpi_flows.create_existing_stream(s) 
+                lpi_flows.create_existing_stream(s)
             if s['modsubtype'] == "packets":
-                lpi_packets.create_existing_stream(s) 
+                lpi_packets.create_existing_stream(s)
             if s['modsubtype'] == "users":
                 lpi_users.create_existing_stream(s)
 
@@ -88,15 +87,15 @@ class LPIModule:
         if data['metric'] == "newflows" or data['metric'] == "peakflows":
             return lpi_flows.process_data(self.db, self.exporter, \
                     self.protocol_map, data)
-        
+
         if data['metric'] == "packets":
             return lpi_packets.process_data(self.db, self.exporter, \
                     self.protocol_map, data)
-        
+
         if data['metric'] == "activeusers" or data['metric'] == "observedusers":
             return lpi_users.process_data(self.db, self.exporter, \
                     self.protocol_map, data)
-        
+
         return 0
 
     def reset_seen(self):
@@ -108,7 +107,7 @@ class LPIModule:
             self.observed_protocols[k] = 0
 
     def update_seen(self, data):
-        
+
         if self.current_header == {}:
             self.current_header['user'] = data['user']
             self.current_header['id'] = data['id']
@@ -123,11 +122,11 @@ class LPIModule:
             assert(data['dir'] == self.current_header['dir'])
             assert(data['metric'] == self.current_header['metric'])
             assert(data['ts'] == self.current_header['ts'])
-       
+
         for k in data['results'].keys():
             assert(k in self.observed_protocols)
             del self.observed_protocols[k]
-    
+
     def insert_zeroes(self):
         assert(self.current_header != 0)
 
@@ -145,14 +144,14 @@ class LPIModule:
 
 
         self.process_stats(data)
-        
+
     def run(self):
         while self.enabled:
             logger.log("Attempting to connect to LPI Server")
-            self.server_fd = lpi_common.connect_lpi_server(self.lpiserver, 
+            self.server_fd = lpi_common.connect_lpi_server(self.lpiserver,
                     int(self.lpiport))
             if self.server_fd == -1:
-                logger.log("Connection failed -- will retry in %d seconds" %  
+                logger.log("Connection failed -- will retry in %d seconds" %
                         self.wait)
                 time.sleep(self.wait)
                 self.wait *= 2
@@ -162,7 +161,7 @@ class LPIModule:
 
             logger.log("Successfully connected to LPI Server")
             self.wait = 15
-            self.protocol_map = {}    
+            self.protocol_map = {}
 
             while True:
                 rec_type, data = lpi_common.read_lpicp(self.server_fd)
