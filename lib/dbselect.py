@@ -1,7 +1,7 @@
 import psycopg2
 import psycopg2.extras
 from libnntscclient.logger import *
-import time, sys
+import time
 
 # Class used for querying the NNTSC database.
 # Uses psycopg2 rather than SQLAlchemy for the following reasons:
@@ -106,7 +106,7 @@ class DBSelector:
             if row == None:
                 break
             col = {}
-            for k,v in row.items():
+            for k, v in row.items():
                 col[k] = v
             collections.append(col)
         return collections
@@ -186,7 +186,7 @@ class DBSelector:
                 if row == None:
                     break
                 row_dict = {"modsubtype":sub}
-                for k,v in row.items():
+                for k, v in row.items():
                     if k == "id":
                         continue
                     row_dict[k] = v
@@ -228,7 +228,7 @@ class DBSelector:
             if row == None:
                 break
             stream_dict = {}
-            for k,v in row.items():
+            for k, v in row.items():
                 if k == "id":
                     continue
                 stream_dict[k] = v
@@ -307,7 +307,7 @@ class DBSelector:
             stop_time = int(time.time())
         if start_time == None:
             start_time = stop_time - (24 * 60 * 60)
-        
+
         assert(type(labels) is dict)
 
         # TODO cast to a set to make unique entries?
@@ -521,7 +521,7 @@ class DBSelector:
         """
         case = "CASE"
         caseparams = []
-        for label,stream_ids in labels.iteritems():
+        for label, stream_ids in labels.iteritems():
             #case += " WHEN stream_id in (%s) THEN '%s'" % (
                 #",".join(str(x) for x in stream_ids), label)
             case += " WHEN stream_id in (%s)" % (

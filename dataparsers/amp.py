@@ -99,6 +99,7 @@ class AmpModule:
         self.connect_rabbit()
 
     def connect_rabbit(self):
+        """ Connect to a rabbitmq server """
         # Connect to rabbitmq -- try again if the connection fails
         attempts = 1
 
@@ -135,13 +136,16 @@ class AmpModule:
         # away
 
     def on_connection_closed(self, connection, reply_code, reply_text):
+        """ Callback for when connection is closed """
         logger.log("Connection to RabbitMQ closed, trying again shortly: (%s) %s" % (reply_code, reply_text))
 
     def on_channel_closed(self, channel, reply_code, reply_text):
+        """ Callback for when channel is closed """
         logger.log("Channel %i was closed: (%s) %s" % (channel, reply_code, reply_text))
         self.connection.close()
 
     def on_consumer_cancelled(self, frame):
+        """ Callback for when consumer is cancelled """
         logger.log("Consumer was cancelled remotely, shutting down")
         if self.channel:
             self.channel.close()
@@ -163,10 +167,10 @@ class AmpModule:
                     amp_traceroute.process_data(self.db, self.exporter,
                             properties.timestamp, data, source)
                 elif test == "dns":
-                    amp_dns.process_data(self.db, self.exporter, 
+                    amp_dns.process_data(self.db, self.exporter,
                             properties.timestamp, data, source)
                 elif test == "http":
-                    amp_http.process_data(self.db, self.exporter, 
+                    amp_http.process_data(self.db, self.exporter,
                             properties.timestamp, data, source)
             else:
                 logger.log("unknown test: '%s'" % (

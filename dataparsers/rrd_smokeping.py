@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -48,7 +48,7 @@ def stream_table(db):
         # seconds between measurements at highest resolution
         Column('minres', Integer, nullable=False, default=300),
         # number of measurements stored at highest resolution
-        Column('highrows', Integer, nullable=False, default=1008),         
+        Column('highrows', Integer, nullable=False, default=1008),
 
         UniqueConstraint('filename', 'source', 'host'),
         useexisting=True
@@ -90,7 +90,7 @@ def data_table(db):
         Column('ping20', Float, nullable=True),
         useexisting=True
     )
-    
+
     return DATA_TABLE_NAME
 
 def insert_stream(db, exp, name, fname, source, host, minres, rows):
@@ -105,9 +105,9 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
 
     # insert stream into our stream table
     st = db.metadata.tables[STREAM_TABLE_NAME]
-    
+
     try:
-        result = db.conn.execute(st.insert(), stream_id=streamid, 
+        result = db.conn.execute(st.insert(), stream_id=streamid,
                 filename=fname, source=source,
                 host=host, minres=minres, highrows=rows)
     except IntegrityError, e:
@@ -115,7 +115,7 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
         logger.log(e)
         return -1
 
-    #id = db.insert_stream(mod="rrd", modsubtype="smokeping", name=name, 
+    #id = db.insert_stream(mod="rrd", modsubtype="smokeping", name=name,
     #        filename=fname, source=source, host=host, minres=minres,
     #        highrows=rows, lasttimestamp=0)
 
@@ -152,7 +152,7 @@ def insert_data(db, exp, stream, ts, line):
         exportdict[line_map[i]] = val
 
     dt = db.metadata.tables[DATA_TABLE_NAME]
-    
+
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 30, ["timestamp", "stream_id"])
     partitions.update(ts)
