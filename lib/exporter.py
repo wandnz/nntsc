@@ -133,7 +133,7 @@ class DBWorker(threading.Thread):
                 except IOError as e:
                     log("Failed to return empty history: %s\n" % (e))
                     return -1
-                    
+
             return 0
 
         if end == None:
@@ -185,7 +185,7 @@ class DBWorker(threading.Thread):
                 except IOError as e:
                     log("Failed to return empty history: %s\n" % (e))
                     return -1
-                    
+
             return 0
 
         if end == None:
@@ -245,7 +245,7 @@ class DBWorker(threading.Thread):
 
                 if self.subscribe_streams(streams, start, end, cols, name) == -1:
                     return -1
-                    
+
             return 0
 
         if end == None:
@@ -255,7 +255,7 @@ class DBWorker(threading.Thread):
 
         while start < stoppoint:
             queryend = start + MAX_HISTORY_QUERY
-    
+
             if queryend >= stoppoint:
                 queryend = stoppoint
                 more = False
@@ -265,7 +265,7 @@ class DBWorker(threading.Thread):
             # Only aggregate the streams for each label if explicitly requested,
             # otherwise fetch full historical data
             if aggs != []:
-                generator = self.db.select_aggregated_data(name, labels, 
+                generator = self.db.select_aggregated_data(name, labels,
                         cols, start, end, [], 1, aggs)
             else:
                 generator = self.db.select_data(name, labels, cols, start, end)
@@ -323,7 +323,7 @@ class DBWorker(threading.Thread):
                             name, [currlabel], "raw", thismore)
 
                     assert(currlabel in labels)
-                    if self._write_history(labels[currlabel], result, name, 
+                    if self._write_history(labels[currlabel], result, name,
                                 cols,
                             start, thissub) == -1:
                         return -1
@@ -361,7 +361,7 @@ class DBWorker(threading.Thread):
             # Convert the row into a nice dictionary and add it to the
             # history to be exported
             datadict = {}
-            for k,v in row.items():
+            for k, v in row.items():
                 datadict[k] = v
             history.append(datadict)
             historysize += 1
@@ -752,10 +752,10 @@ class NNTSCClient(threading.Thread):
         # Just reflect whatever we get on the socket to our client
         totalsent = 0
         while totalsent < len(obj):
-                sent = self.sock.send(obj[totalsent:])
-                if sent == 0:
-                    return 0
-                totalsent += sent
+            sent = self.sock.send(obj[totalsent:])
+            if sent == 0:
+                return 0
+            totalsent += sent
 
         return totalsent
 
@@ -856,15 +856,15 @@ class NNTSCExporter:
         self.pwe.del_fd_event(sock)
         sock.close()
 
-    def filter_columns(self, cols, data, stream_id, ts):
+    def filter_columns(self, cols, data, stream_id, timestamp):
 
         # Filter the data received from the NNTSC data parser to only
         # contain the columns that were asked for by the client
 
         # Always need these
-        results = {"label":stream_id, "timestamp":ts}
+        results = {"label":stream_id, "timestamp":timestamp}
 
-        for k,v in data.items():
+        for k, v in data.items():
             if k in cols:
                 results[k] = v
 
@@ -884,7 +884,7 @@ class NNTSCExporter:
                 self.collections[col].append(sock)
         else:
             self.collections[col] = [sock]
-    
+
     def export_push(self, received, fd):
         try:
             collid, timestamp = received
@@ -973,7 +973,7 @@ class NNTSCExporter:
             log("Values should expressed as a dictionary")
             self.drop_source(sock)
             return
-   
+
         if stream_id in self.subscribers.keys():
             active = []
 
@@ -1108,7 +1108,7 @@ if __name__ == '__main__':
 
     opts, rest = getopt.getopt(sys.argv[1:],'p:h')
 
-    for o,a in opts:
+    for o, a in opts:
         if o == "-p":
             listen_port = int(a)
         if o == '-h':

@@ -20,18 +20,16 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy import Table, Column, Integer, \
+        String, ForeignKey, UniqueConstraint, Index
+from sqlalchemy.types import Integer, String
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects import postgresql
 from libnntsc.partition import PartitionedTable
 import libnntscclient.logger as logger
 
-import sys, string
-
-STREAM_TABLE_NAME="streams_amp_icmp"
-DATA_TABLE_NAME="data_amp_icmp"
+STREAM_TABLE_NAME = "streams_amp_icmp"
+DATA_TABLE_NAME = "data_amp_icmp"
 
 amp_icmp_streams = {}
 partitions = None
@@ -100,6 +98,7 @@ when the AMP module is first instantiated"""
         amp_icmp_sources[src] = {streamid: 0}
 
 def insert_stream(db, exp, source, dest, size, address, timestamp):
+    """ Insert a new stream into the database and export to listeners """
 
     name = "icmp %s:%s:%s:%s" % (source, dest, address, size)
 
@@ -129,6 +128,7 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     return streamid
 
 def insert_data(db, exp, stream, ts, result):
+    """ Insert a new measurement into the database and export to listeners """
     global partitions
 
     dt = db.metadata.tables[DATA_TABLE_NAME]
@@ -149,12 +149,12 @@ def insert_data(db, exp, stream, ts, result):
     return 0
 
 def process_data(db, exp, timestamp, data, source):
-
+    """ Process a data object, which can contain 1 or more sets of results """
     missing = {}
 
     if source in amp_icmp_sources:
         for k in amp_icmp_sources[source].keys():
-            # If we've not seen a test result for a large number of 
+            # If we've not seen a test result for a large number of
             # consecutive measurements, stop inserting nulls until we
             # see something valid for the stream again
             if amp_icmp_sources[source][k] < 100:
@@ -176,7 +176,7 @@ def process_data(db, exp, timestamp, data, source):
             del missing[stream_id]
             amp_icmp_sources[source][stream_id] = 0
         else:
-            stream_id = insert_stream(db, exp, source, d["target"], sizestr, 
+            stream_id = insert_stream(db, exp, source, d["target"], sizestr,
                     d["address"], timestamp)
 
             if stream_id == -1:
@@ -186,7 +186,7 @@ def process_data(db, exp, timestamp, data, source):
                 return -1
             else:
                 amp_icmp_streams[key] = stream_id
-                
+
                 if amp_icmp_sources.has_key(source):
                     amp_icmp_sources[source][stream_id] = 0
                 else:
@@ -195,7 +195,7 @@ def process_data(db, exp, timestamp, data, source):
         insert_data(db, exp, stream_id, timestamp, d)
         db.update_timestamp(stream_id, timestamp)
 
-    return 0    
+    return 0
 
     # XXX Not sure if we actually need to insert nulls for streams we only
     # get results for periodically. Leave this code here in case we do
@@ -212,6 +212,7 @@ def process_data(db, exp, timestamp, data, source):
         amp_icmp_sources[source][k] += 1
 
 def register(db):
+    """ Register the amp-icmp collection """
     st_name = stream_table(db)
     dt_name = data_table(db)
 

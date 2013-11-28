@@ -7,20 +7,20 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 # $Id$
 
 
-import ConfigParser, sys
+import ConfigParser
 import libnntscclient.logger as logger
 
 def load_nntsc_config(filename):
@@ -29,15 +29,15 @@ def load_nntsc_config(filename):
 
     # add some default values
     nntsc_config.add_section('multicast')
-    nntsc_config.set('multicast','enabled','False')
-    nntsc_config.set('multicast','group','224.1.1.1')
-    nntsc_config.set('multicast','port','5007')
+    nntsc_config.set('multicast', 'enabled', 'False')
+    nntsc_config.set('multicast', 'group', '224.1.1.1')
+    nntsc_config.set('multicast', 'port', '5007')
 
     if nntsc_config.read([filename]) == []:
 	    logger.log("Failed to load config file: %s" % (filename))
 	    return 0
 
-    return nntsc_config 
+    return nntsc_config
 
 
 def get_nntsc_config_bool(nntsc_config, section, option):
@@ -79,7 +79,7 @@ def get_nntsc_config(nntsc_config, section, option):
     return result
 
 def get_nntsc_db_config(nntsc_config):
-	
+
     dbhost = get_nntsc_config(nntsc_config, 'database', 'host')
     if dbhost == "NNTSCConfigError":
         return {}
@@ -92,7 +92,7 @@ def get_nntsc_db_config(nntsc_config):
     dbpass = get_nntsc_config(nntsc_config, 'database', 'password')
     if dbpass == "NNTSCConfigError":
         return {}
-	
+
     return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass}
 
 

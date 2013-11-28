@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -33,11 +33,11 @@ import libnntscclient.logger as logger
 from itertools import chain
 import sys, string
 
-STREAM_TABLE_NAME="streams_amp_http"
-DATA_VIEW_NAME="data_amp_http"
-TEST_TABLE_NAME="internal_amp_http_test"
-SERVER_TABLE_NAME="internal_amp_http_servers"
-OBJ_TABLE_NAME="internal_amp_http_objects"
+STREAM_TABLE_NAME = "streams_amp_http"
+DATA_VIEW_NAME = "data_amp_http"
+TEST_TABLE_NAME = "internal_amp_http_test"
+SERVER_TABLE_NAME = "internal_amp_http_servers"
+OBJ_TABLE_NAME = "internal_amp_http_objects"
 
 amp_http_streams = {}
 test_partitions = None
@@ -49,7 +49,7 @@ def stream_table(db):
     if STREAM_TABLE_NAME in db.metadata.tables:
         return STREAM_TABLE_NAME
 
-    st = Table(STREAM_TABLE_NAME, db.metadata, 
+    st = Table(STREAM_TABLE_NAME, db.metadata,
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 primary_key=True),
         Column('source', String, nullable=False),
@@ -62,7 +62,7 @@ def stream_table(db):
         Column('pipelining_max_requests', Integer, nullable=False),
         Column('caching', Boolean, nullable=False),
         UniqueConstraint('source', 'url', 'persist', 'max_connections',
-                'max_connections_per_server', 
+                'max_connections_per_server',
                 'max_persistent_connections_per_server', 'pipelining',
                 'pipelining_max_requests', 'caching'),
         extend_existing=True,
@@ -78,9 +78,9 @@ def data_tables(db):
     if DATA_VIEW_NAME in db.metadata.tables:
         return DATA_VIEW_NAME
 
-    testtable = Table(TEST_TABLE_NAME, db.metadata, 
+    testtable = Table(TEST_TABLE_NAME, db.metadata,
         Column('test_id', Integer, primary_key=True),
-        Column('stream_id', Integer, 
+        Column('stream_id', Integer,
             ForeignKey('streams.id', ondelete="CASCADE"),
             nullable=False),
         Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
@@ -111,16 +111,16 @@ def data_tables(db):
         UniqueConstraint('test_id', 'server_index', 'server_name'),
         extend_existing=True,
     )
-    
+
     #Index('index_amp_http_servertest', servtable.c.test_id)
 
     objtable = Table(OBJ_TABLE_NAME, db.metadata,
         Column('object_id', Integer, primary_key=True),
-        Column('test_id', Integer, 
+        Column('test_id', Integer,
             ForeignKey(TEST_TABLE_NAME + '.test_id', ondelete="CASCADE"),
             nullable=False),
-        Column('server_id', Integer, 
-            ForeignKey(SERVER_TABLE_NAME + '.server_id', 
+        Column('server_id', Integer,
+            ForeignKey(SERVER_TABLE_NAME + '.server_id',
                 ondelete="CASCADE"), nullable=False),
         Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
         Column('path', String, nullable=False),
@@ -129,7 +129,7 @@ def data_tables(db):
         Column('obj_endtime', postgresql.DOUBLE_PRECISION, nullable=False),
         Column('obj_lookuptime', postgresql.DOUBLE_PRECISION, nullable=False),
         Column('obj_connecttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('obj_starttransfertime', postgresql.DOUBLE_PRECISION, 
+        Column('obj_starttransfertime', postgresql.DOUBLE_PRECISION,
                 nullable=False),
         Column('obj_totaltime', postgresql.DOUBLE_PRECISION, nullable=False),
         Column('obj_size', Integer, nullable=False),
@@ -175,7 +175,7 @@ def insert_stream(db, exp, source, data, timestamp):
     name = "http %s:%s" % (source, data['url'])
 
     props = {"name": name, "source":source, "url":data['url'],
-            "persist":data['keep_alive'], 
+            "persist":data['keep_alive'],
             "max_connections":data['max_connections'],
             "max_connections_per_server":data['max_connections_per_server'],
             "max_persistent_connections_per_server":data['max_persistent_connections_per_server'],
@@ -206,7 +206,7 @@ def insert_test(db, stream, timestamp, data):
     dt = db.metadata.tables[TEST_TABLE_NAME]
 
     if test_partitions == None:
-        test_partitions = PartitionedTable(db, TEST_TABLE_NAME, 
+        test_partitions = PartitionedTable(db, TEST_TABLE_NAME,
                 60 * 60 * 24 * 7, ["test_starttime", "stream_id", "test_id"],
                 "test_starttime")
 
@@ -230,8 +230,7 @@ def insert_test(db, stream, timestamp, data):
                 test_starttime=:start AND test_servercount=:servers AND
                 test_objectcount=:objects AND test_duration=:duration AND
                 test_bytecount=:bytes;""" % (TEST_TABLE_NAME))
-        
-        
+
         result = db.conn.execute(query, id=stream, start=timestamp,
                 servers=data['server_count'], objects=data['object_count'],
                 duration=data['duration'], bytes=data['bytes'])
@@ -265,7 +264,7 @@ def insert_server(db, stream, timestamp, testid, server, index):
             "server_objectcount": server["object_count"]}
 
     try:
-        db.conn.execute(dt.insert(), **server_info);
+        db.conn.execute(dt.insert(), **server_info)
 
         # Get the id of the server we just inserted. I know this is not
         # the normal way to do this, but we can't just RETURN it due to table
@@ -322,7 +321,7 @@ def insert_object(db, stream, timestamp, testid, serverid, obj):
     }
 
     try:
-        db.conn.execute(dt.insert(), **obj_info);
+        db.conn.execute(dt.insert(), **obj_info)
 
         # Get the id of the object we just inserted. I know this is not
         # the normal way to do this, but we can't just RETURN it due to table
@@ -351,7 +350,7 @@ def insert_object(db, stream, timestamp, testid, serverid, obj):
 def export_http_row(exp, stream, ts, objid, testinfo, serverinfo, objinfo):
 
     # Construct a dictionary-equivalent of a row from the data view using
-    # the rows we added to the internal tables, so we can export it to 
+    # the rows we added to the internal tables, so we can export it to
     # anyone wanting live data.
 
     # Merge the three info dicts, removing duplicate keys
@@ -373,8 +372,8 @@ def create_existing_stream(data):
             data['pipelining'], \
             str(data['pipelining_max_requests']), \
             data['caching'])
-   
-    amp_http_streams[key] = data['stream_id'] 
+
+    amp_http_streams[key] = data['stream_id']
 
 def process_data(db, exp, timestamp, data, source):
 
@@ -391,7 +390,7 @@ def process_data(db, exp, timestamp, data, source):
         stream_id = insert_stream(db, exp, source, data, timestamp)
         if stream_id == -1:
             logger.log("AMPModule: Cannot create stream for:")
-            logger.log("AMPModule: %s %s %s \n" % ("http", source,    
+            logger.log("AMPModule: %s %s %s \n" % ("http", source,
                     data['url']))
             return -1
         amp_http_streams[streamkey] = stream_id
@@ -425,5 +424,5 @@ def process_data(db, exp, timestamp, data, source):
         servindex += 1
     db.update_timestamp(stream_id, timestamp)
 
-# vim: set sw=4 tabstop=4 softtabstop=4 expandtab :		
+# vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
