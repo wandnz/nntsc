@@ -71,7 +71,7 @@ from libnntscclient.logger import *
 #   1 NNTSCClient thread per connected client
 #   MAX_WORKERS DBWorker threads per NNTSCClient
 
-MAX_HISTORY_QUERY = (24 * 60 * 60 * 7 * 4)
+MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
 MAX_WORKERS = 2
 
 class DBWorker(threading.Thread):
@@ -266,9 +266,10 @@ class DBWorker(threading.Thread):
             # otherwise fetch full historical data
             if aggs != []:
                 generator = self.db.select_aggregated_data(name, labels,
-                        cols, start, end, [], 1, aggs)
+                        cols, start, queryend, [], 1, aggs)
             else:
-                generator = self.db.select_data(name, labels, cols, start, end)
+                generator = self.db.select_data(name, labels, cols, start,
+                        queryend)
 
             if (self._query_history(generator, name, start, queryend,
                     labels, cols, more, subend)) == -1:
