@@ -264,11 +264,13 @@ class DBWorker(threading.Thread):
 
             # Only aggregate the streams for each label if explicitly requested,
             # otherwise fetch full historical data
+            
             if aggs != []:
                 generator = self.db.select_aggregated_data(name, labels, 
-                        cols, start, end, [], 1, aggs)
+                        cols, start, queryend, [], 1, aggs)
             else:
-                generator = self.db.select_data(name, labels, cols, start, end)
+                generator = self.db.select_data(name, labels, cols, start, 
+                        queryend)
 
             if (self._query_history(generator, name, start, queryend,
                     labels, cols, more, subend)) == -1:
