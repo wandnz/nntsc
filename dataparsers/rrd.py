@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -36,7 +36,7 @@ class RRDModule:
         if dbconf == {}:
             sys.exit(1)
 
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], 
+        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
         self.exporter = exp
@@ -48,7 +48,7 @@ class RRDModule:
                 self.smokepings[r['stream_id']] = r
             if r['modsubtype'] == 'muninbytes':
                 self.muninbytes[r['stream_id']] = r
-            
+
             filename = str(r['filename'])
             if filename in self.rrds:
                 self.rrds[filename].append(r)
@@ -62,37 +62,37 @@ class RRDModule:
         # that the last line of output from fetch isn't full of NaNs.
         # First we try to make sure endts falls on a period boundary,
         # which you think would be enough, but even being on the
-        # boundary is enough to make rrdfetch think it needs to give 
+        # boundary is enough to make rrdfetch think it needs to give
         # you an extra period's worth of output, even if that output
         # is totally useless :(
         #
-        # XXX Surely there must be a better way of dealing with this!   
+        # XXX Surely there must be a better way of dealing with this!
 
         if (endts % r['minres']) != 0:
             endts -= (endts % r['minres'])
             #endts -= 1
 
         startts = endts - (r['highrows'] * r['minres'])
-        
+
         if (r["lasttimestamp"] > startts):
             startts = r["lasttimestamp"]
-        
+
         # XXX Occasionally we manage to push our endts back past our last
         # timestamp, so we need to make sure we don't query for a broken
         # time period. This is a bit of a hax fix, but is better than nothing
         if endts < startts:
             endts = startts
-            
+
         return startts, endts
 
     def run(self):
-        logger.log("Starting RRD module") 
+        logger.log("Starting RRD module")
         while True:
             for fname,rrds in self.rrds.items():
                 for r in rrds:
                     stream_id = r['stream_id']
                     timestamp = int(time.mktime(time.localtime()))
-                    endts = rrdtool.last(str(fname)) 
+                    endts = rrdtool.last(str(fname))
 
                     startts, endts = self.rejig_ts(endts, r)
 
@@ -103,7 +103,7 @@ class RRDModule:
                     current = int(fetchres[0][0])
                     last = int(fetchres[0][1])
                     step = int(fetchres[0][2])
-                    
+
                     data = fetchres[2]
                     current += step
 
@@ -114,36 +114,36 @@ class RRDModule:
                         if r['modsubtype'] == "smokeping":
                             rrd_smokeping.insert_data(self.db, self.exporter,
                                     r['stream_id'], current, line)
-                        
+
                         if r['modsubtype'] == "muninbytes":
                             rrd_muninbytes.insert_data(self.db, self.exporter,
                                     r['stream_id'], current, line)
-                        
+
                         if current > r['lasttimestamp']:
                             r['lasttimestamp'] = current
-                    
+
                         # RRD streams are created before we see any data so we
                         # have to update firsttimestamp when we see the first
                         # data point
                         if (r['firsttimestamp'] == 0):
                             r['firsttimestamp'] = current;
                             self.db.set_firsttimestamp(r['stream_id'], current)
-    
+
                         current += step
-                         
-                    self.db.update_timestamp(r['stream_id'], r['lasttimestamp']) 
+
+                    self.db.update_timestamp(r['stream_id'], r['lasttimestamp'])
             self.db.commit_transaction()
 
             time.sleep(30)
 
 def create_rrd_stream(db, rrdtype, params, index, existing):
 
-    
+
     if "file" not in params:
         logger.log("Failed to create stream for RRD %d" % (index))
         logger.log("All RRDs must have a 'file' parameter")
         return
-    
+
     if params['file'] in existing:
         return
 
@@ -157,7 +157,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
         if "source" not in params:
             logger.log("Failed to create stream for RRD %d" % (index))
             logger.log("All Smokeping RRDs must have a 'source' parameter")
-        
+
         if "host" not in params:
             logger.log("Failed to create stream for RRD %d" % (index))
             logger.log("All Smokeping RRDs must have a 'host' parameter")
@@ -167,10 +167,10 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             logger.log("Failed to create stream for RRD %d" % (index))
             logger.log("All Smokeping RRDs must have a 'name' parameter")
             return
-        
-        rrd_smokeping.insert_stream(db, None, params['name'], params['file'], 
+
+        rrd_smokeping.insert_stream(db, None, params['name'], params['file'],
                 params["source"], params['host'], minres, rows)
-        
+
     if rrdtype == "muninbytes":
         if "switch" not in params:
             logger.log("Failed to create stream for RRD %d" % (index))
@@ -189,7 +189,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             logger.log("Failed to create stream for RRD %d" % (index))
             logger.log("'direction' parameter for MuninBytes RRDs must be either 'sent' or 'received'")
             return
-        
+
         if "interfacelabel" not in params:
             label = None
             namelabel = "Port " + params["interface"]
@@ -199,7 +199,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
 
         muninname = params["switch"] + " >> " + namelabel + " (Bytes " + params["direction"] + ")"
 
-        rrd_muninbytes.insert_stream(db, None, muninname, params['file'], 
+        rrd_muninbytes.insert_stream(db, None, muninname, params['file'],
                 params['switch'], params['interface'], params['direction'],
                 minres, rows, label)
 
@@ -210,7 +210,7 @@ def insert_rrd_streams(db, conf):
     files = {}
     for r in rrds:
         files[r['filename']] = r['name']
-        
+
 
     if conf == "":
         return
@@ -234,7 +234,7 @@ def insert_rrd_streams(db, conf):
         x = line.strip().split("=")
         if len(x) != 2:
             continue
-        
+
         if x[0] == "type":
             if parameters != {}:
                 create_rrd_stream(db, subtype, parameters, index, files)
@@ -244,7 +244,7 @@ def insert_rrd_streams(db, conf):
         else:
             parameters[x[0]] = x[1]
 
-   
+
     if parameters != {}:
         create_rrd_stream(db, subtype, parameters, index, files)
 
@@ -255,10 +255,10 @@ def insert_rrd_streams(db, conf):
 def run_module(rrds, config, exp):
     rrd = RRDModule(rrds, config, exp)
     rrd.run()
-    
+
 
 def tables(db):
-    
+
     st_name = rrd_smokeping.stream_table(db)
     dt_name = rrd_smokeping.data_table(db)
 
@@ -268,7 +268,7 @@ def tables(db):
     dt_name = rrd_muninbytes.data_table(db)
 
     db.register_collection("rrd", "muninbytes", st_name, dt_name)
-        
+
     #res = {}
     #res["rrd_smokeping"] = (smokeping_stream_table(), smokeping_stream_constraints(), smokeping_data_table())
 

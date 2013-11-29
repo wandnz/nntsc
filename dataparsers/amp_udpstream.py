@@ -7,13 +7,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -29,8 +29,8 @@ from sqlalchemy.sql.expression import select, join, outerjoin, func, label
 from libnntsc.partition import PartitionedTable
 import libnntscclient.logger as logger
 
-STREAM_TABLE_NAME="streams_amp_udpstream"
-DATA_VIEW_NAME="data_amp_udpstream"
+STREAM_TABLE_NAME = "streams_amp_udpstream"
+DATA_VIEW_NAME = "data_amp_udpstream"
 
 def stream_table(db):
 
@@ -44,7 +44,7 @@ def stream_table(db):
         Column('destination', String, nullable=False),
         Column('packetsize', Integer, nullable=False),
         Column('packetspacing', Integer, nullable=False),
-        UniqueConstraint('source', 'destination', 'packetsize', 
+        UniqueConstraint('source', 'destination', 'packetsize',
                 'packetspacing'),
         extend_existing=True,
     )
@@ -75,8 +75,8 @@ def data_tables(db):
     Index('index_amp_udpstream_teststream', testtable.c.stream_id)
 
     pkttable = Table('internal_amp_udpstream_packets', db.metadata,
-        Column('test_id', Integer, 
-            ForeignKey('internal_amp_udpstream_test.test_id', 
+        Column('test_id', Integer,
+            ForeignKey('internal_amp_udpstream_test.test_id',
                     ondelete="CASCADE"),
             nullable=False),
         Column('packet_order', Integer, nullable=False),

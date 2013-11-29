@@ -28,10 +28,8 @@ from sqlalchemy.dialects import postgresql
 from libnntsc.partition import PartitionedTable
 import libnntscclient.logger as logger
 
-import sys, string
-
-STREAM_TABLE_NAME="streams_amp_dns"
-DATA_TABLE_NAME="data_amp_dns"
+STREAM_TABLE_NAME = "streams_amp_dns"
+DATA_TABLE_NAME = "data_amp_dns"
 
 amp_dns_streams = {}
 partitions = None
@@ -43,7 +41,7 @@ flagnames = ['rd', 'tc', 'aa', 'qr', 'cd', 'ad', 'ra']
 def result_to_key(res):
     key = (str(res['source']), str(res['destination']), str(res['instance']),
             res['address'], str(res['query']), str(res['query_type']),
-            str(res['query_class']), str(res['udp_payload_size']), 
+            str(res['query_class']), str(res['udp_payload_size']),
             res['recurse'], res['dnssec'], res['nsid'])
 
     return key
@@ -57,7 +55,7 @@ def insert_stream(db, exp, data, timestamp):
     name = "dns %s:%s:%s" % (data['source'], data['destination'], data['query'])
 
     props = {"name":name}
-    
+
     for k,v in data.items():
         if k in streamkeys:
             props[k] = v
@@ -183,24 +181,24 @@ def split_result(alldata, result):
             data[k] = v
 
     return stream, data
-    
+
 def process_data(db, exp, timestamp, data, source):
-  
+
     for r in data['results']:
         streamresult, dataresult = split_result(data, r)
-   
+
         # Source is not part of the AMP result itself
         streamresult['source'] = source
 
         key = result_to_key(streamresult)
         if key in amp_dns_streams:
             stream_id = amp_dns_streams[key]
-            
+
         else:
             stream_id = insert_stream(db, exp, streamresult, timestamp)
             if stream_id == -1:
                 logger.log("AMPModule: Cannot create stream for:")
-                logger.log("AMPModule: %s %s %s %s\n" % ("dns", source, 
+                logger.log("AMPModule: %s %s %s %s\n" % ("dns", source,
                         streamresult['destination'], streamresult['query']))
                 return -1
             amp_dns_streams[key] = stream_id
