@@ -162,6 +162,14 @@ def insert_data(db, exp, stream, ts, result):
 
 def process_data(db, exp, timestamp, data, source):
     """ Process data (which may have multiple paths) and insert into the DB """
+    missing = {}
+
+    for stream_id in amp_trace_streams.values():
+        # Mark every stream id that we haven't yet seen data for. Any
+        # stream id that reports more than one measurement per message
+        # will have those later measurements ignored.
+        missing[stream_id] = 0
+
     # For each path returned in the test data
     for d in data:
         if d["random"]:
@@ -174,6 +182,10 @@ def process_data(db, exp, timestamp, data, source):
 
         if key in amp_trace_streams:
             stream_id = amp_trace_streams[key]
+
+            if stream_id not in missing:
+                continue
+            del missing[stream_id]
         else:
             stream_id = insert_stream(db, exp, source, d["target"], sizestr,
                     d['address'], timestamp)
