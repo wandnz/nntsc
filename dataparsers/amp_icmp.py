@@ -33,7 +33,6 @@ DATA_TABLE_NAME = "data_amp_icmp"
 
 amp_icmp_streams = {}
 partitions = None
-amp_icmp_sources = {}
 
 def stream_table(db):
     """ Specify the description of an icmp stream, used to create the table """
@@ -92,10 +91,6 @@ when the AMP module is first instantiated"""
     key = (src, dest, addr, size)
 
     amp_icmp_streams[key] = streamid
-    if amp_icmp_sources.has_key(src):
-        amp_icmp_sources[src][streamid] = 0
-    else:
-        amp_icmp_sources[src] = {streamid: 0}
 
 def insert_stream(db, exp, source, dest, size, address, timestamp):
     """ Insert a new stream into the database and export to listeners """
@@ -152,13 +147,11 @@ def process_data(db, exp, timestamp, data, source):
     """ Process a data object, which can contain 1 or more sets of results """
     missing = {}
 
-    if source in amp_icmp_sources:
-        for k in amp_icmp_sources[source].keys():
-            # If we've not seen a test result for a large number of
-            # consecutive measurements, stop inserting nulls until we
-            # see something valid for the stream again
-            if amp_icmp_sources[source][k] < 100:
-                missing[k] = 0
+    for stream_id in amp_icmp_streams.values():
+        # Mark every stream id that we haven't yet seen data for. Any
+        # stream id that reports more than one measurement per message
+        # will have those later measurements ignored.
+        missing[stream_id] = 0
 
     for d in data:
         if d["random"]:
@@ -172,9 +165,9 @@ def process_data(db, exp, timestamp, data, source):
         if key in amp_icmp_streams:
             stream_id = amp_icmp_streams[key]
 
-            assert(stream_id in missing)
+            if stream_id not in missing:
+                continue
             del missing[stream_id]
-            amp_icmp_sources[source][stream_id] = 0
         else:
             stream_id = insert_stream(db, exp, source, d["target"], sizestr,
                     d["address"], timestamp)
@@ -187,29 +180,10 @@ def process_data(db, exp, timestamp, data, source):
             else:
                 amp_icmp_streams[key] = stream_id
 
-                if amp_icmp_sources.has_key(source):
-                    amp_icmp_sources[source][stream_id] = 0
-                else:
-                    amp_icmp_sources[source] = {stream_id: 0}
-
         insert_data(db, exp, stream_id, timestamp, d)
         db.update_timestamp(stream_id, timestamp)
 
     return 0
-
-    # XXX Not sure if we actually need to insert nulls for streams we only
-    # get results for periodically. Leave this code here in case we do
-    # end up needing it, but don't actually run it until we are sure that
-    # the missing data values are causing us problems.
-
-    nulldata = {'packet_size':0, 'loss':0, 'error_type':0, 'error_code':0}
-    # Insert "null" data values for any streams that we didn't test this
-    # time around
-    for k in missing.keys:
-        insert_data(db, exp, k, timestamp, nulldata)
-        db.update_timestamp(k, timestamp)
-        # Increment the consecutive null count
-        amp_icmp_sources[source][k] += 1
 
 def register(db):
     """ Register the amp-icmp collection """
