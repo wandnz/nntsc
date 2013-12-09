@@ -255,6 +255,13 @@ class DBWorker(threading.Thread):
 
         while start < stoppoint:
             queryend = start + MAX_HISTORY_QUERY
+    
+            # If we were asked for data up until "now", make sure we account
+            # for the time taken to make earlier queries otherwise we'll
+            # miss any new data inserted while we were querying previous
+            # weeks of data
+            if end == None:
+                stoppoint = int(time.time())
 
             if queryend >= stoppoint:
                 queryend = stoppoint
@@ -275,18 +282,11 @@ class DBWorker(threading.Thread):
                     labels, cols, more, subend)) == -1:
                 return -1
 
-            # Don't subscribe to a stream more than once
-            if subend != -1:
+            # Don't subscribe more than once
+            if more == False:
                 subend = -1
 
             start = queryend + 1
-
-            # If we were asked for data up until "now", make sure we account
-            # for the time taken to make earlier queries otherwise we'll
-            # miss any new data inserted while we were querying previous
-            # weeks of data
-            if end == None:
-                stoppoint = int(time.time())
 
         log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
@@ -311,12 +311,10 @@ class DBWorker(threading.Thread):
                     # avoid duplicate subscriptions and set the 'more'
                     # flag correctly
                     if row['label'] == currlabel:
-                        thissub = -1
                         thismore = True
                     else:
-                        thissub = subend
                         thismore = more
-
+                           
                     # Export the history to the pipe
                     freq = self._calc_frequency(freqstats, binsize)
                     result = ({ currlabel : history },
@@ -326,7 +324,7 @@ class DBWorker(threading.Thread):
                     assert(currlabel in labels)
                     if self._write_history(labels[currlabel], result, name,
                                 cols,
-                            start, thissub) == -1:
+                            start, subend, thismore) == -1:
                         return -1
 
                 # Reset all our counters etc.
@@ -374,7 +372,7 @@ class DBWorker(threading.Thread):
                     { currlabel : freq },
                     name, [currlabel], "raw", more)
             if self._write_history(labels[currlabel], result, name, cols,
-                    start, subend) == -1:
+                    start, subend, more) == -1:
                 return -1
 
         # Also remember to export empty history for any streams that had
@@ -387,21 +385,21 @@ class DBWorker(threading.Thread):
             result = ({m : []}, {m : 0}, name, [m], "raw", more)
             assert (m in labels)
             if self._write_history(labels[m], result, name, cols,
-                    start, subend) == -1:
+                    start, subend, more) == -1:
                 return -1
 
         return 0
 
     # Nice little helper function that pushes history data onto the pipe
     # back to our NNTSCClient
-    def _write_history(self, streams, result, name, cols, start, subend):
+    def _write_history(self, streams, result, name, cols, start, subend, more):
         try:
             self.pipeend.send((NNTSC_HISTORY, result))
         except IOError as e:
             log("Failed to return history to client: %s" % (e))
             return -1
 
-        if subend != -1:
+        if subend != -1 and not more:
             if self.subscribe_streams(streams, start, subend, cols, name) == -1:
                 return -1
 
