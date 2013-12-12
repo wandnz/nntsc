@@ -183,6 +183,13 @@ def split_result(alldata, result):
     return stream, data
 
 def process_data(db, exp, timestamp, data, source):
+    missing = {}
+
+    for stream_id in amp_dns_streams.values():
+        # Mark every stream id that we haven't yet seen data for. Any
+        # stream id that reports more than one measurement per message
+        # will have those later measurements ignored.
+        missing[stream_id] = 0
 
     for r in data['results']:
         streamresult, dataresult = split_result(data, r)
@@ -194,6 +201,9 @@ def process_data(db, exp, timestamp, data, source):
         if key in amp_dns_streams:
             stream_id = amp_dns_streams[key]
 
+            if stream_id not in missing:
+                continue
+            del missing[stream_id]
         else:
             stream_id = insert_stream(db, exp, streamresult, timestamp)
             if stream_id == -1:
