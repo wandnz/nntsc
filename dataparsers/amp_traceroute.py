@@ -155,7 +155,6 @@ def insert_data(db, exp, stream, ts, result):
         return -1
 
     exp.send((0, ("amp_traceroute", stream, ts, result)))
-    db.commit_transaction()
 
     return 0
 
@@ -206,5 +205,7 @@ def process_data(db, exp, timestamp, data, source):
 
         insert_data(db, exp, stream_id, timestamp, d)
         db.update_timestamp(stream_id, timestamp)
+
+    db.commit_transaction()
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
