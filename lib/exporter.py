@@ -149,6 +149,13 @@ class DBWorker(threading.Thread):
                 more = False
             else:
                 more = True
+                # Make sure our queries align nicely with the binsize,
+                # otherwise we'll end up with duplicate results for the
+                # bins that span the query boundary
+                if queryend % binsize < binsize - 1:
+                    queryend = (int(queryend / binsize) * binsize) - 1
+
+            
 
             generator = self.db.select_aggregated_data(name, labels, aggcols,
                     start, queryend, groupcols, binsize, aggfunc)
@@ -201,6 +208,11 @@ class DBWorker(threading.Thread):
                 more = False
             else:
                 more = True
+                # Make sure our queries align nicely with the binsize,
+                # otherwise we'll end up with duplicate results for the
+                # bins that span the query boundary
+                if queryend % binsize < binsize - 1:
+                    queryend = (int(queryend / binsize) * binsize) - 1
 
             generator = self.db.select_percentile_data(name, labels, ntilecols,
                     othercols, start, queryend, binsize, ntileagg, otheragg)
