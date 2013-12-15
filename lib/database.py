@@ -406,13 +406,12 @@ class Database:
         self.trans.rollback()
         self.trans = self.conn.begin()
 
-    def update_timestamp(self, stream_id, lasttimestamp):
-        table = self.metadata.tables['streams']
-        result = self.conn.execute(table.update().where( \
-                table.c.id==stream_id).values( \
-                lasttimestamp=lasttimestamp))
-        result.close()
-        self.pending += 1
+    def update_timestamp(self, stream_ids, lasttimestamp):
+        if len(stream_ids) == 0:
+            return
+        sql = "UPDATE streams SET lasttimestamp=%s "
+        sql += "WHERE id IN (%s)" % (",".join(["%s"] * len(stream_ids)))
+        self.conn.execute(sql, tuple([lasttimestamp] + stream_ids))
 
     def set_firsttimestamp(self, stream_id, ts):
         table = self.metadata.tables['streams']

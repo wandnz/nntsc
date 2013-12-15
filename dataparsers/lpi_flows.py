@@ -154,6 +154,7 @@ def process_data(db, exp, protomap, data):
     user = data['user']
     dir = data['dir']
     freq = data['freq']
+    done = []
 
     if data['metric'] == "newflows":
         metric='new'
@@ -184,7 +185,8 @@ def process_data(db, exp, protomap, data):
                 lpi_flows_streams[(mon, user, dir, freq, protomap[p], metric)] = stream_id
 
         insert_data(db, exp, stream_id, data['ts'], val)
-        db.update_timestamp(stream_id, data['ts'])
+        done.append(stream_id)
+    db.update_timestamp(done, data['ts'])
     return 0
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

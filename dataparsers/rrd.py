@@ -131,7 +131,8 @@ class RRDModule:
 
                         current += step
 
-                    self.db.update_timestamp(r['stream_id'], r['lasttimestamp'])
+                    self.db.update_timestamp([r['stream_id']],
+                            r['lasttimestamp'])
             self.db.commit_transaction()
 
             time.sleep(30)

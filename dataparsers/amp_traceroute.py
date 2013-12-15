@@ -161,13 +161,7 @@ def insert_data(db, exp, stream, ts, result):
 
 def process_data(db, exp, timestamp, data, source):
     """ Process data (which may have multiple paths) and insert into the DB """
-    missing = {}
-
-    for stream_id in amp_trace_streams.values():
-        # Mark every stream id that we haven't yet seen data for. Any
-        # stream id that reports more than one measurement per message
-        # will have those later measurements ignored.
-        missing[stream_id] = 0
+    done = {}
 
     # For each path returned in the test data
     for d in data:
@@ -182,9 +176,8 @@ def process_data(db, exp, timestamp, data, source):
         if key in amp_trace_streams:
             stream_id = amp_trace_streams[key]
 
-            if stream_id not in missing:
+            if stream_id in done:
                 continue
-            del missing[stream_id]
         else:
             stream_id = insert_stream(db, exp, source, d["target"], sizestr,
                     d['address'], timestamp)
@@ -204,8 +197,7 @@ def process_data(db, exp, timestamp, data, source):
         d["hop_rtt"] = [x["rtt"] for x in d["hops"]]
 
         insert_data(db, exp, stream_id, timestamp, d)
-        db.update_timestamp(stream_id, timestamp)
-
-    db.commit_transaction()
+        done[stream_id] = 0
+    db.update_timestamp(done.keys(), timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

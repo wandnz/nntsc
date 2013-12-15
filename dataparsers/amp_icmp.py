@@ -145,13 +145,7 @@ def insert_data(db, exp, stream, ts, result):
 
 def process_data(db, exp, timestamp, data, source):
     """ Process a data object, which can contain 1 or more sets of results """
-    missing = {}
-
-    for stream_id in amp_icmp_streams.values():
-        # Mark every stream id that we haven't yet seen data for. Any
-        # stream id that reports more than one measurement per message
-        # will have those later measurements ignored.
-        missing[stream_id] = 0
+    done = {}
 
     for d in data:
         if d["random"]:
@@ -165,9 +159,8 @@ def process_data(db, exp, timestamp, data, source):
         if key in amp_icmp_streams:
             stream_id = amp_icmp_streams[key]
 
-            if stream_id not in missing:
+            if stream_id in done:
                 continue
-            del missing[stream_id]
         else:
             stream_id = insert_stream(db, exp, source, d["target"], sizestr,
                     d["address"], timestamp)
@@ -181,8 +174,9 @@ def process_data(db, exp, timestamp, data, source):
                 amp_icmp_streams[key] = stream_id
 
         insert_data(db, exp, stream_id, timestamp, d)
-        db.update_timestamp(stream_id, timestamp)
-
+        done[stream_id] = 0
+    # update the last timestamp for all streams we just got data for
+    db.update_timestamp(done.keys(), timestamp)
     return 0
 
 def register(db):
