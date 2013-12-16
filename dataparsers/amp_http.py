@@ -422,7 +422,7 @@ def process_data(db, exp, timestamp, data, source):
                     server_info, obj_info)
 
         servindex += 1
-    db.update_timestamp(stream_id, timestamp)
+    db.update_timestamp([stream_id], timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
