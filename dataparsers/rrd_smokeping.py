@@ -22,9 +22,11 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
+        SQLAlchemyError, DataError
 import libnntscclient.logger as logger
 from libnntsc.partition import PartitionedTable
+from libnntsc.database import DB_NO_ERROR, DB_GENERIC_ERROR, DB_DATA_ERROR
 
 STREAM_TABLE_NAME="streams_rrd_smokeping"
 DATA_TABLE_NAME="data_rrd_smokeping"
@@ -100,8 +102,8 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
 
     colid, streamid = db.register_new_stream("rrd", "smokeping", name, 0)
 
-    if colid == -1:
-        return -1
+    if colid < 0:
+        return colid
 
     # insert stream into our stream table
     st = db.metadata.tables[STREAM_TABLE_NAME]
@@ -110,10 +112,19 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
         result = db.conn.execute(st.insert(), stream_id=streamid,
                 filename=fname, source=source,
                 host=host, minres=minres, highrows=rows)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
+        # These errors suggest that we have some bad data that we may be
+        # able to just throw away and carry on
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        # All other errors imply an issue with the database itself or the
+        # way we have been using it. Restarting the database connection is
+        # a better course of action in this case.
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
 
     #id = db.insert_stream(mod="rrd", modsubtype="smokeping", name=name,
     #        filename=fname, source=source, host=host, minres=minres,
@@ -160,14 +171,24 @@ def insert_data(db, exp, stream, ts, line):
     try:
         db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,
                 **kwargs)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
+        # These errors suggest that we have some bad data that we may be
+        # able to just throw away and carry on
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        # All other errors imply an issue with the database itself or the
+        # way we have been using it. Restarting the database connection is
+        # a better course of action in this case.
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
+
 
     exp.send((0, ("rrd_smokeping", stream, ts, exportdict)))
 
-    return 0
+    return DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

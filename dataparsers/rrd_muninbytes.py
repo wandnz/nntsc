@@ -23,9 +23,11 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
 	String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float, BigInteger
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError,\
+        ProgrammingError, DataError
 import libnntscclient.logger as logger
 from libnntsc.partition import PartitionedTable
+from libnntsc.database import DB_NO_ERROR, DB_GENERIC_ERROR, DB_DATA_ERROR
 
 STREAM_TABLE_NAME = "streams_rrd_muninbytes"
 DATA_TABLE_NAME = "data_rrd_muninbytes"
@@ -84,8 +86,8 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
 
     colid, streamid = db.register_new_stream("rrd", "muninbytes", name, 0)
 
-    if colid == -1:
-        return -1
+    if colid < 0:
+        return colid
 
     st = db.metadata.tables[STREAM_TABLE_NAME]
 
@@ -94,10 +96,20 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
                 filename=filename, switch=switch, interface=interface,
                 direction=dir, minres=minres, highrows=rows,
                 interfacelabel=label)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
+        # These errors suggest that we have some bad data that we may be
+        # able to just throw away and carry on
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        # All other errors imply an issue with the database itself or the
+        # way we have been using it. Restarting the database connection is
+        # a better course of action in this case.
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
+
 
     if streamid >= 0 and exp != None:
         exp.send((1, (colid, "rrd_muninbytes", streamid, props)))
@@ -132,14 +144,23 @@ def insert_data(db, exp, stream, ts, line):
     try:
         db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,
                 **kwargs)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
+        # These errors suggest that we have some bad data that we may be
+        # able to just throw away and carry on
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        # All other errors imply an issue with the database itself or the
+        # way we have been using it. Restarting the database connection is
+        # a better course of action in this case.
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
 
     exp.send((0, ("rrd_muninbytes", stream, ts, exportdict)))
 
-    return 0
+    return DB_NO_ERROR
 
 
 
