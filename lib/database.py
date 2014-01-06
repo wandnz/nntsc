@@ -22,7 +22,8 @@
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint, event, DDL, Index
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError,\
+        ProgrammingError, DataError
 from sqlalchemy.sql import and_, or_, not_, text
 from sqlalchemy.sql.expression import select, outerjoin, func, label
 from sqlalchemy.engine.url import URL
@@ -36,6 +37,10 @@ from sqlalchemy.sql import table
 from sqlalchemy.ext import compiler
 
 from libnntscclient.logger import *
+
+DB_NO_ERROR = 0
+DB_DATA_ERROR = -1
+DB_GENERIC_ERROR = -2
 
 class CreateView(DDLElement):
     def __init__(self, name, selectable):
@@ -65,32 +70,31 @@ class Database:
         if dbpass == "":
             dbpass = None
 
-        connect_string = URL('postgresql', username=dbuser, password=dbpass, \
-                host=dbhost, database=dbname)
+        self.connect_string = URL('postgresql', username=dbuser, \
+                password=dbpass, host=dbhost, database=dbname)
 
-        if debug:
-            log('Connecting to db using "%s"' % connect_string)
+        self.dbname = dbname
+        self.conn = None
+        self.engine = None
+        self.trans = None
+        self.init_error = False
+
+    def connect_db(self):
+
+        if not self.init_error and self.trans is not None:
+            self.commit_transaction() 
+
+        if self.conn is not None:
+            self.conn.close()
 
         self.init_error = False
-        self.dbname = dbname
-        self.engine = create_engine(connect_string, echo=debug,
+        self.engine = create_engine(self.connect_string, echo=False,
                 implicit_returning = False)
 
         self.__reflect_db()
 
         self.conn = self.engine.connect()
-
-        #self.stream_tables = {}
-        #self.data_tables = {}
-
-        #for name, tab in self.meta.tables.items():
-        #    if name[0:5] == "data_":
-        #        self.data_tables[name] = tab
-        #    if name[0:8] == "streams_":
-        #        self.stream_tables[name] = tab
-
         self.trans = self.conn.begin()
-        self.pending = 0
 
     def __reflect_db(self):
         self.metadata = MetaData(self.engine)
@@ -228,11 +232,11 @@ class Database:
 
         if result.rowcount == 0:
             log("Database Error: no collection for %s:%s" % (mod, subtype))
-            return -1, -1
+            return DB_DATA_ERROR, -1
 
         if result.rowcount > 1:
             log("Database Error: duplicate collections for %s:%s" % (mod, subtype))
-            return -1, -1
+            return DB_DATA_ERROR, -1
 
         col = result.fetchone()
         col_id = col['id']
@@ -244,10 +248,15 @@ class Database:
         try:
             result = self.conn.execute(sttable.insert(), collection=col_id,
                     name=name, lasttimestamp=0, firsttimestamp=ts)
-        except IntegrityError, e:
+        except (DataError, ProgrammingError, IntegrityError) as e:
+            log(e)
             log("Failed to register stream %s for %s:%s, probably already exists" % (name, mod, subtype))
             #print >> sys.stderr, e
-            return -1, -1
+            return DB_DATA_ERROR, -1
+        except SQLAlchemyError as e:
+            log(e)
+            log("Failed to register stream %s for %s:%s due to SQLAlchemy error" % (name, mod, subtype))
+            return DB_GENERIC_ERROR, -1
 
         # Return the new stream id
         newid = result.inserted_primary_key
@@ -390,9 +399,9 @@ class Database:
 
     def commit_transaction(self):
         # TODO: Better error handling!
+        if self.trans is None:
+            return
 
-        #print "Committing %d statements (%s)" % (self.pending, \
-        #        time.strftime("%d %b %Y %H:%M:%S", time.localtime()))
         try:
             self.trans.commit()
         except:
@@ -401,8 +410,6 @@ class Database:
         self.trans = self.conn.begin()
 
     def rollback_transaction(self):
-        #if self.pending == 0:
-        #    return
         self.trans.rollback()
         self.trans = self.conn.begin()
 
@@ -419,7 +426,6 @@ class Database:
                 table.c.id==stream_id).values( \
                 firsttimestamp=ts))
         result.close()
-        self.pending += 1
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

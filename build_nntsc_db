@@ -74,6 +74,7 @@ if dbconf["name"] == "":
     sys.exit(1)
 
 db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
+db.connect_db()
 db.build_databases(modules, new=clean_db)
 
 if 'rrd' in enabled_modules:

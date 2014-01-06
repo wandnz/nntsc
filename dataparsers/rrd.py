@@ -38,6 +38,7 @@ class RRDModule:
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
+        self.db.connect_db()
 
         self.exporter = exp
         self.smokepings = {}

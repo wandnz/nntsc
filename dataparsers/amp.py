@@ -22,7 +22,8 @@
 
 import sys
 
-from libnntsc.database import Database
+from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
+        DB_GENERIC_ERROR
 from libnntsc.configurator import *
 import pika
 from ampsave.importer import import_data_functions
@@ -43,6 +44,7 @@ class AmpModule:
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
+        self.db.connect_db()
         self.exporter = exp
 
         # the amp modules understand how to extract the test data from the blob
@@ -154,34 +156,70 @@ class AmpModule:
         """ Process a single message from the queue.
             Depending on the test this message may include multiple results.
         """
-        # ignore any messages that don't have user_id set
-        if hasattr(properties, "user_id"):
-            test = properties.headers["x-amp-test-type"]
-            if test in self.amp_modules:
-                data = self.amp_modules[test].get_data(body)
-                source = properties.user_id
-                if test == "icmp":
-                    amp_icmp.process_data(self.db, self.exporter,
-                            properties.timestamp, data, source)
-                elif test == "traceroute":
-                    amp_traceroute.process_data(self.db, self.exporter,
-                            properties.timestamp, data, source)
-                elif test == "dns":
-                    amp_dns.process_data(self.db, self.exporter,
-                            properties.timestamp, data, source)
-                elif test == "http":
-                    amp_http.process_data(self.db, self.exporter,
-                            properties.timestamp, data, source)
-            else:
-                logger.log("unknown test: '%s'" % (
-                        properties.headers["x-amp-test-type"]))
-            # TODO check if it all worked, don't ack if it fails
-            self.db.commit_transaction()
 
-            if test in self.collections:
-                self.exporter.send((2, (self.collections[test], \
-                        properties.timestamp)))
-        channel.basic_ack(delivery_tag = method.delivery_tag)
+        # We need this loop so that we can try processing the message again
+        # if a DB_GENERIC_ERROR requires us to reconnect to the database. If
+        # we exit this function without acknowledging the message then we
+        # will stop getting messages (including the unacked one!)
+        while 1:
+            if hasattr(properties, "user_id"):
+                test = properties.headers["x-amp-test-type"]
+                if test in self.amp_modules:
+                    data = self.amp_modules[test].get_data(body)
+                    source = properties.user_id
+                    if test == "icmp":
+                        code = amp_icmp.process_data(self.db, self.exporter,
+                                properties.timestamp, data, source)
+                    elif test == "traceroute":
+                        code = amp_traceroute.process_data(self.db, 
+                                self.exporter, properties.timestamp, data, 
+                                source)
+                    elif test == "dns":
+                        code = amp_dns.process_data(self.db, self.exporter,
+                                properties.timestamp, data, source)
+                    elif test == "http":
+                        code = amp_http.process_data(self.db, self.exporter,
+                                properties.timestamp, data, source)
+                    else:
+                        code = DB_DATA_ERROR
+                else:
+                    logger.log("unknown test: '%s'" % (
+                            properties.headers["x-amp-test-type"]))
+                    code = DB_DATA_ERROR
+
+                if code == DB_NO_ERROR:
+                    self.db.commit_transaction()
+
+                    if test in self.collections:
+                        self.exporter.send((2, (self.collections[test], \
+                                properties.timestamp)))
+                    channel.basic_ack(delivery_tag = method.delivery_tag)
+                    break
+
+                elif code == DB_DATA_ERROR:
+                    # Data was bad so we couldn't insert into the database.
+                    # Acknowledge the message so we can dump it from the queue
+                    # and move on but don't try to export it to clients.
+                    logger.log("AMP -- Data error, acknowledging and moving on")
+                    channel.basic_ack(delivery_tag = method.delivery_tag)
+                    break
+
+                else:
+                    # Some other error cropped up. Best approach here is to 
+                    # reconnect to the database and try to process the message
+                    # again. Unfortunately SQLAlchemy gives us no indication
+                    # of whether the connect was successful until we try to
+                    # operate on the connection, so we'll just have to loop
+                    # around and try process the message again
+                    logger.log("AMP -- reconnecting to database after error")
+                    time.sleep(5)
+                    self.db.connect_db()
+                    logger.log("AMP -- reconnected")
+
+            else:
+                # ignore any messages that don't have user_id set
+                channel.basic_ack(delivery_tag = method.delivery_tag)
+                break
 
     def run(self):
         """ Run forever, calling the process_data callback for each message """
