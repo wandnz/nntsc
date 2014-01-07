@@ -358,7 +358,7 @@ class DBSelector:
         for col in uniquecols:
             sql_agg += ", " + col
 
-        sql_agg += " FROM %s " % (table)
+        sql_agg += " FROM %s " % self._generate_from(table, all_streams)
         sql_agg += self._generate_where(all_streams)
 
         # Constructing the outer SELECT query, which will aggregate across
@@ -378,8 +378,9 @@ class DBSelector:
 
         # Execute our query!
         # XXX Getting these parameters in the right order is a pain!
-        params = tuple(binparam + caseparams + [start_time] + [stop_time] + all_streams)
+        params = tuple(binparam + caseparams + [start_time, stop_time] + all_streams + [start_time, stop_time])
 
+        #print sql % params
         self.datacursor.execute(sql, params)
 
         while True:
@@ -453,7 +454,7 @@ class DBSelector:
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
 
-        params = tuple(caseparams + [start_time] + [stop_time] + all_streams)
+        params = tuple(caseparams + [start_time, stop_time] + all_streams + [start_time, stop_time])
 
         for resultrow in self._generic_select(table, all_streams, params,
                 selectcols, None, 'timestamp', 0):
@@ -482,7 +483,8 @@ class DBSelector:
             if i != len(selcols) - 1:
                 selclause += ", "
 
-        fromclause = " FROM %s " % table
+        #fromclause = " FROM %s " % table
+        fromclause = " FROM %s " % self._generate_from(table, streams)
 
         whereclause = self._generate_where(streams)
 
@@ -533,20 +535,39 @@ class DBSelector:
         case += " END"
         return case, caseparams
 
+    def _generate_from(self, table, streams):
+        """ Forms a FROM clause for an SQL query that encompasses all
+            streams in the provided list
+        """
+        sql = "(SELECT id FROM streams "
+        sql += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
 
+        assert(len(streams) > 0)
+        sql += " AND id IN ("
+        for i in range(0, len(streams)):
+            sql += "%s"
+            if i != len(streams) - 1:
+                sql += ", "
+        sql += ")) AS activestreams INNER JOIN %s ON " % table
+        sql += "%s.stream_id = activestreams.id" % table
+        return sql
+
+    # XXX update arguments if this is how we want to end up going about it.
+    # It's entirely possible that we want to merge this with _generate_from if
+    # it will work ok in all situations
     def _generate_where(self, streams):
         """ Forms a WHERE clause for an SQL query that encompasses all
             streams in the provided list
         """
         tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
-
-        assert(len(streams) > 0)
-        streamclause = "AND stream_id IN ("
-        for i in range(0, len(streams)):
-            streamclause += "%s"
-            if i != len(streams) - 1:
-                streamclause += ", "
-        streamclause += ")"
+        return tsclause
+        #assert(len(streams) > 0)
+        #streamclause = "AND stream_id IN ("
+        #for i in range(0, len(streams)):
+        #    streamclause += "%s"
+        #    if i != len(streams) - 1:
+        #        streamclause += ", "
+        #streamclause += ")"
 
         return tsclause + streamclause
 
@@ -850,7 +871,8 @@ class DBSelector:
         sql_ntile += "timestamp - (timestamp %%%% %d)" % (binsize)
         sql_ntile += " ORDER BY %s )" % (ntilecols[0])
 
-        sql_ntile += " FROM %s " % (table)
+        #sql_ntile += " FROM %s " % (table)
+        sql_ntile += " FROM %s " % self._generate_from(table, all_streams)
 
         where_clause = self._generate_where(all_streams)
 
@@ -912,7 +934,8 @@ class DBSelector:
         sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
         # Execute our query!
-        params = tuple(caseparams + [binsize] + [start_time] + [stop_time] + all_streams)
+        #params = tuple(caseparams + [binsize] + [start_time] + [stop_time] + all_streams)
+        params = tuple(caseparams + [binsize] + [start_time, stop_time] + all_streams + [start_time, stop_time])
         self.datacursor.execute(sql, params)
 
         while True:
