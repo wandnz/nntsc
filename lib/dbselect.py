@@ -359,7 +359,7 @@ class DBSelector:
             sql_agg += ", " + col
 
         sql_agg += " FROM %s " % self._generate_from(table, all_streams)
-        sql_agg += self._generate_where(all_streams)
+        sql_agg += self._generate_where()
 
         # Constructing the outer SELECT query, which will aggregate across
         # each label to find the aggregate values
@@ -378,9 +378,9 @@ class DBSelector:
 
         # Execute our query!
         # XXX Getting these parameters in the right order is a pain!
-        params = tuple(binparam + caseparams + [start_time, stop_time] + all_streams + [start_time, stop_time])
+        params = tuple(binparam + caseparams + [start_time, stop_time] +
+                all_streams + [start_time, stop_time])
 
-        #print sql % params
         self.datacursor.execute(sql, params)
 
         while True:
@@ -454,7 +454,8 @@ class DBSelector:
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
 
-        params = tuple(caseparams + [start_time, stop_time] + all_streams + [start_time, stop_time])
+        params = tuple(caseparams + [start_time, stop_time] + all_streams +
+                [start_time, stop_time])
 
         for resultrow in self._generic_select(table, all_streams, params,
                 selectcols, None, 'timestamp', 0):
@@ -483,10 +484,8 @@ class DBSelector:
             if i != len(selcols) - 1:
                 selclause += ", "
 
-        #fromclause = " FROM %s " % table
         fromclause = " FROM %s " % self._generate_from(table, streams)
-
-        whereclause = self._generate_where(streams)
+        whereclause = self._generate_where()
 
         # Form the "GROUP BY" section of our query (if asking
         # for aggregated data)
@@ -535,10 +534,20 @@ class DBSelector:
         case += " END"
         return case, caseparams
 
+    # It looks like restricting the number of stream ids that are checked for
+    # in the data table helps significantly with performance, so if we can
+    # exclude all the streams that aren't in scope, we have a much smaller
+    # search space.
+    # TODO we can probably do this at an earlier stage, which would mean we
+    # need to send less stream ids through for the big labelling case statement
+    # and won't need to do this extra check here. The list of stream ids can
+    # go back into the WHERE clause and the FROM can return to just being the
+    # table name.
     def _generate_from(self, table, streams):
         """ Forms a FROM clause for an SQL query that encompasses all
-            streams in the provided list
+            streams in the provided list that fit within a given time period.
         """
+        # get all stream ids that are active in the period
         sql = "(SELECT id FROM streams "
         sql += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
 
@@ -548,28 +557,14 @@ class DBSelector:
             sql += "%s"
             if i != len(streams) - 1:
                 sql += ", "
+        # join the active streams with the appropriate data table
         sql += ")) AS activestreams INNER JOIN %s ON " % table
         sql += "%s.stream_id = activestreams.id" % table
         return sql
 
-    # XXX update arguments if this is how we want to end up going about it.
-    # It's entirely possible that we want to merge this with _generate_from if
-    # it will work ok in all situations
-    def _generate_where(self, streams):
-        """ Forms a WHERE clause for an SQL query that encompasses all
-            streams in the provided list
-        """
-        tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
-        return tsclause
-        #assert(len(streams) > 0)
-        #streamclause = "AND stream_id IN ("
-        #for i in range(0, len(streams)):
-        #    streamclause += "%s"
-        #    if i != len(streams) - 1:
-        #        streamclause += ", "
-        #streamclause += ")"
-
-        return tsclause + streamclause
+    def _generate_where(self):
+        """ Forms a WHERE clause for an SQL query based on a time period """
+        return " WHERE timestamp >= %s AND timestamp <= %s "
 
     def _get_data_table(self, col):
         """ Finds the data table for a given collection
@@ -871,12 +866,8 @@ class DBSelector:
         sql_ntile += "timestamp - (timestamp %%%% %d)" % (binsize)
         sql_ntile += " ORDER BY %s )" % (ntilecols[0])
 
-        #sql_ntile += " FROM %s " % (table)
         sql_ntile += " FROM %s " % self._generate_from(table, all_streams)
-
-        where_clause = self._generate_where(all_streams)
-
-        sql_ntile += where_clause
+        sql_ntile += self._generate_where()
         sql_ntile += " ORDER BY binstart "
 
         # Constructing the middle SELECT query, which will aggregate across
@@ -934,8 +925,8 @@ class DBSelector:
         sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
         # Execute our query!
-        #params = tuple(caseparams + [binsize] + [start_time] + [stop_time] + all_streams)
-        params = tuple(caseparams + [binsize] + [start_time, stop_time] + all_streams + [start_time, stop_time])
+        params = tuple(caseparams + [binsize] + [start_time, stop_time] +
+                all_streams + [start_time, stop_time])
         self.datacursor.execute(sql, params)
 
         while True:
