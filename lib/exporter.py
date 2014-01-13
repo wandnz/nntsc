@@ -464,7 +464,6 @@ class DBWorker(threading.Thread):
             lastts = req_hdr[2]
             streams = self.db.select_active_streams_by_collection(col, lastts)
             try:
-                print "SENDING:", NNTSC_ACTIVE_STREAMS, col, len(streams)
                 self.pipeend.send((NNTSC_ACTIVE_STREAMS, (col, streams)))
             except IOError as e:
                 log("Sending streams failed: %s" % (e))
