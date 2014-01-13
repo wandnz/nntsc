@@ -235,6 +235,33 @@ class DBSelector:
             selected.append(stream_dict)
         return selected
 
+    def select_active_streams_by_collection(self, coll, lastactivity):
+        """ Fetches all recently active streams belonging to a given collection.
+
+            For example, passing "amp-icmp" into this function would give you
+            all amp-icmp streams.
+
+            Only streams with data after the lastactivity timestamp will be
+            returned. To get all streams for a collection, set lastactivity
+            to 0.
+
+            Returns a list of stream ids
+        """
+        if self.basiccursor == None:
+            return []
+
+        sql = "SELECT id FROM streams WHERE collection=%s AND lasttimestamp>%s"
+        self.basiccursor.execute(sql, (coll, lastactivity))
+
+        active = []
+        while True:
+            row = self.basiccursor.fetchone()
+            if row == None:
+                break
+            for stream_id in row.values():
+                active.append(stream_id)
+        return active
+
 
     def select_aggregated_data(self, col, labels, aggcols,
             start_time = None, stop_time = None, groupcols = None,

@@ -449,13 +449,23 @@ class DBWorker(threading.Thread):
                 log("Sending schemas failed: %s" % (e))
                 return -1
 
-
         if req_hdr[0] == NNTSC_REQ_STREAMS:
             col = req_hdr[1]
             startstream = req_hdr[2]
             streams = self.db.select_streams_by_collection(col, startstream)
             try:
                 self.pipeend.send((NNTSC_STREAMS, (col, streams)))
+            except IOError as e:
+                log("Sending streams failed: %s" % (e))
+                return -1
+
+        if req_hdr[0] == NNTSC_REQ_ACTIVE_STREAMS:
+            col = req_hdr[1]
+            lastts = req_hdr[2]
+            streams = self.db.select_active_streams_by_collection(col, lastts)
+            try:
+                print "SENDING:", NNTSC_ACTIVE_STREAMS, col, len(streams)
+                self.pipeend.send((NNTSC_ACTIVE_STREAMS, (col, streams)))
             except IOError as e:
                 log("Sending streams failed: %s" % (e))
                 return -1
@@ -682,6 +692,51 @@ class NNTSCClient(threading.Thread):
             i = end
         return 0
 
+    # TODO this is terrible, it's all copy and pasted from the regular streams
+    # list, but uses a different identifier. Ideally all this could be merged
+    # into a single function
+    def export_active_streams_msg(self, col, more, streams):
+        stream_data = pickle.dumps((col, more, streams))
+
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_ACTIVE_STREAMS,
+                len(stream_data))
+        try:
+            self.sock.send(header + stream_data)
+        except error, msg:
+            log("Error sending active streams to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+            return -1
+
+        return 0
+
+    # TODO this is terrible, it's all copy and pasted from the regular streams
+    # list, but uses a different identifier. Ideally all this could be merged
+    # into a single function
+    def send_active_streams(self, streamresult):
+
+        col = streamresult[0]
+        streams = streamresult[1]
+        self.parent.register_collection(self.sock, col)
+
+        if len(streams) == 0:
+            return self.export_streams_msg(col, False, [])
+
+        i = 0
+        while (i < len(streams)):
+
+            start = i
+            if len(streams) <= i + 1000:
+                end = len(streams)
+                more = False
+            else:
+                end = i + 1000
+                more = True
+
+            if self.export_active_streams_msg(col, more, streams[start:end]) == -1:
+                return -1
+
+            i = end
+        return 0
+
     def send_history(self, subresult):
         history, freq, name, streams, aggfunc, more = subresult
         now = int(time.time())
@@ -795,6 +850,9 @@ class NNTSCClient(threading.Thread):
 
         if response == NNTSC_SUBSCRIBE:
             return self.subscribe_stream(result)
+
+        if response == NNTSC_ACTIVE_STREAMS:
+            return self.send_active_streams(result)
 
         # Response type was invalid
         return -1

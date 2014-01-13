@@ -149,7 +149,6 @@ class NNTSCClient:
         return len(received)
 
     def parse_message(self):
-
         if len(self.buf) < struct.calcsize(nntsc_hdr_fmt):
             return -1, {}
 
@@ -174,6 +173,12 @@ class NNTSCClient:
             msgdict['dataschema'] = ds
 
         if header[1] == NNTSC_STREAMS:
+            name, more, arrived = pickle.loads(self.buf[header_end:total_len])
+            msgdict['collection'] = name
+            msgdict['more'] = more
+            msgdict['streams'] = arrived
+
+        if header[1] == NNTSC_ACTIVE_STREAMS:
             name, more, arrived = pickle.loads(self.buf[header_end:total_len])
             msgdict['collection'] = name
             msgdict['more'] = more
