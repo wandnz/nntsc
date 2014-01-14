@@ -416,26 +416,9 @@ class DBSelector:
 
         self.datacursor.execute(sql, params)
 
-        while True:
-            try:
-                # fetchmany is recommended over repeated calls to fetchone
-                fetched = self.datacursor.fetchmany(100)
-            except psycopg2.extensions.QueryCanceledError:
-                # The named datacursor is invalidated as soon as the
-                # transaction ends/fails, we don't need to close it (and it
-                # won't allow us to close it). We do have to rollback though
-                # so that the basic cursor will continue to work.
-                self.datacursor = None
-                self.conn.rollback()
-                #info = sql % params
-                #log("DBSelector: Query cancelled: %s" % info)
-                break
-
-            if fetched == []:
-                break
-
-            for row in fetched:
-                yield (row, tscol, binsize)
+        fetched = self._query_data_generator()
+        for row in fetched:
+            yield (row, tscol, binsize)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -550,26 +533,9 @@ class DBSelector:
                 + orderclause
         self.datacursor.execute(sql, params)
 
-        while True:
-            try:
-                # fetchmany is recommended over repeated calls to fetchone
-                fetched = self.datacursor.fetchmany(100)
-            except psycopg2.extensions.QueryCanceledError:
-                # The named datacursor is invalidated as soon as the
-                # transaction ends/fails, we don't need to close it (and it
-                # won't allow us to close it). We do have to rollback though
-                # so that the basic cursor will continue to work.
-                self.datacursor = None
-                self.conn.rollback()
-                #info = sql % params
-                #log("DBSelector: Query cancelled: %s" % info)
-                break
-
-            if fetched == []:
-                break
-
-            for row in fetched:
-                yield (row, tscol, binsize)
+        fetched = self._query_data_generator()
+        for row in fetched:
+            yield (row, tscol, binsize)
 
 
     def _generate_label_case(self, labels):
@@ -985,9 +951,16 @@ class DBSelector:
                 all_streams + [start_time, stop_time])
         self.datacursor.execute(sql, params)
 
+        fetched = self._query_data_generator()
+        for row in fetched:
+            yield (row, "binstart", binsize)
+
+
+    # This generator is called by a generator function one level up, but
+    # nesting them all seems to work ok
+    def _query_data_generator(self):
         while True:
             try:
-                # fetchmany is generally recommended over fetchone
                 fetched = self.datacursor.fetchmany(100)
             except psycopg2.extensions.QueryCanceledError:
                 # The named datacursor is invalidated as soon as the
@@ -1004,7 +977,6 @@ class DBSelector:
                 break
 
             for row in fetched:
-                yield (row, "binstart", binsize)
-
+                yield row
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
