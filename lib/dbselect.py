@@ -19,6 +19,12 @@ class DBSelector:
         if dbhost != "" and dbhost != None:
             connstr += " host=%s" % (dbhost)
 
+        # Force all queries we make to timeout after 50 seconds so they don't
+        # hang around causing trouble if the user changes page and abandons
+        # the request or similar. Varnish will return an error if the page
+        # doesn't load after 60s, so we don't need to go for longer than that.
+        connstr += " options='-c statement_timeout=50000'"
+
         try:
             self.conn = psycopg2.connect(connstr)
         except psycopg2.DatabaseError as e:
@@ -411,8 +417,20 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         while True:
-            # fetchmany seems to be recommended over repeated calls to fetchone
-            fetched = self.datacursor.fetchmany(100)
+            try:
+                # fetchmany is recommended over repeated calls to fetchone
+                fetched = self.datacursor.fetchmany(100)
+            except psycopg2.extensions.QueryCanceledError:
+                # The named datacursor is invalidated as soon as the
+                # transaction ends/fails, we don't need to close it (and it
+                # won't allow us to close it). We do have to rollback though
+                # so that the basic cursor will continue to work.
+                self.datacursor = None
+                self.conn.rollback()
+                #info = sql % params
+                #log("DBSelector: Query cancelled: %s" % info)
+                break
+
             if fetched == []:
                 break
 
@@ -533,9 +551,20 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         while True:
-            # fetchmany seems to be recommended over repeated calls to
-            # fetchone
-            fetched = self.datacursor.fetchmany(100)
+            try:
+                # fetchmany is recommended over repeated calls to fetchone
+                fetched = self.datacursor.fetchmany(100)
+            except psycopg2.extensions.QueryCanceledError:
+                # The named datacursor is invalidated as soon as the
+                # transaction ends/fails, we don't need to close it (and it
+                # won't allow us to close it). We do have to rollback though
+                # so that the basic cursor will continue to work.
+                self.datacursor = None
+                self.conn.rollback()
+                #info = sql % params
+                #log("DBSelector: Query cancelled: %s" % info)
+                break
+
             if fetched == []:
                 break
 
@@ -957,8 +986,19 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         while True:
-            # fetchmany is generally recommended over fetchone
-            fetched = self.datacursor.fetchmany(100)
+            try:
+                # fetchmany is generally recommended over fetchone
+                fetched = self.datacursor.fetchmany(100)
+            except psycopg2.extensions.QueryCanceledError:
+                # The named datacursor is invalidated as soon as the
+                # transaction ends/fails, we don't need to close it (and it
+                # won't allow us to close it). We do have to rollback though
+                # so that the basic cursor will continue to work.
+                self.datacursor = None
+                self.conn.rollback()
+                #info = sql % params
+                #log("DBSelector: Query cancelled: %s" % info)
+                break
 
             if fetched == []:
                 break
