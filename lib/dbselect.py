@@ -19,6 +19,12 @@ class DBSelector:
         if dbhost != "" and dbhost != None:
             connstr += " host=%s" % (dbhost)
 
+        # Force all queries we make to timeout after 50 seconds so they don't
+        # hang around causing trouble if the user changes page and abandons
+        # the request or similar. Varnish will return an error if the page
+        # doesn't load after 60s, so we don't need to go for longer than that.
+        connstr += " options='-c statement_timeout=50000'"
+
         try:
             self.conn = psycopg2.connect(connstr)
         except psycopg2.DatabaseError as e:
@@ -235,6 +241,33 @@ class DBSelector:
             selected.append(stream_dict)
         return selected
 
+    def select_active_streams_by_collection(self, coll, lastactivity):
+        """ Fetches all recently active streams belonging to a given collection.
+
+            For example, passing "amp-icmp" into this function would give you
+            all amp-icmp streams.
+
+            Only streams with data after the lastactivity timestamp will be
+            returned. To get all streams for a collection, set lastactivity
+            to 0.
+
+            Returns a list of stream ids
+        """
+        if self.basiccursor == None:
+            return []
+
+        sql = "SELECT id FROM streams WHERE collection=%s AND lasttimestamp>%s"
+        self.basiccursor.execute(sql, (coll, lastactivity))
+
+        active = []
+        while True:
+            row = self.basiccursor.fetchone()
+            if row == None:
+                break
+            for stream_id in row.values():
+                active.append(stream_id)
+        return active
+
 
     def select_aggregated_data(self, col, labels, aggcols,
             start_time = None, stop_time = None, groupcols = None,
@@ -358,8 +391,8 @@ class DBSelector:
         for col in uniquecols:
             sql_agg += ", " + col
 
-        sql_agg += " FROM %s " % (table)
-        sql_agg += self._generate_where(all_streams)
+        sql_agg += " FROM %s " % self._generate_from(table, all_streams)
+        sql_agg += self._generate_where()
 
         # Constructing the outer SELECT query, which will aggregate across
         # each label to find the aggregate values
@@ -378,18 +411,14 @@ class DBSelector:
 
         # Execute our query!
         # XXX Getting these parameters in the right order is a pain!
-        params = tuple(binparam + caseparams + [start_time] + [stop_time] + all_streams)
+        params = tuple(binparam + caseparams + [start_time, stop_time] +
+                all_streams + [start_time, stop_time])
 
         self.datacursor.execute(sql, params)
 
-        while True:
-            # fetchmany seems to be recommended over repeated calls to fetchone
-            fetched = self.datacursor.fetchmany(100)
-            if fetched == []:
-                break
-
-            for row in fetched:
-                yield (row, tscol, binsize)
+        fetched = self._query_data_generator()
+        for row in fetched:
+            yield (row, tscol, binsize)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -453,7 +482,8 @@ class DBSelector:
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
 
-        params = tuple(caseparams + [start_time] + [stop_time] + all_streams)
+        params = tuple(caseparams + [start_time, stop_time] + all_streams +
+                [start_time, stop_time])
 
         for resultrow in self._generic_select(table, all_streams, params,
                 selectcols, None, 'timestamp', 0):
@@ -482,9 +512,8 @@ class DBSelector:
             if i != len(selcols) - 1:
                 selclause += ", "
 
-        fromclause = " FROM %s " % table
-
-        whereclause = self._generate_where(streams)
+        fromclause = " FROM %s " % self._generate_from(table, streams)
+        whereclause = self._generate_where()
 
         # Form the "GROUP BY" section of our query (if asking
         # for aggregated data)
@@ -504,15 +533,9 @@ class DBSelector:
                 + orderclause
         self.datacursor.execute(sql, params)
 
-        while True:
-            # fetchmany seems to be recommended over repeated calls to
-            # fetchone
-            fetched = self.datacursor.fetchmany(100)
-            if fetched == []:
-                break
-
-            for row in fetched:
-                yield (row, tscol, binsize)
+        fetched = self._query_data_generator()
+        for row in fetched:
+            yield (row, tscol, binsize)
 
 
     def _generate_label_case(self, labels):
@@ -533,22 +556,37 @@ class DBSelector:
         case += " END"
         return case, caseparams
 
-
-    def _generate_where(self, streams):
-        """ Forms a WHERE clause for an SQL query that encompasses all
-            streams in the provided list
+    # It looks like restricting the number of stream ids that are checked for
+    # in the data table helps significantly with performance, so if we can
+    # exclude all the streams that aren't in scope, we have a much smaller
+    # search space.
+    # TODO we can probably do this at an earlier stage, which would mean we
+    # need to send less stream ids through for the big labelling case statement
+    # and won't need to do this extra check here. The list of stream ids can
+    # go back into the WHERE clause and the FROM can return to just being the
+    # table name.
+    def _generate_from(self, table, streams):
+        """ Forms a FROM clause for an SQL query that encompasses all
+            streams in the provided list that fit within a given time period.
         """
-        tsclause = " WHERE timestamp >= %s AND timestamp <= %s "
+        # get all stream ids that are active in the period
+        sql = "(SELECT id FROM streams "
+        sql += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
 
         assert(len(streams) > 0)
-        streamclause = "AND stream_id IN ("
+        sql += " AND id IN ("
         for i in range(0, len(streams)):
-            streamclause += "%s"
+            sql += "%s"
             if i != len(streams) - 1:
-                streamclause += ", "
-        streamclause += ")"
+                sql += ", "
+        # join the active streams with the appropriate data table
+        sql += ")) AS activestreams INNER JOIN %s ON " % table
+        sql += "%s.stream_id = activestreams.id" % table
+        return sql
 
-        return tsclause + streamclause
+    def _generate_where(self):
+        """ Forms a WHERE clause for an SQL query based on a time period """
+        return " WHERE timestamp >= %s AND timestamp <= %s "
 
     def _get_data_table(self, col):
         """ Finds the data table for a given collection
@@ -850,11 +888,8 @@ class DBSelector:
         sql_ntile += "timestamp - (timestamp %%%% %d)" % (binsize)
         sql_ntile += " ORDER BY %s )" % (ntilecols[0])
 
-        sql_ntile += " FROM %s " % (table)
-
-        where_clause = self._generate_where(all_streams)
-
-        sql_ntile += where_clause
+        sql_ntile += " FROM %s " % self._generate_from(table, all_streams)
+        sql_ntile += self._generate_where()
         sql_ntile += " ORDER BY binstart "
 
         # Constructing the middle SELECT query, which will aggregate across
@@ -912,18 +947,36 @@ class DBSelector:
         sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
         # Execute our query!
-        params = tuple(caseparams + [binsize] + [start_time] + [stop_time] + all_streams)
+        params = tuple(caseparams + [binsize] + [start_time, stop_time] +
+                all_streams + [start_time, stop_time])
         self.datacursor.execute(sql, params)
 
+        fetched = self._query_data_generator()
+        for row in fetched:
+            yield (row, "binstart", binsize)
+
+
+    # This generator is called by a generator function one level up, but
+    # nesting them all seems to work ok
+    def _query_data_generator(self):
         while True:
-            # fetchmany is generally recommended over fetchone
-            fetched = self.datacursor.fetchmany(100)
+            try:
+                fetched = self.datacursor.fetchmany(100)
+            except psycopg2.extensions.QueryCanceledError:
+                # The named datacursor is invalidated as soon as the
+                # transaction ends/fails, we don't need to close it (and it
+                # won't allow us to close it). We do have to rollback though
+                # so that the basic cursor will continue to work.
+                self.datacursor = None
+                self.conn.rollback()
+                #info = sql % params
+                #log("DBSelector: Query cancelled: %s" % info)
+                break
 
             if fetched == []:
                 break
 
             for row in fetched:
-                yield (row, "binstart", binsize)
-
+                yield row
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

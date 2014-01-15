@@ -169,6 +169,8 @@ class Database:
             streams.create()
 
             Index('index_streams_collection', streams.c.collection)
+            Index('index_streams_first', streams.c.firsttimestamp)
+            Index('index_streams_last', streams.c.lasttimestamp)
 
         # Create a useful function to select a mode from any data
         # http://scottrbailey.wordpress.com/2009/05/22/postgres-adding-custom-aggregates-most/
