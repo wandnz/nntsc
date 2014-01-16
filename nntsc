@@ -50,7 +50,8 @@ class DataCollector():
         except Exception, e:
             raise
 
-    def __init__(self, listen_port, config, backgrounded, exportonly):
+    def __init__(self, listen_port, config, backgrounded, exportonly, 
+            querytimeout):
         if backgrounded:
             logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
         self.config = config
@@ -66,6 +67,7 @@ class DataCollector():
         self.exporter = NNTSCExporter(listen_port);
         self.backgrounded = backgrounded
         self.exportonly = exportonly
+        self.querytimeout = querytimeout
 
     def configure(self):
         nntsc_conf = load_nntsc_config(self.config)
@@ -83,7 +85,7 @@ class DataCollector():
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
-        self.exporter.configure(self.config)
+        self.exporter.configure(self.config, self.querytimeout)
 
         self.processes = []
         self.config = nntsc_conf
@@ -123,6 +125,7 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--background", help="Run as a daemon", action="store_true")
     parser.add_argument("-P", "--pidfile", help="PID file location (if running backgrounded)", default=None)
     parser.add_argument("-E", "--exportonly", help="Run the exporter only -- do not collect any new data", action="store_true")
+    parser.add_argument("-T", "--querytimeout", help="Cancel any database queries that exceed this number of seconds", default=0, type=int)
 
     args = parser.parse_args()
 
@@ -145,11 +148,13 @@ if __name__ == '__main__':
         context.pidfile = pidfile
 
         with context:
-            dc = DataCollector(listen_port, config, True, args.exportonly)
+            dc = DataCollector(listen_port, config, True, args.exportonly,
+                    args.querytimeout)
             dc.run()
 
     else:
-        dc = DataCollector(listen_port, config, False, args.exportonly)
+        dc = DataCollector(listen_port, config, False, args.exportonly,
+                args.querytimeout)
         try:
             dc.run()
         except KeyboardInterrupt:
