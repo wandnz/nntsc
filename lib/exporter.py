@@ -301,7 +301,7 @@ class DBWorker(threading.Thread):
 
             start = queryend + 1
 
-        log("Subscribe job completed successfully (%s)\n" % (self.threadid))
+        #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
 
     def _query_history(self, rowgen, name, start, end, labels, cols,
