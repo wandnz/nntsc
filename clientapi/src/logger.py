@@ -22,6 +22,7 @@
 
 import sys
 import logging
+import time
 
 backgrounded = False
 logger = None
@@ -43,7 +44,7 @@ def createLogger(flag, logfile, name):
 def log(msg):
 
     if not backgrounded:
-        print >> sys.stderr, msg
+        print >> sys.stderr, time.strftime("%d %b %Y %H:%M:%S"), msg
     else:
         logger.debug(msg) 
 
