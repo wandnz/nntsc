@@ -27,7 +27,7 @@ class DBSelector:
         if timeout != 0:
             connstr += " options='-c statement_timeout=%d'" % (timeout * 1000.0)
         
-        log("Setting DB timeout to %d" % (timeout * 1000.0))
+        #log("Setting DB timeout to %d" % (timeout * 1000.0))
 
         try:
             self.conn = psycopg2.connect(connstr)
