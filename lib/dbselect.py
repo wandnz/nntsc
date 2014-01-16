@@ -14,6 +14,7 @@ class DBSelector:
     def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None,
             timeout=0):
 
+        self.dbselid = uniqueid
         connstr = "dbname=%s user=%s" % (dbname, dbuser)
         if dbpass != "" and dbpass != None:
             connstr += " password=%s" % (dbpass)
@@ -29,14 +30,24 @@ class DBSelector:
         
         #log("Setting DB timeout to %d" % (timeout * 1000.0))
 
-        try:
-            self.conn = psycopg2.connect(connstr)
-        except psycopg2.DatabaseError as e:
-            log("DBSelector: Error connecting to database: %s" % e)
-            self.conn = None
-            self.basiccursor = None
-            self.datacursor = None
-            return
+        self.conn = None
+        reconnect = 30
+        while self.conn == None:
+
+            try:
+                self.conn = psycopg2.connect(connstr)
+            except psycopg2.DatabaseError as e:
+                log("DBSelector: Error connecting to database: %s" % e)
+                log("Retrying in %d seconds" % reconnect);
+                self.conn = None
+                self.basiccursor = None
+                self.datacursor = None
+                
+                time.sleep(reconnect)
+                reconnect *= 2
+                if (reconnect > 600):
+                    reconnect = 600;
+
 
         # The basiccursor is used for all "short" queries that are
         # unlikely to produce a large result. The full result will be
@@ -66,6 +77,8 @@ class DBSelector:
         self.datacursor = None
         self.cursorname = "cursor_" + uniqueid
 
+        log("DBSelector: Successfully created DBSelector %s" % self.dbselid)
+
     def _reset_cursor(self):
         if self.conn == None:
             return
@@ -94,6 +107,7 @@ class DBSelector:
             self.basiccursor.close()
         if self.conn:
             self.conn.close()
+            log("DBSelector: Closed database connection for %s" % self.dbselid)
 
         self.basiccursor = None
         self.datacursor = None
