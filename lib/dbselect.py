@@ -11,7 +11,8 @@ import time
 #  * documentation that makes sense
 
 class DBSelector:
-    def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None):
+    def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None,
+            timeout=0):
 
         connstr = "dbname=%s user=%s" % (dbname, dbuser)
         if dbpass != "" and dbpass != None:
@@ -23,7 +24,10 @@ class DBSelector:
         # hang around causing trouble if the user changes page and abandons
         # the request or similar. Varnish will return an error if the page
         # doesn't load after 60s, so we don't need to go for longer than that.
-        connstr += " options='-c statement_timeout=50000'"
+        if timeout != 0:
+            connstr += " options='-c statement_timeout=%d'" % (timeout * 1000.0)
+        
+        log("Setting DB timeout to %d" % (timeout * 1000.0))
 
         try:
             self.conn = psycopg2.connect(connstr)
@@ -970,7 +974,7 @@ class DBSelector:
                 self.datacursor = None
                 self.conn.rollback()
                 #info = sql % params
-                #log("DBSelector: Query cancelled: %s" % info)
+                #log("DBSelector: Query cancelled")
                 break
 
             if fetched == []:
