@@ -85,6 +85,7 @@ class DataCollector():
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
+        self.db.connect_db();
         self.exporter.configure(self.config, self.querytimeout)
 
         self.processes = []

@@ -24,9 +24,11 @@ from sqlalchemy import Table, Column, Integer, \
     String, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.sql import text
 from sqlalchemy.types import Integer, String
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, DataError, \
+        ProgrammingError, SQLAlchemyError
 from sqlalchemy.dialects import postgresql
 from libnntsc.partition import PartitionedTable
+from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
 import libnntscclient.logger as logger
 
 STREAM_TABLE_NAME = "streams_amp_traceroute"
@@ -109,8 +111,8 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     colid, streamid = db.register_new_stream("amp", "traceroute", name,
             timestamp)
 
-    if colid == -1:
-        return -1
+    if colid < 0:
+        return colid
 
     # insert stream into our stream table
     st = db.metadata.tables[STREAM_TABLE_NAME]
@@ -119,10 +121,15 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
         result = db.conn.execute(st.insert(), stream_id=streamid,
                 source=source, destination=dest, packet_size=size,
                 address=address, datastyle="traceroute")
-    except IntegrityError, e:
+    except (DataError, ProgrammingError, IntegrityError) as e:
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
+
 
     if streamid >= 0 and exp != None:
         exp.send((1, (colid, "amp_traceroute", streamid, props)))
@@ -149,14 +156,19 @@ def insert_data(db, exp, stream, ts, result):
                     ":error_type, :error_code, CAST(:hop_rtt AS integer[]),"
                     "CAST(:path AS inet[]))" % DATA_TABLE_NAME),
                     stream_id=stream, timestamp=ts, **result)
-    except IntegrityError, e:
+    except (IntegrityError, DataError, ProgrammingError) as e:
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
+        
 
     exp.send((0, ("amp_traceroute", stream, ts, result)))
 
-    return 0
+    return DB_NO_ERROR
 
 
 def process_data(db, exp, timestamp, data, source):
@@ -182,12 +194,12 @@ def process_data(db, exp, timestamp, data, source):
             stream_id = insert_stream(db, exp, source, d["target"], sizestr,
                     d['address'], timestamp)
 
-            if stream_id == -1:
+            if stream_id < 0:
                 logger.log("AMPModule: Cannot create stream for:")
                 logger.log("AMPModule: %s %s:%s:%s:%s\n" % (
                         "traceroute", source, d["target"], d["address"],
                         sizestr))
-                return -1
+                return stream_id
             else:
                 amp_trace_streams[key] = stream_id
 
@@ -196,8 +208,11 @@ def process_data(db, exp, timestamp, data, source):
         d["path"] = [x["address"] for x in d["hops"]]
         d["hop_rtt"] = [x["rtt"] for x in d["hops"]]
 
-        insert_data(db, exp, stream_id, timestamp, d)
+        res = insert_data(db, exp, stream_id, timestamp, d)
+        if res != DB_NO_ERROR:
+            return res
         done[stream_id] = 0
     db.update_timestamp(done.keys(), timestamp)
+    return DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
