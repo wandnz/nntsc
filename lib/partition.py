@@ -83,10 +83,16 @@ class PartitionedTable:
         self.db.conn.execute("""CREATE TABLE %s ( CHECK (%s >= %d AND                    %s < %d ) ) INHERITS (%s);""" % 
                 (name, self.partitioncolumn, self.currentstart, \
                 self.partitioncolumn, self.currentend, self.base))
-   
+
+        # add an index on each of the specified columns
         for col in self.indexcols:
             self.db.conn.execute("CREATE INDEX %s_%s ON %s (%s);" %
                 (indexname, col, name, col))
+
+        # add a combined index on the partition column and stream id columns
+        self.db.conn.execute(
+                "CREATE INDEX %s_streamid_%s ON %s (stream_id, %s);" %
+                (indexname, self.partitioncolumn, name, self.partitioncolumn))
 
         self.existing.append({'start':start, 'end':self.currentend, 'name':name})
         if self.currentend > self.lastend:
