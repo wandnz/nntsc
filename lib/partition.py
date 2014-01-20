@@ -52,7 +52,7 @@ class PartitionedTable:
         #
         # XXX This dummy function will essentially discard the row being
         # inserted (because of the RETURN NULL). This shouldn't be a problem
-        # because this will be replaced as soon as update() is called, but 
+        # because this will be replaced as soon as update() is called, but
         # perhaps it would be a bit nicer if we inserted into the parent table
         # by default instead?
         trigfunc = text("""CREATE OR REPLACE FUNCTION %s()
@@ -64,14 +64,14 @@ class PartitionedTable:
                 LANGUAGE plpgsql;
                 """ % (self.base + "_trigfunc"))
         self.db.conn.execute(trigfunc)
-        
+
         triggersql = text("""CREATE TRIGGER %s BEFORE INSERT ON %s
-                FOR EACH ROW EXECUTE PROCEDURE %s();""" % 
+                FOR EACH ROW EXECUTE PROCEDURE %s();""" %
                 (self.triggername, self.base, self.base + "_trigfunc"))
         self.db.conn.execute(triggersql)
 
     def _create_table(self, partvalue):
-        
+
         start = partvalue / int(self.freq) * int(self.freq)
         self.currentstart = start
         self.currentend = start + self.freq
@@ -79,14 +79,20 @@ class PartitionedTable:
         indexname = "idx_" + self.base + "_" + str(start)
 
         logger.log("Creating new table partition: %s" % name)
-            
-        self.db.conn.execute("""CREATE TABLE %s ( CHECK (%s >= %d AND                    %s < %d ) ) INHERITS (%s);""" % 
+
+        self.db.conn.execute("""CREATE TABLE %s ( CHECK (%s >= %d AND                    %s < %d ) ) INHERITS (%s);""" %
                 (name, self.partitioncolumn, self.currentstart, \
                 self.partitioncolumn, self.currentend, self.base))
-   
+
+        # add an index on each of the specified columns
         for col in self.indexcols:
             self.db.conn.execute("CREATE INDEX %s_%s ON %s (%s);" %
                 (indexname, col, name, col))
+
+        # add a combined index on the partition column and stream id columns
+        self.db.conn.execute(
+                "CREATE INDEX %s_streamid_%s ON %s (stream_id, %s);" %
+                (indexname, self.partitioncolumn, name, self.partitioncolumn))
 
         self.existing.append({'start':start, 'end':self.currentend, 'name':name})
         if self.currentend > self.lastend:
@@ -95,7 +101,7 @@ class PartitionedTable:
         return name
 
     def update(self, partvalue):
-        
+
         if self.currentstart != None and self.currentend != None:
             if partvalue >= self.currentstart and partvalue < self.currentend:
                 return
@@ -105,16 +111,16 @@ class PartitionedTable:
         # create a new table using our current desired frequency.
         #
         # Not creating a partition (i.e. using an existing one) should only
-        # happen on NNTSC startup, such as when we read old data from a whole 
+        # happen on NNTSC startup, such as when we read old data from a whole
         # bunch of RRDs. Even in this case, the data should be sequential so
         # hopefully we aren't going to be switching partition frequently.
-        # 
+        #
         # XXX Changing the frequency may result in partition overlap in certain
-        # situations. Example: an old partition covered the time 100-120 but we 
-        # changed the frequency to 100, restarted and got a measurement for 
+        # situations. Example: an old partition covered the time 100-120 but we
+        # changed the frequency to 100, restarted and got a measurement for
         # 130. This would create a new partition for 100-200, which overlaps
-        # with the earlier partition. If we later see data for 110, which 
-        # table should it go into? I don't think we care, as long as data ends 
+        # with the earlier partition. If we later see data for 110, which
+        # table should it go into? I don't think we care, as long as data ends
         # up in *a* partition that belongs to the parent table, but I am aware
         # that this will happen.
 
