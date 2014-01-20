@@ -959,7 +959,7 @@ class DBSelector:
         # XXX rename ntile to something unique if we support multiple
         # percentile columns
         sql_ntile += "ntile(20) OVER ( PARTITION BY "
-        sql_ntile += "timestamp - (timestamp %%%% %d)" % (binsize)
+        sql_ntile += "timestamp - (timestamp %%%% %d), label" % (binsize)
         sql_ntile += " ORDER BY %s )" % (ntilecols[0])
 
         sql_ntile += " FROM %s " % self._generate_from(table, all_streams)
