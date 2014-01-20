@@ -23,9 +23,11 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float, Boolean
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError, \
+        SQLAlchemyError, ProgrammingError
 from sqlalchemy.dialects import postgresql
 from libnntsc.partition import PartitionedTable
+from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
 import libnntscclient.logger as logger
 
 STREAM_TABLE_NAME = "streams_amp_dns"
@@ -61,18 +63,23 @@ def insert_stream(db, exp, data, timestamp):
             props[k] = v
 
     colid, streamid = db.register_new_stream("amp", "dns", name, timestamp)
-    if colid == -1:
-        return -1
+    if colid < 0:
+        return colid
 
     st = db.metadata.tables[STREAM_TABLE_NAME]
 
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid,
             **data)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
+        
 
     if streamid >= 0 and exp != None:
         exp.send((1, (colid, "amp_dns", streamid, props)))
@@ -137,6 +144,7 @@ def data_table(db):
 
     return DATA_TABLE_NAME
 
+
 def insert_data(db, exp, stream, ts, result):
     global partitions
 
@@ -147,15 +155,25 @@ def insert_data(db, exp, stream, ts, result):
             ["timestamp", "stream_id"])
     partitions.update(ts)
 
+
     try:
         db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts, **result)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
+        # These errors suggest that we have some bad data that we may be
+        # able to just throw away and carry on
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        # All other errors imply an issue with the database itself or the
+        # way we have been using it. Restarting the database connection is
+        # a better course of action in this case.
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
 
     exp.send((0, ("amp_dns", stream, ts, result)))
-    return 0
+    return DB_NO_ERROR
 
 def split_result(alldata, result):
 
@@ -199,19 +217,21 @@ def process_data(db, exp, timestamp, data, source):
                 continue
         else:
             stream_id = insert_stream(db, exp, streamresult, timestamp)
-            if stream_id == -1:
+            if stream_id < 0:
                 logger.log("AMPModule: Cannot create stream for:")
                 logger.log("AMPModule: %s %s %s %s\n" % ("dns", source,
                         streamresult['destination'], streamresult['query']))
-                return -1
+                return stream_id
             amp_dns_streams[key] = stream_id
 
-        insert_data(db, exp, stream_id, timestamp, dataresult)
+        res = insert_data(db, exp, stream_id, timestamp, dataresult)
+        if res != DB_NO_ERROR:
+            return res
         done[stream_id] = 0
 
     db.update_timestamp(done.keys(), timestamp)
 
-    return 0
+    return DB_NO_ERROR
 
 
 def register(db):

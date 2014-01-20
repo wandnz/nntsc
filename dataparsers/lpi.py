@@ -20,7 +20,8 @@
 # $Id$
 
 
-from libnntsc.database import Database
+from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
+        DB_GENERIC_ERROR
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
@@ -63,6 +64,7 @@ class LPIModule:
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
+        self.db.connect_db()
 
         for s in existing:
 
@@ -78,7 +80,7 @@ class LPIModule:
     def process_stats(self, data):
         if data == {}:
             logger.log("LPIModule: Empty Stats Dict")
-            return -1
+            return DB_DATA_ERROR
 
         if data['metric'] == "bytes":
             return lpi_bytes.process_data(self.db, self.exporter, \
@@ -96,7 +98,7 @@ class LPIModule:
             return lpi_users.process_data(self.db, self.exporter, \
                     self.protocol_map, data)
 
-        return 0
+        return DB_NO_ERROR
 
     def reset_seen(self):
         assert(self.protocol_map != {})
@@ -143,7 +145,7 @@ class LPIModule:
             data['results'][k] = 0
 
 
-        self.process_stats(data)
+        return self.process_stats(data)
 
     def run(self):
         while self.enabled:
@@ -167,8 +169,8 @@ class LPIModule:
                 rec_type, data = lpi_common.read_lpicp(self.server_fd)
 
                 if rec_type == 3:
-                    self.insert_zeroes()
-                    self.db.commit_transaction()
+                    if self.insert_zeroes() == DB_NO_ERROR:
+                        self.db.commit_transaction()
                     self.reset_seen()
 
                 if rec_type == 4:
@@ -177,7 +179,18 @@ class LPIModule:
 
                 if rec_type == 0:
                     self.update_seen(data)
-                    if self.process_stats(data) == -1:
+                    code = self.process_stats(data)
+                    
+                    while (code == DB_GENERIC_ERROR):
+                        # Database error -- reconnect to database
+                        logger.log("LPIModule: Database Error")
+                        time.sleep(5)
+                        self.db.connect_db()
+                        logger.log("LPIModule: Database reconnected")
+                        code = self.process_stats(data)
+                    
+                    if code == DB_DATA_ERROR:
+                        # Bad data -- reconnect to server  
                         logger.log("LPIModule: Invalid Statistics Data")
                         break
 

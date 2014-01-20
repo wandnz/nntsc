@@ -23,12 +23,14 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
     String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float, Boolean
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
+        DataError, SQLAlchemyError
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.expression import select, join, outerjoin, func, label, and_
 from sqlalchemy.sql import text
 
 from libnntsc.partition import PartitionedTable
+from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
 import libnntscclient.logger as logger
 from itertools import chain
 import sys, string
@@ -185,16 +187,21 @@ def insert_stream(db, exp, source, data, timestamp):
 
     colid, streamid = db.register_new_stream("amp", "http", name, timestamp)
 
-    if colid == -1:
-        return -1
+    if colid < 0:
+        return colid
 
     st = db.metadata.tables[STREAM_TABLE_NAME]
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid, **props)
-    except IntegrityError, e:
+    except (IntegrityError, DataError, ProgrammingError) as e:
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
+
 
     exp.send((1, (colid, "amp_http", streamid, props)))
     return streamid
@@ -237,10 +244,15 @@ def insert_test(db, stream, timestamp, data):
         assert(result.rowcount == 1)
         row = result.fetchone()
         test_id = row[0]
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
         db.rollback_transaction()
         logger.log(e)
-        return -1, None
+        return DB_DATA_ERROR, None
+    except SQLAlchemyError as e:
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR, None
+        
     db.commit_transaction()
 
     return test_id, test_info
@@ -278,10 +290,14 @@ def insert_server(db, stream, timestamp, testid, server, index):
         assert(result.rowcount == 1)
         row = result.fetchone()
         server_id = row[0]
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
         db.rollback_transaction()
         logger.log(e)
-        return -1, None
+        return DB_DATA_ERROR, None
+    except SQLAlchemyError as e:
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR, None
     db.commit_transaction()
 
     return server_id, server_info
@@ -339,10 +355,14 @@ def insert_object(db, stream, timestamp, testid, serverid, obj):
         assert(result.rowcount == 1)
         row = result.fetchone()
         object_id = row[0]
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
         db.rollback_transaction()
         logger.log(e)
-        return -1, None
+        return DB_DATA_ERROR, None
+    except SQLAlchemyError as e:
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR, None
     db.commit_transaction()
 
     return object_id, obj_info
@@ -388,41 +408,42 @@ def process_data(db, exp, timestamp, data, source):
         stream_id = amp_http_streams[streamkey]
     else:
         stream_id = insert_stream(db, exp, source, data, timestamp)
-        if stream_id == -1:
+        if stream_id < 0:
             logger.log("AMPModule: Cannot create stream for:")
             logger.log("AMPModule: %s %s %s \n" % ("http", source,
                     data['url']))
-            return -1
+            return stream_id
         amp_http_streams[streamkey] = stream_id
 
     test_id, test_info = insert_test(db, stream_id, timestamp, data)
-    if test_id == -1:
+    if test_id < 0:
         logger.log("AMPModule: Cannot create HTTP test row for stream %d\n" \
                 % (stream_id))
-        return -1
+        return test_id
 
     servindex = 0
     for serv in data['servers']:
         server_id, server_info = insert_server(db, stream_id, timestamp, \
                 test_id, serv, servindex)
 
-        if server_id == -1:
+        if server_id < 0:
             logger.log("AMPModule: Cannot create HTTP server for stream %d\n" \
                     % (stream_id))
-            return -1
+            return server_id
 
         for obj in serv['objects']:
             obj_id, obj_info = insert_object(db, stream_id, timestamp, \
                     test_id, server_id, obj)
-            if obj_id == -1:
+            if obj_id < 0:
                 logger.log("AMPModule: Cannot create HTTP object for %d\n" \
                         % (stream_id))
-                return -1
+                return obj_id
             export_http_row(exp, stream_id, timestamp, obj_id, test_info, \
                     server_info, obj_info)
 
         servindex += 1
     db.update_timestamp([stream_id], timestamp)
+    return DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

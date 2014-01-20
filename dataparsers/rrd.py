@@ -23,7 +23,8 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.types import Integer, String, Float
-from libnntsc.database import Database
+from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
+        DB_GENERIC_ERROR
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
 import libnntscclient.logger as logger
@@ -38,6 +39,7 @@ class RRDModule:
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
+        self.db.connect_db()
 
         self.exporter = exp
         self.smokepings = {}
@@ -111,23 +113,42 @@ class RRDModule:
 
                         if current == last:
                             break
-                        if r['modsubtype'] == "smokeping":
-                            rrd_smokeping.insert_data(self.db, self.exporter,
-                                    r['stream_id'], current, line)
 
-                        if r['modsubtype'] == "muninbytes":
-                            rrd_muninbytes.insert_data(self.db, self.exporter,
-                                    r['stream_id'], current, line)
+                        code = DB_DATA_ERROR
+                        while 1:
+                            if r['modsubtype'] == "smokeping":
+                                code = rrd_smokeping.insert_data(self.db, 
+                                        self.exporter, r['stream_id'], current, 
+                                        line)
 
-                        if current > r['lasttimestamp']:
-                            r['lasttimestamp'] = current
+                            if r['modsubtype'] == "muninbytes":
+                                code = rrd_muninbytes.insert_data(self.db, 
+                                        self.exporter, r['stream_id'], current, 
+                                        line)
 
-                        # RRD streams are created before we see any data so we
-                        # have to update firsttimestamp when we see the first
-                        # data point
-                        if (r['firsttimestamp'] == 0):
-                            r['firsttimestamp'] = current;
-                            self.db.set_firsttimestamp(r['stream_id'], current)
+                            if code == DB_GENERIC_ERROR:
+                                logger.log("RRDModule: Database Error")
+                                time.sleep(5)
+                                self.db.connect_db()
+                                logger.log("RRDModule: Database reconnected")
+                                continue
+
+                            break
+                        
+                        if code == DB_NO_ERROR:
+                            if current > r['lasttimestamp']:
+                                r['lasttimestamp'] = current
+
+                            # RRD streams are created before we see any data 
+                            # so we have to update firsttimestamp when we see 
+                            # the first data point
+                            if (r['firsttimestamp'] == 0):
+                                r['firsttimestamp'] = current;
+                                self.db.set_firsttimestamp(r['stream_id'], 
+                                        current)
+
+                        if code == DB_DATA_ERROR:
+                            logger.log("Bad RRD Data, skipping row")
 
                         current += step
 
@@ -153,6 +174,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
     rows = info['rra[0].rows']
     logger.log("Creating stream for RRD-%s: %s" % (rrdtype, params['file']))
 
+    code = DB_NO_ERROR
 
     if rrdtype == "smokeping":
         if "source" not in params:
@@ -169,7 +191,8 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             logger.log("All Smokeping RRDs must have a 'name' parameter")
             return
 
-        rrd_smokeping.insert_stream(db, None, params['name'], params['file'],
+        code = rrd_smokeping.insert_stream(db, None, params['name'], 
+                params['file'],
                 params["source"], params['host'], minres, rows)
 
     if rrdtype == "muninbytes":
@@ -200,9 +223,11 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
 
         muninname = params["switch"] + " >> " + namelabel + " (Bytes " + params["direction"] + ")"
 
-        rrd_muninbytes.insert_stream(db, None, muninname, params['file'],
+        code = rrd_muninbytes.insert_stream(db, None, muninname, params['file'],
                 params['switch'], params['interface'], params['direction'],
                 minres, rows, label)
+
+    return code
 
 def insert_rrd_streams(db, conf):
 
@@ -238,7 +263,15 @@ def insert_rrd_streams(db, conf):
 
         if x[0] == "type":
             if parameters != {}:
-                create_rrd_stream(db, subtype, parameters, index, files)
+                code = create_rrd_stream(db, subtype, parameters, index, 
+                       files)
+                if code == DB_GENERIC_ERROR:
+                    logger.log("Database error while creating RRD stream")
+                    return code
+                if code == DB_DATA_ERROR:
+                    logger.log("Invalid RRD stream description")
+                    return code
+                    
             parameters = {}
             subtype = x[1]
             index += 1
@@ -247,10 +280,17 @@ def insert_rrd_streams(db, conf):
 
 
     if parameters != {}:
-        create_rrd_stream(db, subtype, parameters, index, files)
+        code = create_rrd_stream(db, subtype, parameters, index, files)
+        if code == DB_GENERIC_ERROR:
+            logger.log("Database error while creating RRD stream")
+            return code
+        if code == DB_DATA_ERROR:
+            logger.log("Invalid RRD stream description")
+            return code
 
     db.commit_transaction()
     f.close()
+    return DB_NO_ERROR
 
 
 def run_module(rrds, config, exp):

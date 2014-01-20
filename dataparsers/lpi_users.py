@@ -23,10 +23,12 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
     String, MetaData, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, DataError, \
+        ProgrammingError, SQLAlchemyError
 from sqlalchemy.dialects import postgresql
 import libnntscclient.logger as logger
 from libnntsc.partition import PartitionedTable
+from libnntsc.database import DB_NO_ERROR, DB_DATA_ERROR, DB_GENERIC_ERROR
 
 import sys, string
 
@@ -99,17 +101,27 @@ def add_new_stream(db, exp, mon, freq, proto, metric, ts):
 
     colid, streamid = db.register_new_stream("lpi", "users", namestr, ts)
 
-    if colid == -1:
-        return -1
+    if colid < 0:
+        return colid
 
     st = db.metadata.tables[STREAM_TABLE_NAME]
     try:
         result = db.conn.execute(st.insert(), stream_id=streamid,
                 source=mon, freq=freq, protocol=proto, metric=metric)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
+        # These errors suggest that we have some bad data that we may be
+        # able to just throw away and carry on
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        # All other errors imply an issue with the database itself or the
+        # way we have been using it. Restarting the database connection is
+        # a better course of action in this case.
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
+
 
     if streamid >= 0 and exp != None:
         exp.send((1, (colid, "lpi_users", streamid, \
@@ -128,10 +140,19 @@ def insert_data(db, exp, stream_id, ts, value):
 
     try:
         db.conn.execute(dt.insert(), stream_id=stream_id, timestamp=ts, users=value)
-    except IntegrityError, e:
+    except (DataError, IntegrityError, ProgrammingError) as e:
+        # These errors suggest that we have some bad data that we may be
+        # able to just throw away and carry on
         db.rollback_transaction()
         logger.log(e)
-        return -1
+        return DB_DATA_ERROR
+    except SQLAlchemyError as e:
+        # All other errors imply an issue with the database itself or the
+        # way we have been using it. Restarting the database connection is
+        # a better course of action in this case.
+        db.rollback_transaction()
+        logger.log(e)
+        return DB_GENERIC_ERROR
 
     exp.send((0, ("lpi_users", stream_id, ts, {"users":value})))
     return 0
@@ -148,27 +169,29 @@ def process_data(db, exp, protomap, data):
         metric='observed'
     else:
         logger.log("LPI Users: Unknown Metric: %s" % (data['metric']))
-        return -1
+        return DB_DATA_ERROR
 
     for p, val in data['results'].items():
         if p not in protomap.keys():
             logger.log("LPI Users: Unknown protocol id: %u" % (p))
-            return -1
+            return DB_DATA_ERROR
         stream_id = find_stream(mon, freq, protomap[p], metric)
         if stream_id == -1:
             stream_id = add_new_stream(db, exp, mon, freq, protomap[p], metric,
                     data['ts'])
 
-            if stream_id == -1:
+            if stream_id < 0:
                 logger.log("LPI Users: Cannot create new stream")
                 logger.log("LPI Users: %s %s %s %s\n" % (mon, freq, protomap[p], metric))
-                return -1
+                return stream_id
             else:
                 lpi_users_streams[(mon, freq, protomap[p], metric)] = stream_id
 
-        insert_data(db, exp, stream_id, data['ts'], val)
+        res = insert_data(db, exp, stream_id, data['ts'], val)
+        if res != DB_NO_ERROR:
+            return res
         done.append(stream_id)
     db.update_timestamp(done, data['ts'])
-    return 0
+    return DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

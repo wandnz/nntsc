@@ -75,7 +75,7 @@ MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
 MAX_WORKERS = 2
 
 class DBWorker(threading.Thread):
-    def __init__(self, parent, pipeend, dbconf, lock, cv, threadid):
+    def __init__(self, parent, pipeend, dbconf, lock, cv, threadid, timeout):
         threading.Thread.__init__(self)
         self.dbconf = dbconf
         self.parent = parent
@@ -83,6 +83,7 @@ class DBWorker(threading.Thread):
         self.lock = lock
         self.cv = cv
         self.threadid = threadid
+        self.timeout = timeout
 
     def process_job(self, job):
         jobtype = job[0]
@@ -300,7 +301,7 @@ class DBWorker(threading.Thread):
 
             start = queryend + 1
 
-        log("Subscribe job completed successfully (%s)\n" % (self.threadid))
+        #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
 
     def _query_history(self, rowgen, name, start, end, labels, cols,
@@ -490,8 +491,9 @@ class DBWorker(threading.Thread):
             # this thread if we aren't using it otherwise we run the
             # risk of inactive threads preventing us from contacting
             # the database
-            self.db = DBSelector(self.threadid, self.dbconf["name"], self.dbconf["user"],
-                    self.dbconf["pass"], self.dbconf["host"])
+            self.db = DBSelector(self.threadid, self.dbconf["name"], 
+                    self.dbconf["user"],
+                    self.dbconf["pass"], self.dbconf["host"], self.timeout)
             if self.process_job(job) == -1:
                 break
             self.db.close()
@@ -590,7 +592,7 @@ class DBWorker(threading.Thread):
         return freq
 
 class NNTSCClient(threading.Thread):
-    def __init__(self, sock, parent, pipeend, dbconf):
+    def __init__(self, sock, parent, pipeend, dbconf, dbtimeout):
         threading.Thread.__init__(self)
         assert(dbconf)
         self.sock = sock
@@ -608,7 +610,7 @@ class NNTSCClient(threading.Thread):
             threadid = "client%d_thread%d" % (self.sock.fileno(), i)
 
             worker = DBWorker(self, pipe_send, dbconf, self.joblock,
-                    self.jobcv, threadid)
+                    self.jobcv, threadid, dbtimeout)
             worker.daemon = True
             worker.start()
 
@@ -1108,7 +1110,8 @@ class NNTSCExporter:
 
         pipe_recv, pipe_send = Pipe(False)
 
-        cthread = NNTSCClient(client, self, pipe_recv, self.dbconf)
+        cthread = NNTSCClient(client, self, pipe_recv, self.dbconf, \
+                self.dbtimeout)
         cthread.daemon = True
         cthread.start()
         self.client_sockets[client] = pipe_send
@@ -1151,7 +1154,7 @@ class NNTSCExporter:
 
         return s
 
-    def configure(self, conf_fname):
+    def configure(self, conf_fname, dbtimeout):
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:
             sys.exit(0)
@@ -1161,6 +1164,7 @@ class NNTSCExporter:
             sys.exit(1)
 
         self.dbconf = dbconf
+        self.dbtimeout = dbtimeout
 
         listen_sock = self.create_listener(self.listen_port)
 

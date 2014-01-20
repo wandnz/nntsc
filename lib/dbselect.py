@@ -11,8 +11,10 @@ import time
 #  * documentation that makes sense
 
 class DBSelector:
-    def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None):
+    def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None,
+            timeout=0):
 
+        self.dbselid = uniqueid
         connstr = "dbname=%s user=%s" % (dbname, dbuser)
         if dbpass != "" and dbpass != None:
             connstr += " password=%s" % (dbpass)
@@ -23,16 +25,29 @@ class DBSelector:
         # hang around causing trouble if the user changes page and abandons
         # the request or similar. Varnish will return an error if the page
         # doesn't load after 60s, so we don't need to go for longer than that.
-        connstr += " options='-c statement_timeout=50000'"
+        if timeout != 0:
+            connstr += " options='-c statement_timeout=%d'" % (timeout * 1000.0)
+        
+        #log("Setting DB timeout to %d" % (timeout * 1000.0))
 
-        try:
-            self.conn = psycopg2.connect(connstr)
-        except psycopg2.DatabaseError as e:
-            log("DBSelector: Error connecting to database: %s" % e)
-            self.conn = None
-            self.basiccursor = None
-            self.datacursor = None
-            return
+        self.conn = None
+        reconnect = 30
+        while self.conn == None:
+
+            try:
+                self.conn = psycopg2.connect(connstr)
+            except psycopg2.DatabaseError as e:
+                log("DBSelector: Error connecting to database: %s" % e)
+                log("Retrying in %d seconds" % reconnect);
+                self.conn = None
+                self.basiccursor = None
+                self.datacursor = None
+                
+                time.sleep(reconnect)
+                reconnect *= 2
+                if (reconnect > 600):
+                    reconnect = 600;
+
 
         # The basiccursor is used for all "short" queries that are
         # unlikely to produce a large result. The full result will be
@@ -62,6 +77,8 @@ class DBSelector:
         self.datacursor = None
         self.cursorname = "cursor_" + uniqueid
 
+        log("DBSelector: Successfully created DBSelector %s" % self.dbselid)
+
     def _reset_cursor(self):
         if self.conn == None:
             return
@@ -90,6 +107,7 @@ class DBSelector:
             self.basiccursor.close()
         if self.conn:
             self.conn.close()
+            log("DBSelector: Closed database connection for %s" % self.dbselid)
 
         self.basiccursor = None
         self.datacursor = None
@@ -105,7 +123,12 @@ class DBSelector:
 
         collections = []
 
-        self.basiccursor.execute("SELECT * from collections")
+        try:
+            self.basiccursor.execute("SELECT * from collections")
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return []
+        
         while True:
             row = self.basiccursor.fetchone()
 
@@ -128,21 +151,33 @@ class DBSelector:
         if self.basiccursor == None:
             return [], []
 
-        self.basiccursor.execute(
+        try:
+            self.basiccursor.execute(
                 "SELECT streamtable, datatable from collections WHERE id=%s",
                 (colid,))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return [], []
 
         tables = self.basiccursor.fetchone()
 
         # Parameterised queries don't work on the FROM clause -- our table
         # names *shouldn't* be an SQL injection risk, right?? XXX
-        self.basiccursor.execute(
-                "SELECT * from %s LIMIT 1" % (tables['streamtable']))
+        try:
+            self.basiccursor.execute(
+                    "SELECT * from %s LIMIT 1" % (tables['streamtable']))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return [], []
 
         streamcolnames = [cn[0] for cn in self.basiccursor.description]
 
-        self.basiccursor.execute(
-                "SELECT * from %s LIMIT 1" % (tables['datatable']))
+        try:
+            self.basiccursor.execute(
+                    "SELECT * from %s LIMIT 1" % (tables['datatable']))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return [], []
 
         datacolnames = [cn[0] for cn in self.basiccursor.description]
         return streamcolnames, datacolnames
@@ -172,8 +207,13 @@ class DBSelector:
         # Find the collections matching this module
         if self.basiccursor == None:
             return []
-        self.basiccursor.execute(
-                "SELECT * from collections where module=%s", (mod,))
+        try:
+            self.basiccursor.execute(
+                    "SELECT * from collections where module=%s", (mod,))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return []
+
         streamtables = {}
 
         cols = self.basiccursor.fetchall()
@@ -185,7 +225,12 @@ class DBSelector:
         for cid, (tname, sub) in streamtables.items():
             sql = """ SELECT * FROM streams, %s WHERE streams.collection=%s
                       AND streams.id = %s.stream_id """ % (tname, "%s", tname)
-            self.basiccursor.execute(sql, (cid,))
+            try:
+                self.basiccursor.execute(sql, (cid,))
+            except psycopg2.extensions.QueryCanceledError:
+                self.conn.rollback()
+                return []
+
 
             while True:
                 row = self.basiccursor.fetchone()
@@ -217,8 +262,13 @@ class DBSelector:
         """
         if self.basiccursor == None:
             return []
-        self.basiccursor.execute(
-                "SELECT * from collections where id=%s", (coll,))
+        try:
+            self.basiccursor.execute(
+                    "SELECT * from collections where id=%s", (coll,))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return []
+        
         assert(self.basiccursor.rowcount == 1)
 
         coldata = self.basiccursor.fetchone()
@@ -226,7 +276,11 @@ class DBSelector:
         tname = coldata['streamtable']
         sql = """SELECT * FROM streams, %s WHERE streams.id = %s.stream_id
                  AND streams.id > %s""" % (tname, tname, "%s")
-        self.basiccursor.execute(sql, (minid,))
+        try:
+            self.basiccursor.execute(sql, (minid,))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return []
 
         selected = []
         while True:
@@ -257,7 +311,11 @@ class DBSelector:
             return []
 
         sql = "SELECT id FROM streams WHERE collection=%s AND lasttimestamp>%s"
-        self.basiccursor.execute(sql, (coll, lastactivity))
+        try:
+            self.basiccursor.execute(sql, (coll, lastactivity))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return []
 
         active = []
         while True:
@@ -349,6 +407,8 @@ class DBSelector:
         # Find the data table and make sure we are only querying for
         # valid columns
         table, columns = self._get_data_table(col)
+        if table == None:
+            return
 
         # XXX get rid of stream_id, ideally it wouldnt even get to here
         if "stream_id" in groupcols:
@@ -465,6 +525,8 @@ class DBSelector:
 
         # Find the data table for the requested collection
         table, columns = self._get_data_table(col)
+        if table == None:
+            return
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
@@ -597,9 +659,14 @@ class DBSelector:
 
         """
         if self.basiccursor == None:
-            return
-        self.basiccursor.execute(
-                "SELECT * from collections where id=%s", (col,))
+            return None, []
+        try:
+            self.basiccursor.execute(
+                    "SELECT * from collections where id=%s", (col,))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return None, []
+
         assert(self.basiccursor.rowcount == 1)
 
         coldata = self.basiccursor.fetchone()
@@ -612,9 +679,14 @@ class DBSelector:
         # This is the quickest way to get the column names -- don't
         # try querying the data table itself because that could be slow
         # if the table is, for example, a complicated view.
-        self.basiccursor.execute(
+        try:
+            self.basiccursor.execute(
                 "SELECT * from information_schema.columns WHERE table_name=%s",
                 (tname,))
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return None, []
+
 
         columns = []
         while True:
@@ -860,6 +932,8 @@ class DBSelector:
         # Find the data table and make sure we are only querying for
         # valid columns
         table, columns = self._get_data_table(col)
+        if table == None:
+            return
         ntilecols = self._sanitise_columns(columns, ntilecols)
         othercols = self._sanitise_columns(columns, othercols)
 
@@ -970,7 +1044,7 @@ class DBSelector:
                 self.datacursor = None
                 self.conn.rollback()
                 #info = sql % params
-                #log("DBSelector: Query cancelled: %s" % info)
+                #log("DBSelector: Query cancelled")
                 break
 
             if fetched == []:
