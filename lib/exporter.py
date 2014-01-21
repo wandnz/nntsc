@@ -924,7 +924,7 @@ class NNTSCExporter:
 
     def deregister_client(self, sock):
 
-        log("Dropping client on fd %d" % (sock.fileno()))
+        #log("Dropping client on fd %d" % (sock.fileno()))
         if sock in self.client_sockets:
             del self.client_sockets[sock]
         if sock in self.client_threads:
@@ -1118,7 +1118,7 @@ class NNTSCExporter:
         return ret
 
     def queue_callback(self, pwe, client):
-        sock = client['data']
+        sock = client
         queue = self.client_sockets[sock]
         store = self.client_store[sock]
 
