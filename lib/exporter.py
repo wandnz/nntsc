@@ -76,13 +76,11 @@ MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
 MAX_WORKERS = 2
 
 class DBWorker(threading.Thread):
-    def __init__(self, parent, pipeend, dbconf, lock, cv, threadid, timeout):
+    def __init__(self, parent, pipeend, dbconf, threadid, timeout):
         threading.Thread.__init__(self)
         self.dbconf = dbconf
         self.parent = parent
         self.pipeend = pipeend
-        self.lock = lock
-        self.cv = cv
         self.threadid = threadid
         self.timeout = timeout
 
@@ -477,16 +475,11 @@ class DBWorker(threading.Thread):
         running = 1
 
         while running:
-            self.cv.acquire()
-
             # Wait for a job to become available
-            while len(self.parent.jobs) == 0:
-                self.cv.wait()
-
-            # Grab the first job available
-            job = self.parent.jobs[0]
-            self.parent.jobs = self.parent.jobs[1:]
-            self.cv.release()
+            try:
+                job = self.parent.jobs.get(True)
+            except StdQueue.Empty:
+                continue
 
             # Don't have a db connection open for the lifetime of
             # this thread if we aren't using it otherwise we run the
@@ -600,18 +593,15 @@ class NNTSCClient(threading.Thread):
         self.parent = parent
         self.livequeue = queue
         self.recvbuf = ""
-        self.jobs = []
-        self.joblock = threading.Lock()
-        self.jobcv = threading.Condition(self.joblock)
-
+        self.jobs = Queue(100000)
+        
         self.workers = []
         # Create some worker threads for handling the database queries
         for i in range(0, MAX_WORKERS):
             pipe_recv, pipe_send = Pipe(False)
             threadid = "client%d_thread%d" % (self.sock.fileno(), i)
 
-            worker = DBWorker(self, pipe_send, dbconf, self.joblock,
-                    self.jobcv, threadid, dbtimeout)
+            worker = DBWorker(self, pipe_send, dbconf, threadid, dbtimeout)
             worker.daemon = True
             worker.start()
 
@@ -663,7 +653,7 @@ class NNTSCClient(threading.Thread):
         try:
             self.sock.send(header + stream_data)
         except error, msg:
-            log("Error sending schemas to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+            log("Error sending streams to client fd %d: %s" % (self.sock.fileno(), msg[1]))
             return -1
 
         return 0
@@ -772,10 +762,11 @@ class NNTSCClient(threading.Thread):
             return msg, 1, error
 
         # Put the job on our joblist for one of the worker threads to handle
-        self.jobcv.acquire()
-        self.jobs.append((header[1], body))
-        self.jobcv.notify()
-        self.jobcv.release()
+        try:
+            self.jobs.put((header[1], body), False)
+        except StdQueue.Full:
+            log("Too many jobs queued by a client, dropping client")
+            return msg, 0, 1
 
         return msg[total_len:], 0, error
 
@@ -897,11 +888,8 @@ class NNTSCClient(threading.Thread):
         self.sock.close()
 
         # Add "halt" jobs to the job queue for each worker
-        self.jobcv.acquire()
         for w in self.workers:
-            self.jobs.append((-1, None))
-        self.jobcv.notify_all()
-        self.jobcv.release()
+            self.jobs.put((-1, None), True)
 
         # Make sure we close our end of the pipe to each thread
         for w in self.workers:
