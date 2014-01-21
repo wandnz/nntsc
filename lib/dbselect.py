@@ -77,7 +77,7 @@ class DBSelector:
         self.datacursor = None
         self.cursorname = "cursor_" + uniqueid
 
-        log("DBSelector: Successfully created DBSelector %s" % self.dbselid)
+        #log("DBSelector: Successfully created DBSelector %s" % self.dbselid)
 
     def _reset_cursor(self):
         if self.conn == None:
@@ -107,7 +107,7 @@ class DBSelector:
             self.basiccursor.close()
         if self.conn:
             self.conn.close()
-            log("DBSelector: Closed database connection for %s" % self.dbselid)
+            #log("DBSelector: Closed database connection for %s" % self.dbselid)
 
         self.basiccursor = None
         self.datacursor = None

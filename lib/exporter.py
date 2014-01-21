@@ -25,7 +25,8 @@
 import sys, socket, time, struct, getopt, pickle
 from pywandevent.pywandevent import PyWandEvent
 from socket import *
-from multiprocessing import Pipe
+from multiprocessing import Pipe, Queue
+import Queue as StdQueue
 import threading, select
 
 from libnntsc.dbselect import DBSelector
@@ -592,12 +593,12 @@ class DBWorker(threading.Thread):
         return freq
 
 class NNTSCClient(threading.Thread):
-    def __init__(self, sock, parent, pipeend, dbconf, dbtimeout):
+    def __init__(self, sock, parent, queue, dbconf, dbtimeout):
         threading.Thread.__init__(self)
         assert(dbconf)
         self.sock = sock
         self.parent = parent
-        self.pipeend = pipeend
+        self.livequeue = queue
         self.recvbuf = ""
         self.jobs = []
         self.joblock = threading.Lock()
@@ -808,23 +809,28 @@ class NNTSCClient(threading.Thread):
             return 0
 
     def receive_live(self):
-        fd = self.pipeend.fileno()
-
-        try:
-            obj = self.pipeend.recv()
-        except EOFError, msg:
-            log("Error receiving live data from pipe %d: %s" % (fd, msg))
-            return 0
-
-        # Just reflect whatever we get on the socket to our client
-        totalsent = 0
-        while totalsent < len(obj):
-            sent = self.sock.send(obj[totalsent:])
-            if sent == 0:
+        
+        while 1:
+            try:
+                obj = self.livequeue.get(False)
+            except StdQueue.Empty:
                 return 0
-            totalsent += sent
+            
+            # Just reflect the objects directly to the client
+            sendobj = obj[0] + obj[1]
+
+            totalsent = 0
+            while totalsent < len(sendobj):
+                try:
+                    sent = self.sock.send(sendobj[totalsent:])
+                except:
+                    return -1
+                if sent == 0:
+                    return -1
+                totalsent += sent
 
         return totalsent
+        
 
     def receive_worker(self, socket):
         fd = socket.fileno()
@@ -862,21 +868,21 @@ class NNTSCClient(threading.Thread):
         running = 1
 
         while running:
-            input = [self.sock, self.pipeend]
+            # Process any live data on the queue first
+            if self.receive_live() == -1:
+                running = 0
+                break
+
+            input = [self.sock]
 
             for w in self.workers:
                 input.append(w[0])
 
-            inpready, outready, exready = select.select(input, [], [])
+            # Timeout of zero is bad, will use lots of CPU. Hopefully, 0.01
+            # won't keep us from serving the live queue for too long.
+            inpready, outready, exready = select.select(input, [], [], 0.01)
             for s in inpready:
-                if s == self.pipeend:
-                    if self.receive_live() == 0:
-                        running = 0
-                        break
-                    # XXX This continue means that we prefer reading live
-                    # data -- this may be a bad idea
-                    continue
-                elif s == self.sock:
+                if s == self.sock:
                     if self.receive_client() == 0:
                         running = 0
                         break
@@ -887,7 +893,7 @@ class NNTSCClient(threading.Thread):
                         break
         #log("Closing client thread on fd %d" % self.sock.fileno())
         self.parent.deregister_client(self.sock)
-        self.pipeend.close()
+        self.livequeue.close()
         self.sock.close()
 
         # Add "halt" jobs to the job queue for each worker
@@ -909,16 +915,24 @@ class NNTSCExporter:
         self.dbconf = None
         self.collections = {}
         self.subscribers = {}
+
+        # TODO Combine into a single dict
         self.client_sockets = {}
         self.client_threads = {}
+        self.client_store = {}
+        self.client_timers = {}
 
     def deregister_client(self, sock):
 
-        #log("Dropping client on fd %d" % (sock.fileno()))
+        log("Dropping client on fd %d" % (sock.fileno()))
         if sock in self.client_sockets:
             del self.client_sockets[sock]
         if sock in self.client_threads:
             del self.client_threads[sock]
+        if sock in self.client_timers:
+            del self.client_timers[sock]
+        if sock in self.client_store:
+            del self.client_store[sock]
 
     def drop_source(self, sock):
         log("Dropping source on fd %d" % (sock.fileno()))
@@ -941,19 +955,22 @@ class NNTSCExporter:
         return results
 
     def register_stream(self, s, sock, cols, start, end, name):
-        #print "Registered new stream: ", s, start, end
         if self.subscribers.has_key(s):
             self.subscribers[s].append((sock, cols, start, end, name))
         else:
             self.subscribers[s] = [(sock, cols, start, end, name)]
 
+        if name in self.collections and sock in self.collections[name]:
+            self.collections[name][sock] += 1
+             
+
 
     def register_collection(self, sock, col):
         if self.collections.has_key(col):
             if sock not in self.collections[col]:
-                self.collections[col].append(sock)
+                self.collections[col][sock] = 0
         else:
-            self.collections[col] = [sock]
+            self.collections[col] = {sock: 0}
 
     def export_push(self, received, fd):
         try:
@@ -972,19 +989,23 @@ class NNTSCExporter:
         pushdata = pickle.dumps((collid, timestamp))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, len(pushdata))
 
-        active = []
-        for sock in self.collections[collid]:
+        active = {}
+        for sock, subbed in self.collections[collid].items():
             if sock not in self.client_sockets:
                 continue
+            if subbed == 0:
+                active[sock] = subbed
+                continue
+            
+            store = self.client_store[sock]
+            store.append((header, pushdata))
 
+            if self.client_timers[sock] == -1:
+                self.client_timers[sock] = self.pwe.add_timer_event(
+                        0, 100, sock, self.queue_callback)
+
+            active[sock] = subbed
             pipesend = self.client_sockets[sock]
-            try:
-                pipesend.send(header + pushdata)
-            except error, msg:
-                log("Error sending push to pipe for client fd %d: %s" % (sock.fileno(), msg[1]))
-                self.deregister_client(sock)
-            else:
-                active.append(sock)
         self.collections[collid] = active
 
         return 0
@@ -1012,19 +1033,19 @@ class NNTSCExporter:
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS,
                 len(ns_data))
 
-        active = []
-        for sock in self.collections[coll_id]:
+        active = {}
+        for sock, subbed in self.collections[coll_id].items():
             if sock not in self.client_sockets:
                 continue
+            
+            store = self.client_store[sock]
+            store.append((header, ns_data))
 
-            pipesend = self.client_sockets[sock]
-            try:
-                pipesend.send(header + ns_data)
-            except error, msg:
-                log("Error sending schemas to pipe for client fd %d: %s" % (sock.fileno(), msg[1]))
-                self.deregister_client(sock)
-            else:
-                active.append(sock)
+            if self.client_timers[sock] == -1:
+                self.client_timers[sock] = self.pwe.add_timer_event(
+                        0, 100, sock, self.queue_callback)
+
+            active[sock] = subbed
         self.collections[coll_id] = active
 
         return 0
@@ -1063,14 +1084,13 @@ class NNTSCExporter:
                         len(contents))
 
                 if sock in self.client_sockets:
-                    pipesend = self.client_sockets[sock]
+                    store = self.client_store[sock]
+                    store.append((header, contents))
 
-                    #print "Pushing onto client pipe", stream_id, col
-                    pipesend.send(header + contents)
+                    if self.client_timers[sock] == -1:
+                        self.client_timers[sock] = self.pwe.add_timer_event(
+                                0, 100, sock, self.queue_callback)
 
-                    #    log("Error sending live data to pipe for client: %s" % (msg[1]))
-                    #    self.deregister_client(sock)
-                    #else:
                     if results != {}:
                         active.append((sock, columns, start, end, col))
             self.subscribers[stream_id] = active
@@ -1097,6 +1117,29 @@ class NNTSCExporter:
 
         return ret
 
+    def queue_callback(self, pwe, client):
+        sock = client['data']
+        queue = self.client_sockets[sock]
+        store = self.client_store[sock]
+
+        #log("Prepush: Queue size is currently %u" % queue.qsize())
+        while len(store) > 0:
+            try:
+                queue.put(store[0], False)
+            except StdQueue.Full:
+                break
+
+            store = store[1:]
+        #log("Postpush: Queue size is currently %u" % queue.qsize())
+
+        if len(store) > 0:
+            self.client_timers[sock] = self.pwe.add_timer_event(0, 100, \
+                    sock, self.queue_callback)
+        else:
+            self.client_timers[sock] = -1
+
+        # Probably unnecessary?
+        self.client_store[sock] = store
 
     def accept_connection(self, fd, evtype, sock, data):
 
@@ -1108,14 +1151,17 @@ class NNTSCExporter:
 
         #log("Accepted connection on fd %d" % (client.fileno()))
 
-        pipe_recv, pipe_send = Pipe(False)
+        
+        queue = Queue(10000000)
 
-        cthread = NNTSCClient(client, self, pipe_recv, self.dbconf, \
+        cthread = NNTSCClient(client, self, queue, self.dbconf, \
                 self.dbtimeout)
         cthread.daemon = True
         cthread.start()
-        self.client_sockets[client] = pipe_send
+        self.client_sockets[client] = queue
         self.client_threads[client] = cthread
+        self.client_store[client] = []
+        self.client_timers[client] = -1
 
         #self.pwe.add_fd_event(client, 1, "", self.receive_client)
 
