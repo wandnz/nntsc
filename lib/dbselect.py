@@ -442,16 +442,14 @@ class DBSelector:
 
         # Constructing the innermost SELECT query, which lists the label for
         # each measurement
-
-        # Use a CASE statement to combine all the streams within a label
-        case, caseparams = self._generate_label_case(labels)
-        sql_agg = """ SELECT %s AS label, timestamp """ % (case)
+        sql_agg = " SELECT label, timestamp "
 
         uniquecols = list(set(aggcols))
         for col in uniquecols:
             sql_agg += ", " + col
 
-        sql_agg += " FROM %s " % self._generate_from(table, all_streams)
+        from_sql, from_params = self._generate_from(table, labels)
+        sql_agg += " FROM %s " % from_sql
         sql_agg += self._generate_where()
 
         # Constructing the outer SELECT query, which will aggregate across
@@ -471,7 +469,7 @@ class DBSelector:
 
         # Execute our query!
         # XXX Getting these parameters in the right order is a pain!
-        params = tuple(binparam + caseparams + [start_time, stop_time] +
+        params = tuple(binparam + from_params + [start_time, stop_time] +
                 all_streams + [start_time, stop_time])
 
         self.datacursor.execute(sql, params)
@@ -530,7 +528,7 @@ class DBSelector:
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
-        
+
         # XXX for now, lets try to munge graph types that give a list of
         # stream ids into the label dictionary format that we want
         assert(type(labels) is dict)
@@ -538,21 +536,20 @@ class DBSelector:
         # TODO cast to a set to make unique entries?
         all_streams = reduce(lambda x, y: x+y, labels.values())
 
-        case, caseparams = self._generate_label_case(labels)
         # These columns are important so include them regardless
-        selectcols.append(case + " AS label")
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
+        if 'label' not in selectcols:
+            selectcols.append('label')
 
-        params = tuple(caseparams + [start_time, stop_time] + all_streams +
-                [start_time, stop_time])
+        params = [start_time, stop_time] + all_streams + [start_time, stop_time]
 
-        for resultrow in self._generic_select(table, all_streams, params,
+        for resultrow in self._generic_select(table, labels, params,
                 selectcols, None, 'timestamp', 0):
             yield resultrow
 
 
-    def _generic_select(self, table, streams, params, selcols, groupcols,
+    def _generic_select(self, table, labels, params, selcols, groupcols,
             tscol, binsize):
         """ Generator function that constructs and executes the SQL query
             required for both select_data and select_aggregated_data.
@@ -574,7 +571,8 @@ class DBSelector:
             if i != len(selcols) - 1:
                 selclause += ", "
 
-        fromclause = " FROM %s " % self._generate_from(table, streams)
+        from_sql, from_params =  self._generate_from(table, labels)
+        fromclause = " FROM %s " % from_sql
         whereclause = self._generate_where()
 
         # Form the "GROUP BY" section of our query (if asking
@@ -593,6 +591,7 @@ class DBSelector:
 
         sql = selclause + fromclause + whereclause + groupclause \
                 + orderclause
+        params = tuple(from_params + params)
         self.datacursor.execute(sql, params)
 
         fetched = self._query_data_generator()
@@ -609,7 +608,7 @@ class DBSelector:
         for label, stream_ids in labels.iteritems():
             #case += " WHEN stream_id in (%s) THEN '%s'" % (
                 #",".join(str(x) for x in stream_ids), label)
-            case += " WHEN stream_id in (%s)" % (
+            case += " WHEN id in (%s)" % (
                 ",".join(["%s"] * len(stream_ids)))
             case += " THEN %s"
 
@@ -618,33 +617,36 @@ class DBSelector:
         case += " END"
         return case, caseparams
 
+
     # It looks like restricting the number of stream ids that are checked for
     # in the data table helps significantly with performance, so if we can
     # exclude all the streams that aren't in scope, we have a much smaller
     # search space.
-    # TODO we can probably do this at an earlier stage, which would mean we
-    # need to send less stream ids through for the big labelling case statement
-    # and won't need to do this extra check here. The list of stream ids can
-    # go back into the WHERE clause and the FROM can return to just being the
-    # table name.
-    def _generate_from(self, table, streams):
+    # TODO this needs to be tidied up, returning lists of arguments back
+    # through multiple levels of function calls doesn't feel very nice, and
+    # anyway, the whole way sql query parameters are done needs to be reworked.
+    def _generate_from(self, table, labels):
         """ Forms a FROM clause for an SQL query that encompasses all
             streams in the provided list that fit within a given time period.
         """
+        # build the case statement that will label our stream ids
+        case, caseparams = self._generate_label_case(labels)
+        count = reduce(lambda x, y: x+len(y), labels.values(), 0)
+
         # get all stream ids that are active in the period
-        sql = "(SELECT id FROM streams "
+        sql = "(SELECT id, %s as label FROM streams " % case
         sql += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
 
-        assert(len(streams) > 0)
+        assert(count > 0)
         sql += " AND id IN ("
-        for i in range(0, len(streams)):
+        for i in range(0, count):
             sql += "%s"
-            if i != len(streams) - 1:
+            if i != count - 1:
                 sql += ", "
         # join the active streams with the appropriate data table
         sql += ")) AS activestreams INNER JOIN %s ON " % table
         sql += "%s.stream_id = activestreams.id" % table
-        return sql
+        return sql, caseparams
 
     def _generate_where(self):
         """ Forms a WHERE clause for an SQL query based on a time period """
@@ -887,7 +889,7 @@ class DBSelector:
         #               rtt,
         #               loss,
         #               ntile(20) OVER (
-        #                   PARTITION BY timestamp-timestamp%BINSIZE
+        #                   PARTITION BY timestamp-timestamp%BINSIZE, label
         #                   ORDER BY rtt
         #               )
         #           FROM DATATABLE
@@ -946,10 +948,8 @@ class DBSelector:
         # Constructing the innermost SELECT query, which lists the ntile for
         # each measurement
 
-        # Use a CASE statement to combine all the streams within a label
-        case, caseparams = self._generate_label_case(labels)
-        sql_ntile = """ SELECT %s as label, """ % (case)
-        sql_ntile += "timestamp, timestamp - (timestamp %% %s) AS binstart, "
+        sql_ntile = "SELECT label, timestamp, "
+        sql_ntile += "timestamp - (timestamp %% %s) AS binstart, "
 
         initcols = ntilecols + othercols
         for i in range(0, len(initcols)):
@@ -959,10 +959,11 @@ class DBSelector:
         # XXX rename ntile to something unique if we support multiple
         # percentile columns
         sql_ntile += "ntile(20) OVER ( PARTITION BY "
-        sql_ntile += "timestamp - (timestamp %%%% %d)" % (binsize)
+        sql_ntile += "timestamp - (timestamp %%%% %d), label" % (binsize)
         sql_ntile += " ORDER BY %s )" % (ntilecols[0])
 
-        sql_ntile += " FROM %s " % self._generate_from(table, all_streams)
+        from_sql, from_params = self._generate_from(table, labels)
+        sql_ntile += " FROM %s " % from_sql
         sql_ntile += self._generate_where()
         sql_ntile += " ORDER BY binstart "
 
@@ -1020,8 +1021,9 @@ class DBSelector:
         # that we get all the time sorted data for each stream_id in turn
         sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
 
+
         # Execute our query!
-        params = tuple(caseparams + [binsize] + [start_time, stop_time] +
+        params = tuple([binsize] + from_params + [start_time, stop_time] +
                 all_streams + [start_time, stop_time])
         self.datacursor.execute(sql, params)
 
