@@ -137,7 +137,7 @@ class NNTSCClient:
             return -1;
 
         try:
-            received = self.sock.recv(4096)
+            received = self.sock.recv(256000)
         except error, msg:
             print >> sys.stderr, "Error receiving data from client: %s" % (msg[1])
             return -1

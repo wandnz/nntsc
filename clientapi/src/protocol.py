@@ -41,5 +41,6 @@ NNTSC_AGGREGATE = 7
 NNTSC_PERCENTILE = 8
 NNTSC_PUSH = 9
 NNTSC_ACTIVE_STREAMS = 10
+NNTSC_REGISTER_COLLECTION = 11
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
