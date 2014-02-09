@@ -116,7 +116,7 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], 0, False, "unused") == -1:
+                if self._enqueue_history(name, lab, [], False, 0) == -1:
                     return -1 
             return 0
 
@@ -169,7 +169,7 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], 0, False, "unused") == -1:
+                if self._enqueue_history(name, lab, [], False, 0) == -1:
                     return -1 
 
             return 0
@@ -222,7 +222,7 @@ class DBWorker(threading.Thread):
         if start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], 0, False, "unused") == -1:
+                if self._enqueue_history(name, lab, [], False, 0) == -1:
                     return -1 
 
                 if self._subscribe_streams(streams, start, end, cols, name) == -1:
@@ -301,7 +301,7 @@ class DBWorker(threading.Thread):
                     freq = self._calc_frequency(freqstats, binsize)
 
                     assert(currlabel in labels)
-                    if self._enqueue_history(name, currlabel, history, thismore, freq, "unused") == -1:
+                    if self._enqueue_history(name, currlabel, history, thismore, freq) == -1:
                         return -1
                     
                 # Reset all our counters etc.
@@ -345,7 +345,7 @@ class DBWorker(threading.Thread):
         if historysize != 0:
             # Make sure we write out the last stream
             freq = self._calc_frequency(freqstats, binsize)
-            if self._enqueue_history(name, currlabel, history, more, freq, "unused") == -1:
+            if self._enqueue_history(name, currlabel, history, more, freq) == -1:
                 return -1
 
         # Also remember to export empty history for any streams that had
@@ -356,7 +356,7 @@ class DBWorker(threading.Thread):
         missing = allstreams - observed
         for m in missing:
             assert (m in labels)
-            if self._enqueue_history(name, m, [], more, 0, "unused") == -1:
+            if self._enqueue_history(name, m, [], more, 0) == -1:
                 return -1
 
         return 0
@@ -371,15 +371,9 @@ class DBWorker(threading.Thread):
         return 0
 
 
-    def _enqueue_history(self, name, label, history, more, freq, aggname):
+    def _enqueue_history(self, name, label, history, more, freq):
 
-        # aggname is not used anymore due to the potential for
-        # multiple aggregation functions to be used in a request. However   
-        # clients are still expecting it so we gotta keep chucking it in the
-        # message. 
-        #
-        # TODO Next time we make changes to the protocol, fix this!
-        contents = pickle.dumps((name, label, history, more, freq, aggname))
+        contents = pickle.dumps((name, label, history, more, freq))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
         try:
