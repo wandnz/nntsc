@@ -764,7 +764,7 @@ class NNTSCClient(threading.Thread):
 
         while running:
             # Process any live data on the queue first
-            if self.receive_live() == -1:
+            if len(self.outstanding) == 0 and self.receive_live() == -1:
                 log("Failed to push live data to client -- dropping")
                 running = 0
                 break
