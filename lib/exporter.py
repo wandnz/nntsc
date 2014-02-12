@@ -1082,7 +1082,7 @@ class NNTSCExporter:
 
         return s
 
-    def configure(self, conf_fname, dbtimeout):
+    def configure(self, conf_fname, dbtimeout, exchangeid):
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:
             sys.exit(0)
@@ -1099,7 +1099,7 @@ class NNTSCExporter:
         if self.listen_sock == -1:
             return -1
 
-        self.livequeue = initExportConsumer(nntsc_conf, 'exporter', 'nntsclive')
+        self.livequeue = initExportConsumer(nntsc_conf, 'exporter', exchangeid)
        
         if self.livequeue == None:
             log("Failed to initialise consumer for exporter")
