@@ -34,7 +34,7 @@ from libnntscclient.protocol import *
 from libnntscclient.logger import *
 from libnntsc.pikaqueue import initExportConsumer
 
-# There are 3 classes defined in this file that form a hierarchy for
+# There are 4 classes defined in this file that form a hierarchy for
 # exporting live and/or historical data to clients.
 #
 # The hierarchy is as follows:
@@ -43,32 +43,41 @@ from libnntsc.pikaqueue import initExportConsumer
 # client connections and ensures that any new live data is passed on
 # to any clients that have subscribed to it. The NNTSC dataparsers
 # register themselves as sources to the NNTSCExporter on start-up and
-# send all new data to the exporter via a pipe. If this pipe fills up,
-# the dataparser can no longer deal with new measurements so it is
-# *vital* that this pipe is not ignored for any length of time.
+# send all new data to the exporter via a rabbit queue. The queue is
+# disk-backed and persistent so there is less urgency than there used to
+# be about reading data from this queue.  
+#
+# When it first starts running, the NNTSCExporter creates a thread for
+# a NNTSCListener to run in. This thread is solely dedicated to listening
+# for client connections. The reason this is a separate thread is to allow
+# us to not have to deal with switching between reading from the queue and
+# accepting connections within the NNTSCExporter, as it wasn't entirely
+# clear how to make asynchronous consumers work together with other
+# asynchronous events (e.g. select).
 #
 # When a new client connects, a new instance of NNTSCClient is created
 # which runs in a separate thread. This thread deals with reading requests
 # for data from the client and sending
 # the responses back to the client. It also handles forwarding any live
 # data that the NNTSCExporter passes on to it -- this particular task
-# has higher priority than the others. The code for packing and unpacking
-# NNTSC protocol messages is all contained within this class.
+# has higher priority than the others. 
 #
 # Whenever a NNTSCClient receives a request for data that requires a
 # database query, e.g. historical data or a list of streams, the job is
 # farmed out to an instance of the DBWorker class. Each NNTSCClient will
 # own a number of DBWorker threads (equal to MAX_WORKERS) which can
 # query the database without affecting processing of live data or new
-# client requests. When the query completes, the results are returned
-# back to the NNTSCClient instance via yet another pipe for subsequent
-# transmission to the client that requested them. Before doing so, the
+# client requests. When the query completes, the results are packed into
+# NNTSC response messages and returned back to the NNTSCClient instance via yet 
+# another queue for subsequent transmission to the client that requested them. 
+# Before doing so, the
 # DBWorker thread will also run over the results, transforming them into
 # a nice dictionary mapping column names to values and estimating the
 # measurement frequency (which is required by most client applications).
 #
 # In summary:
 #   1 NNTSCExporter
+#   1 NNTSCListener
 #   1 NNTSCClient thread per connected client
 #   MAX_WORKERS DBWorker threads per NNTSCClient
 
