@@ -23,7 +23,6 @@
 
 
 import sys, socket, time, struct, getopt, pickle
-from pywandevent.pywandevent import PyWandEvent
 from socket import *
 from multiprocessing import Pipe, Queue
 import Queue as StdQueue
@@ -33,8 +32,9 @@ from libnntsc.dbselect import DBSelector
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
+from libnntsc.pikaqueue import initExportConsumer
 
-# There are 3 classes defined in this file that form a hierarchy for
+# There are 4 classes defined in this file that form a hierarchy for
 # exporting live and/or historical data to clients.
 #
 # The hierarchy is as follows:
@@ -43,32 +43,41 @@ from libnntscclient.logger import *
 # client connections and ensures that any new live data is passed on
 # to any clients that have subscribed to it. The NNTSC dataparsers
 # register themselves as sources to the NNTSCExporter on start-up and
-# send all new data to the exporter via a pipe. If this pipe fills up,
-# the dataparser can no longer deal with new measurements so it is
-# *vital* that this pipe is not ignored for any length of time.
+# send all new data to the exporter via a rabbit queue. The queue is
+# disk-backed and persistent so there is less urgency than there used to
+# be about reading data from this queue.  
+#
+# When it first starts running, the NNTSCExporter creates a thread for
+# a NNTSCListener to run in. This thread is solely dedicated to listening
+# for client connections. The reason this is a separate thread is to allow
+# us to not have to deal with switching between reading from the queue and
+# accepting connections within the NNTSCExporter, as it wasn't entirely
+# clear how to make asynchronous consumers work together with other
+# asynchronous events (e.g. select).
 #
 # When a new client connects, a new instance of NNTSCClient is created
 # which runs in a separate thread. This thread deals with reading requests
 # for data from the client and sending
 # the responses back to the client. It also handles forwarding any live
 # data that the NNTSCExporter passes on to it -- this particular task
-# has higher priority than the others. The code for packing and unpacking
-# NNTSC protocol messages is all contained within this class.
+# has higher priority than the others. 
 #
 # Whenever a NNTSCClient receives a request for data that requires a
 # database query, e.g. historical data or a list of streams, the job is
 # farmed out to an instance of the DBWorker class. Each NNTSCClient will
 # own a number of DBWorker threads (equal to MAX_WORKERS) which can
 # query the database without affecting processing of live data or new
-# client requests. When the query completes, the results are returned
-# back to the NNTSCClient instance via yet another pipe for subsequent
-# transmission to the client that requested them. Before doing so, the
+# client requests. When the query completes, the results are packed into
+# NNTSC response messages and returned back to the NNTSCClient instance via yet 
+# another queue for subsequent transmission to the client that requested them. 
+# Before doing so, the
 # DBWorker thread will also run over the results, transforming them into
 # a nice dictionary mapping column names to values and estimating the
 # measurement frequency (which is required by most client applications).
 #
 # In summary:
 #   1 NNTSCExporter
+#   1 NNTSCListener
 #   1 NNTSCClient thread per connected client
 #   MAX_WORKERS DBWorker threads per NNTSCClient
 
@@ -76,11 +85,11 @@ MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
 MAX_WORKERS = 2
 
 class DBWorker(threading.Thread):
-    def __init__(self, parent, pipeend, dbconf, threadid, timeout):
+    def __init__(self, parent, queue, dbconf, threadid, timeout):
         threading.Thread.__init__(self)
         self.dbconf = dbconf
         self.parent = parent
-        self.pipeend = pipeend
+        self.queue = queue
         self.threadid = threadid
         self.timeout = timeout
 
@@ -90,7 +99,7 @@ class DBWorker(threading.Thread):
 
         if jobtype == -1:
             return -1
-
+    
         if jobtype == NNTSC_REQUEST:
             return self.process_request(jobdata)
 
@@ -105,17 +114,6 @@ class DBWorker(threading.Thread):
 
         return -1
 
-    def subscribe_streams(self, streams, start, end, cols, name):
-        for s in streams:
-            try:
-                self.pipeend.send((NNTSC_SUBSCRIBE, \
-                        (s, start, end, cols, name)))
-            except IOError as e:
-                log("Failed to subscribe to %s: %s" % (s, e))
-                return -1
-
-        return 0
-
     def aggregate(self, aggmsg):
         tup = pickle.loads(aggmsg)
         name, start, end, labels, aggcols, groupcols, binsize, aggfunc = tup
@@ -127,13 +125,8 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                result = ({lab:[]}, {lab:0}, name, [lab], "raw", False)
-                try:
-                    self.pipeend.send((NNTSC_HISTORY, result))
-                except IOError as e:
-                    log("Failed to return empty history: %s\n" % (e))
-                    return -1
-
+                if self._enqueue_history(name, lab, [], False, 0) == -1:
+                    return -1 
             return 0
 
         if end == None:
@@ -160,8 +153,7 @@ class DBWorker(threading.Thread):
             generator = self.db.select_aggregated_data(name, labels, aggcols,
                     start, queryend, groupcols, binsize, aggfunc)
 
-            if self._query_history(generator, name, start, queryend,
-                    labels, [], more, -1) == -1:
+            if self._query_history(generator, name, labels, more) == -1:
                 return -1
             start = queryend + 1
 
@@ -186,12 +178,8 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                result = ({lab:[]}, {lab:0}, name, [lab], "raw", False)
-                try:
-                    self.pipeend.send((NNTSC_HISTORY, result))
-                except IOError as e:
-                    log("Failed to return empty history: %s\n" % (e))
-                    return -1
+                if self._enqueue_history(name, lab, [], False, 0) == -1:
+                    return -1 
 
             return 0
 
@@ -217,8 +205,7 @@ class DBWorker(threading.Thread):
             generator = self.db.select_percentile_data(name, labels, ntilecols,
                     othercols, start, queryend, binsize, ntileagg, otheragg)
 
-            if self._query_history(generator, name, start, queryend,
-                    labels, [], more, -1) == -1:
+            if self._query_history(generator, name, labels, more) == -1:
                 return -1
             start = queryend + 1
 
@@ -231,6 +218,7 @@ class DBWorker(threading.Thread):
 
         return 0
 
+
     def subscribe(self, submsg):
         name, start, end, cols, labels, aggs = pickle.loads(submsg)
         now = int(time.time())
@@ -240,22 +228,13 @@ class DBWorker(threading.Thread):
         if end == 0:
             end = None
 
-        if (end == None or end > now):
-            subend = end
-        else:
-            subend = -1
-
         if start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                result = ({lab:[]}, {lab:0}, name, [lab], "raw", False)
-                try:
-                    self.pipeend.send((NNTSC_HISTORY, result))
-                except IOError as e:
-                    log("Failed to return empty history: %s\n" % (e))
-                    return -1
+                if self._enqueue_history(name, lab, [], False, 0) == -1:
+                    return -1 
 
-                if self.subscribe_streams(streams, start, end, cols, name) == -1:
+                if self._subscribe_streams(streams, start, end, cols, name) == -1:
                     return -1
 
             return 0
@@ -290,21 +269,21 @@ class DBWorker(threading.Thread):
                 generator = self.db.select_data(name, labels, cols, start,
                         queryend)
 
-            if (self._query_history(generator, name, start, queryend,
-                    labels, cols, more, subend)) == -1:
+            if (self._query_history(generator, name, labels, more)) == -1:
                 return -1
 
-            # Don't subscribe more than once
-            if more == False:
-                subend = -1
-
             start = queryend + 1
+
+        # Once we've finished fetching and sending history, subscribe to the
+        # streams that belonged to our labels
+        for lab, streams in labels.items():
+            if self._subscribe_streams(streams, start, end, cols, name) == -1:
+                return -1
 
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
 
-    def _query_history(self, rowgen, name, start, end, labels, cols,
-            more, subend):
+    def _query_history(self, rowgen, name, labels, more):
 
         currlabel = -1
         historysize = 0
@@ -329,16 +308,11 @@ class DBWorker(threading.Thread):
                            
                     # Export the history to the pipe
                     freq = self._calc_frequency(freqstats, binsize)
-                    result = ({ currlabel : history },
-                            { currlabel : freq },
-                            name, [currlabel], "raw", thismore)
 
                     assert(currlabel in labels)
-                    if self._write_history(labels[currlabel], result, name,
-                                cols,
-                            start, subend, thismore) == -1:
+                    if self._enqueue_history(name, currlabel, history, thismore, freq) == -1:
                         return -1
-
+                    
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
                             'totaldiffs':0, 'tsdiffs':{} }
@@ -380,11 +354,7 @@ class DBWorker(threading.Thread):
         if historysize != 0:
             # Make sure we write out the last stream
             freq = self._calc_frequency(freqstats, binsize)
-            result = ({ currlabel : history },
-                    { currlabel : freq },
-                    name, [currlabel], "raw", more)
-            if self._write_history(labels[currlabel], result, name, cols,
-                    start, subend, more) == -1:
+            if self._enqueue_history(name, currlabel, history, more, freq) == -1:
                 return -1
 
         # Also remember to export empty history for any streams that had
@@ -394,28 +364,113 @@ class DBWorker(threading.Thread):
 
         missing = allstreams - observed
         for m in missing:
-            result = ({m : []}, {m : 0}, name, [m], "raw", more)
             assert (m in labels)
-            if self._write_history(labels[m], result, name, cols,
-                    start, subend, more) == -1:
+            if self._enqueue_history(name, m, [], more, 0) == -1:
                 return -1
 
         return 0
 
-    # Nice little helper function that pushes history data onto the pipe
-    # back to our NNTSCClient
-    def _write_history(self, streams, result, name, cols, start, subend, more):
+
+    def _subscribe_streams(self, streams, start, subend, cols, name):
         try:
-            self.pipeend.send((NNTSC_HISTORY, result))
-        except IOError as e:
-            log("Failed to return history to client: %s" % (e))
+            self.queue.put((NNTSC_SUBSCRIBE, (streams, start, subend, cols, name)), False)
+        except StdQueue.Full:
+            log("DBWorker tried to push subscribe but result queue was full!")
+            return -1
+        return 0
+
+
+    def _enqueue_history(self, name, label, history, more, freq):
+
+        contents = pickle.dumps((name, label, history, more, freq))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
+
+        try:
+            self.queue.put((NNTSC_HISTORY, header + contents), False)
+        except error, msg:
+            log("Unable to push history onto full worker queue")
             return -1
 
-        if subend != -1 and not more:
-            if self.subscribe_streams(streams, start, subend, cols, name) == -1:
-                return -1
+        return 0
+
+    def _request_collections(self):
+        # Requesting the collection list
+        cols = self.db.list_collections()
+
+        shrink = []
+        for c in cols:
+            shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
+
+        col_pickle = pickle.dumps(shrink)
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_COLLECTIONS, len(col_pickle))
+
+        try:
+            self.queue.put((NNTSC_COLLECTIONS, header + col_pickle), False)
+        except StdQueue.Full:
+            log("Failed to write collections to full DBWorker result queue");
+            return -1
 
         return 0
+
+    def _request_schemas(self, col_id):
+        stream_schema, data_schema = self.db.get_collection_schema(col_id)
+
+        result = pickle.dumps((col_id, stream_schema, data_schema))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(result))
+
+        try:
+            self.queue.put((NNTSC_SCHEMAS, header + result), False)
+        except StdQueue.Full:
+            log("Failed to write schemas to full DBWorker result queue");
+            return -1
+        return 0
+
+    def _request_streams(self, col, bound, request):
+        if request == NNTSC_STREAMS:
+            streams = self.db.select_streams_by_collection(col, bound)
+        elif request == NNTSC_ACTIVE_STREAMS:
+            streams = self.db.select_active_streams_by_collection(col, bound)
+        else:
+            log("Got into request streams with bad request: %d" % request)
+            return -1
+       
+        try:
+            self.queue.put((NNTSC_REGISTER_COLLECTION, col), False)
+        except StdQueue.Full:
+            log("Failed to register collection %d due to full DBWorker result queue" % (col));
+            return -1
+        
+        if len(streams) == 0:
+            return self._enqueue_streams(request, col, False, [])
+
+        i = 0
+        while (i < len(streams)):
+            start = i
+            if len(streams) <= i + 1000:
+                end = len(streams)
+                more = False
+            else:
+                end = i + 1000
+                more = True
+
+            if self._enqueue_streams(request, col, more, streams[start:end]) == -1:
+                log("Failed on streams %d:%d (out of %d))" % (start, end, len(streams)))
+                return -1
+
+            i = end
+        return 0
+
+    def _enqueue_streams(self, req, col, more, streams):
+        stream_data = pickle.dumps((col, more, streams))
+        header = struct.pack(nntsc_hdr_fmt, 1, req, len(stream_data))
+
+        try:
+            self.queue.put((req, header + stream_data), False)
+        except StdQueue.Full:
+            log("Failed to write streams to full DBWorker result queue");
+            return -1
+        return 0
+       
 
     # Processes the job for a basic NNTSC request, i.e. asking for the
     # collections, schemas or streams rather than querying for time
@@ -424,50 +479,18 @@ class DBWorker(threading.Thread):
         req_hdr = struct.unpack(nntsc_req_fmt,
                 reqmsg[0:struct.calcsize(nntsc_req_fmt)])
 
+
         if req_hdr[0] == NNTSC_REQ_COLLECTION:
-            # Requesting the collection list
-            cols = self.db.list_collections()
-
-            shrink = []
-            for c in cols:
-                shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
-
-            try:
-                self.pipeend.send((NNTSC_COLLECTIONS, shrink))
-            except IOError as e:
-                log("Sending collections failed: %s" % (e))
-                return -1
+            return self._request_collections()
 
         if req_hdr[0] == NNTSC_REQ_SCHEMA:
-            col_id = req_hdr[1]
-            stream_schema, data_schema = self.db.get_collection_schema(col_id)
-
-            result = (col_id, stream_schema, data_schema)
-            try:
-                self.pipeend.send((NNTSC_SCHEMAS, result ))
-            except IOError as e:
-                log("Sending schemas failed: %s" % (e))
-                return -1
-
+            return self._request_schemas(req_hdr[1])
+        
         if req_hdr[0] == NNTSC_REQ_STREAMS:
-            col = req_hdr[1]
-            startstream = req_hdr[2]
-            streams = self.db.select_streams_by_collection(col, startstream)
-            try:
-                self.pipeend.send((NNTSC_STREAMS, (col, streams)))
-            except IOError as e:
-                log("Sending streams failed: %s" % (e))
-                return -1
+            return self._request_streams(req_hdr[1], req_hdr[2], NNTSC_STREAMS)
 
         if req_hdr[0] == NNTSC_REQ_ACTIVE_STREAMS:
-            col = req_hdr[1]
-            lastts = req_hdr[2]
-            streams = self.db.select_active_streams_by_collection(col, lastts)
-            try:
-                self.pipeend.send((NNTSC_ACTIVE_STREAMS, (col, streams)))
-            except IOError as e:
-                log("Sending streams failed: %s" % (e))
-                return -1
+            return self._request_streams(req_hdr[1], req_hdr[2], NNTSC_ACTIVE_STREAMS)
 
         return 0
 
@@ -494,7 +517,6 @@ class DBWorker(threading.Thread):
 
         # Thread is over, tidy up
         self.db.close()
-        self.pipeend.close()
 
     def _calc_frequency(self, freqdata, binsize):
 
@@ -592,165 +614,25 @@ class NNTSCClient(threading.Thread):
         self.sock = sock
         self.parent = parent
         self.livequeue = queue
+        self.workdone = Queue(20000)
         self.recvbuf = ""
         self.jobs = Queue(100000)
+        self.outstanding = ""
         
         self.workers = []
         # Create some worker threads for handling the database queries
         for i in range(0, MAX_WORKERS):
-            pipe_recv, pipe_send = Pipe(False)
             threadid = "client%d_thread%d" % (self.sock.fileno(), i)
 
-            worker = DBWorker(self, pipe_send, dbconf, threadid, dbtimeout)
+            worker = DBWorker(self, self.workdone, dbconf, threadid, dbtimeout)
             worker.daemon = True
             worker.start()
 
-            self.workers.append((pipe_recv, worker, pipe_send))
-
-
-    def export_hist_block(self, name, streamid, block, more, freq,
-            aggname):
-
-        contents = pickle.dumps((name, streamid, block, more, freq, aggname))
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
-
-        try:
-            self.sock.send(header + contents)
-        except error, msg:
-            log("Error sending data to client fd %d: %s" % (self.sock.fileno(), msg[1]))
-            return -1
-
-        return 0
-
-    def send_collections(self, cols):
-
-        col_pickle = pickle.dumps(cols)
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_COLLECTIONS, len(col_pickle))
-        try:
-            self.sock.send(header + col_pickle)
-        except error, msg:
-            log("Error sending collections to client fd %d" % (self.sock.fileno(), msg[1]))
-            return -1
-        return 0
-
-    def send_schema(self, schema):
-
-        schema_pick = pickle.dumps(schema)
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(schema_pick))
-
-        try:
-            self.sock.send(header + schema_pick)
-        except error, msg:
-            log("Error sending schemas to client fd %d: %s" % (self.sock.fileno(), msg[1]))
-            return -1
-        return 0
-
-    def export_streams_msg(self, col, more, streams):
-        stream_data = pickle.dumps((col, more, streams))
-
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS,
-                len(stream_data))
-        try:
-            self.sock.send(header + stream_data)
-        except error, msg:
-            log("Error sending streams to client fd %d: %s" % (self.sock.fileno(), msg[1]))
-            return -1
-
-        return 0
-
-    def send_streams(self, streamresult):
-
-        col = streamresult[0]
-        streams = streamresult[1]
-        self.parent.register_collection(self.sock, col)
-
-        if len(streams) == 0:
-            return self.export_streams_msg(col, False, [])
-
-        i = 0
-        while (i < len(streams)):
-
-            start = i
-            if len(streams) <= i + 1000:
-                end = len(streams)
-                more = False
-            else:
-                end = i + 1000
-                more = True
-
-            if self.export_streams_msg(col, more, streams[start:end]) == -1:
-                return -1
-
-            i = end
-        return 0
-
-    # TODO this is terrible, it's all copy and pasted from the regular streams
-    # list, but uses a different identifier. Ideally all this could be merged
-    # into a single function
-    def export_active_streams_msg(self, col, more, streams):
-        stream_data = pickle.dumps((col, more, streams))
-
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_ACTIVE_STREAMS,
-                len(stream_data))
-        try:
-            self.sock.send(header + stream_data)
-        except error, msg:
-            log("Error sending active streams to client fd %d: %s" % (self.sock.fileno(), msg[1]))
-            return -1
-
-        return 0
-
-    # TODO this is terrible, it's all copy and pasted from the regular streams
-    # list, but uses a different identifier. Ideally all this could be merged
-    # into a single function
-    def send_active_streams(self, streamresult):
-
-        col = streamresult[0]
-        streams = streamresult[1]
-        self.parent.register_collection(self.sock, col)
-
-        if len(streams) == 0:
-            return self.export_streams_msg(col, False, [])
-
-        i = 0
-        while (i < len(streams)):
-
-            start = i
-            if len(streams) <= i + 1000:
-                end = len(streams)
-                more = False
-            else:
-                end = i + 1000
-                more = True
-
-            if self.export_active_streams_msg(col, more, streams[start:end]) == -1:
-                return -1
-
-            i = end
-        return 0
-
-    def send_history(self, subresult):
-        history, freq, name, streams, aggfunc, more = subresult
-        now = int(time.time())
-
-        for s in streams:
-
-            # Send the history for this stream
-            if s in history:
-                assert(s in freq)
-                if self.export_hist_block(name, s, history[s], more, freq[s],
-                            aggfunc) == -1:
-                    return -1
-            else:
-                # No history, send an empty list so our client doesn't get
-                # stuck waiting for the data
-                if self.export_hist_block(name, s, [], False, 0, aggfunc) == -1:
-                    return -1
-        return 0
+            self.workers.append(worker)
 
     def subscribe_stream(self, submsg):
-        stream, start, end, cols, name = submsg
-        self.parent.register_stream(stream, self.sock, cols, start, end, name)
+        streams, start, end, cols, name = submsg
+        self.parent.register_stream(streams, self.sock, cols, start, end, name)
 
     def client_message(self, msg):
         error = 0
@@ -822,66 +704,92 @@ class NNTSCClient(threading.Thread):
 
         return totalsent
         
-
-    def receive_worker(self, socket):
-        fd = socket.fileno()
-
+    def transmit_client(self, result):
         try:
-            response, result = socket.recv()
-        except EOFError as msg:
-            log("Error receiving query result from DBWorker %d: %s" % (fd, msg))
-            return 0
+            sent = self.sock.send(result)
+        except error, msg:
+            log("Error sending message to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+            return -1
 
-        # A worker has completed a job, let's form up a response to
-        # send to our client
-        if response == NNTSC_COLLECTIONS:
-            return self.send_collections(result)
+        if sent == 0:
+            return -1
 
-        if response == NNTSC_SCHEMAS:
-            return self.send_schema(result)
+        if (sent < len(result)):
+            self.outstanding = result[sent:]
+        else:
+            self.outstanding = ""
+        return 0
+        
 
-        if response == NNTSC_STREAMS:
-            return self.send_streams(result)
+    def receive_worker(self):
 
-        if response == NNTSC_HISTORY:
-            return self.send_history(result)
+        # Only deal with one worker result at a time - we want to
+        # prioritise live data over processing history
+        while 1:
 
-        if response == NNTSC_SUBSCRIBE:
-            return self.subscribe_stream(result)
+            # If we haven't finished a previous transmit, finish that off
+            # first before fetching new results
+            if len(self.outstanding) > 0:
+                return self.transmit_client(self.outstanding)
 
-        if response == NNTSC_ACTIVE_STREAMS:
-            return self.send_active_streams(result)
+            try:
+                obj = self.workdone.get(False)
+            except StdQueue.Empty:
+                return 0
 
-        # Response type was invalid
-        return -1
+            response = obj[0]
+            result = obj[1]
+
+            # A worker has completed a job, let's form up a response to
+            # send to our client
+            if response in [NNTSC_COLLECTIONS, NNTSC_SCHEMAS, NNTSC_STREAMS, \
+                        NNTSC_HISTORY, NNTSC_ACTIVE_STREAMS]:
+                return self.transmit_client(result)
+
+            elif response == NNTSC_REGISTER_COLLECTION:
+                self.parent.register_collection(self.sock, result)
+                    
+            elif response == NNTSC_SUBSCRIBE:
+                self.subscribe_stream(result)
+
+            else:
+                # Response type was invalid
+                log("Received invalid response from worker thread: %d" % (response))
+                return -1
+
+        return 0
 
     def run(self):
         running = 1
 
         while running:
             # Process any live data on the queue first
-            if self.receive_live() == -1:
+            if len(self.outstanding) == 0 and self.receive_live() == -1:
+                log("Failed to push live data to client -- dropping")
                 running = 0
                 break
 
             input = [self.sock]
-
-            for w in self.workers:
-                input.append(w[0])
+            if len(self.outstanding) > 0 or self.workdone.qsize() > 0:
+                writer = [self.sock]
+            else:
+                writer = []
 
             # Timeout of zero is bad, will use lots of CPU. Hopefully, 0.01
             # won't keep us from serving the live queue for too long.
-            inpready, outready, exready = select.select(input, [], [], 0.01)
+            inpready, outready, exready = select.select(input, writer, [], 0.01)
             for s in inpready:
                 if s == self.sock:
                     if self.receive_client() == 0:
                         running = 0
                         break
-                else:
-                    # Must be a query result from a DBWorker
-                    if self.receive_worker(s) == -1:
+
+            for s in outready:
+                if s == self.sock:
+                    if self.receive_worker() == -1:
                         running = 0
                         break
+
         #log("Closing client thread on fd %d" % self.sock.fileno())
         self.parent.deregister_client(self.sock)
         self.livequeue.close()
@@ -891,42 +799,32 @@ class NNTSCClient(threading.Thread):
         for w in self.workers:
             self.jobs.put((-1, None), True)
 
-        # Make sure we close our end of the pipe to each thread
-        for w in self.workers:
-            w[0].close()
-
 class NNTSCExporter:
     def __init__(self, port):
-        self.pwe = PyWandEvent()
-
         self.listen_port = port
+        self.listen_sock = None
         self.dbconf = None
         self.collections = {}
         self.subscribers = {}
+        self.sources = []
+        self.livequeue = None
 
-        # TODO Combine into a single dict
-        self.client_sockets = {}
-        self.client_threads = {}
-        self.client_store = {}
-        self.client_timers = {}
+        self.clients = {}
+        self.clientlock = threading.Lock()
+        self.sublock = threading.Lock()
+
 
     def deregister_client(self, sock):
 
-        #log("Dropping client on fd %d" % (sock.fileno()))
-        if sock in self.client_sockets:
-            del self.client_sockets[sock]
-        if sock in self.client_threads:
-            del self.client_threads[sock]
-        if sock in self.client_timers:
-            del self.client_timers[sock]
-        if sock in self.client_store:
-            del self.client_store[sock]
+        self.clientlock.acquire()
+        if sock in self.clients:
+            del self.clients[sock]
+        self.clientlock.release()
 
-    def drop_source(self, sock):
-        log("Dropping source on fd %d" % (sock.fileno()))
-
-        self.pwe.del_fd_event(sock)
-        sock.close()
+    def drop_source(self, key):
+        log("Dropping source on queue %s" % (key))
+        if self.livequeue:
+            self.livequeue.unbind_queue(key)
 
     def filter_columns(self, cols, data, stream_id, timestamp):
 
@@ -942,117 +840,142 @@ class NNTSCExporter:
 
         return results
 
-    def register_stream(self, s, sock, cols, start, end, name):
-        if self.subscribers.has_key(s):
-            self.subscribers[s].append((sock, cols, start, end, name))
-        else:
-            self.subscribers[s] = [(sock, cols, start, end, name)]
+    def register_stream(self, streams, sock, cols, start, end, name):
 
-        if name in self.collections and sock in self.collections[name]:
-            self.collections[name][sock] += 1
-             
+        self.sublock.acquire()
+        for s in streams:
+            if self.subscribers.has_key(s):
+                self.subscribers[s].append((sock, cols, start, end, name))
+            else:
+                self.subscribers[s] = [(sock, cols, start, end, name)]
+
+            if name in self.collections and sock in self.collections[name]:
+                self.collections[name][sock] += 1
+            #log("Registered stream %d for socket %d" % (s, sock.fileno()))
+        self.sublock.release()     
 
 
     def register_collection(self, sock, col):
+        self.sublock.acquire()
         if self.collections.has_key(col):
             if sock not in self.collections[col]:
                 self.collections[col][sock] = 0
         else:
             self.collections[col] = {sock: 0}
+        #log("Registered collection %s for socket %d" % (col, sock.fileno()))
+        self.sublock.release()
 
-    def export_push(self, received, fd):
+    def export_push(self, received, key):
         try:
             collid, timestamp = received
         except ValueError:
-            log("Incorrect data format from source %d" % (fd))
+            log("Incorrect data format from source %s" % (key))
             log("Format should be (colid, timestamp)")
-            self.drop_source(sock)
-            return
-
-        # Only export PUSH if someone is subscribed to a stream from the
-        # collection in question
-        if collid not in self.collections:
-            return 0
-
+            self.drop_source(key)
+            return -1
+        
         pushdata = pickle.dumps((collid, timestamp))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, len(pushdata))
 
+        self.sublock.acquire()
+        # Only export PUSH if someone is subscribed to a stream from the
+        # collection in question
+        if collid not in self.collections:
+            self.sublock.release()
+            return 0
+
         active = {}
+        self.clientlock.acquire()
         for sock, subbed in self.collections[collid].items():
-            if sock not in self.client_sockets:
+            if sock not in self.clients.keys():
                 continue
             if subbed == 0:
                 active[sock] = subbed
                 continue
             
-            store = self.client_store[sock]
-            store.append((header, pushdata))
+            try:
+                self.clients[sock]['queue'].put((header, pushdata))
+            except StdQueue.Full:
+                # This may not actually stop the client thread,
+                # but apparently killing threads is bad so let's
+                # hope the thread picks up that we closed its
+                # socket and can exit itself nicely
+                sock.close()
+                #self.deregister_client(sock)
+                continue
 
-            if self.client_timers[sock] == -1:
-                self.client_timers[sock] = self.pwe.add_timer_event(
-                        0, 100, sock, self.queue_callback)
 
             active[sock] = subbed
-            pipesend = self.client_sockets[sock]
+        self.clientlock.release()
         self.collections[collid] = active
+        self.sublock.release()
 
         return 0
 
-    def export_new_stream(self, received, fd):
+    def export_new_stream(self, received, key):
 
         try:
             coll_id, coll_name, stream_id, properties = received
         except ValueError:
-            log("Incorrect data format from source %d" % (fd))
+            log("Incorrect data format from source %s" % (key))
             log("Format should be (collection id, collection name, streamid, values dict)")
             return -1
 
         if not isinstance(properties, dict):
             log("Values should expressed as a dictionary")
             return -1
-
-        if coll_id not in self.collections.keys():
-            return 0
-
-        #log("Exporting new stream %d to interested clients" % (stream_id))
+        
         properties['stream_id'] = stream_id
 
         ns_data = pickle.dumps((coll_id, False, [properties]))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS,
                 len(ns_data))
 
+        self.sublock.acquire()
+        if coll_id not in self.collections.keys():
+            self.sublock.release()
+            return 0
+
+        #log("Exporting new stream %d to interested clients" % (stream_id))
+
         active = {}
+        
+        self.clientlock.acquire()
         for sock, subbed in self.collections[coll_id].items():
-            if sock not in self.client_sockets:
+            if sock not in self.clients.keys():
+                continue
+            try:
+                self.clients[sock]['queue'].put((header, ns_data))
+            except StdQueue.Full:
+                # This may not actually stop the client thread,
+                # but apparently killing threads is bad so let's
+                # hope the thread picks up that we closed its
+                # socket and can exit itself nicely
+                sock.close()
+                #self.deregister_client(sock)
                 continue
             
-            store = self.client_store[sock]
-            store.append((header, ns_data))
-
-            if self.client_timers[sock] == -1:
-                self.client_timers[sock] = self.pwe.add_timer_event(
-                        0, 100, sock, self.queue_callback)
-
             active[sock] = subbed
+        self.clientlock.release()
         self.collections[coll_id] = active
-
+        self.sublock.release()
         return 0
 
-    def export_live_data(self, received, fd):
+    def export_live_data(self, received, key):
 
         try:
             name, stream_id, timestamp, values = received
         except ValueError:
-            log("Incorrect data format from source %d" % (fd))
+            log("Incorrect data format from source %s" % (key))
             log("Format should be (name, streamid, timestamp, values dict)")
-            self.drop_source(sock)
-            return
+            return -1
 
         if not isinstance(values, dict):
             log("Values should expressed as a dictionary")
-            self.drop_source(sock)
-            return
+            return -1
 
+        self.sublock.acquire()
+        self.clientlock.acquire()
         if stream_id in self.subscribers.keys():
             active = []
 
@@ -1071,93 +994,65 @@ class NNTSCExporter:
                 header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE,
                         len(contents))
 
-                if sock in self.client_sockets:
-                    store = self.client_store[sock]
-                    store.append((header, contents))
-
-                    if self.client_timers[sock] == -1:
-                        self.client_timers[sock] = self.pwe.add_timer_event(
-                                0, 100, sock, self.queue_callback)
-
+                if sock in self.clients.keys():
+                    try:
+                        self.clients[sock]['queue'].put((header, contents))
+                    except StdQueue.Full:
+                        # This may not actually stop the client thread,
+                        # but apparently killing threads is bad so let's
+                        # hope the thread picks up that we closed its
+                        # socket and can exit itself nicely
+                        sock.close()
+                        #self.deregister_client(sock)
+                        continue
+                    #log("Pushed live data onto queue for stream %d" % (stream_id))
                     if results != {}:
                         active.append((sock, columns, start, end, col))
             self.subscribers[stream_id] = active
+        self.clientlock.release()
+        self.sublock.release()
 
         return 0
 
-    def receive_source(self, fd, evtype, sock, data):
+    def receive_source(self, channel, method, properties, body):
 
-        try:
-            obj = sock.recv()
-        except EOFError, msg:
-            log("Error receiving data from source %d: %s" % (fd, msg))
-            self.drop_source(sock)
-            return
+        key = method.routing_key
 
-        msgtype, contents = obj
+        msgtype, contents = pickle.loads(body)
 
         if msgtype == 0:
-            ret = self.export_live_data(contents, sock.fileno())
+            ret = self.export_live_data(contents, key)
         if msgtype == 1:
-            ret = self.export_new_stream(contents, sock.fileno())
+            ret = self.export_new_stream(contents, key)
         if msgtype == 2:
-            ret = self.export_push(contents, sock.fileno())
+            ret = self.export_push(contents, key)
 
+        channel.basic_ack(delivery_tag = method.delivery_tag)
+        if ret == -1:
+            self.drop_source(key)
+    
         return ret
 
-    def queue_callback(self, pwe, client):
-        sock = client
-        queue = self.client_sockets[sock]
-        store = self.client_store[sock]
+    def createClient(self, clientfd): 
+        log("Creating client on fd %d" % (clientfd.fileno()))
+        queue = Queue(1000000)
+        clientfd.setblocking(0)
 
-        #log("Prepush: Queue size is currently %u" % queue.qsize())
-        while len(store) > 0:
-            try:
-                queue.put(store[0], False)
-            except StdQueue.Full:
-                break
-
-            store = store[1:]
-        #log("Postpush: Queue size is currently %u" % queue.qsize())
-
-        if len(store) > 0:
-            self.client_timers[sock] = self.pwe.add_timer_event(0, 100, \
-                    sock, self.queue_callback)
-        else:
-            self.client_timers[sock] = -1
-
-        # Probably unnecessary?
-        self.client_store[sock] = store
-
-    def accept_connection(self, fd, evtype, sock, data):
-
-        try:
-            client, addr = sock.accept()
-        except error, msg:
-            log("Error accepting connection: %s" % (msg[1]))
-            return
-
-        #log("Accepted connection on fd %d" % (client.fileno()))
-
-        
-        queue = Queue(10000000)
-
-        cthread = NNTSCClient(client, self, queue, self.dbconf, \
+        cthread = NNTSCClient(clientfd, self, queue, self.dbconf, \
                 self.dbtimeout)
         cthread.daemon = True
         cthread.start()
-        self.client_sockets[client] = queue
-        self.client_threads[client] = cthread
-        self.client_store[client] = []
-        self.client_timers[client] = -1
 
-        #self.pwe.add_fd_event(client, 1, "", self.receive_client)
+        self.clientlock.acquire()
+        self.clients[clientfd] = {'queue':queue, 'thread':cthread}
+        self.clientlock.release()
 
 
-    def register_source(self, pipe):
-        log("Registering source on fd %d" % (pipe.fileno()))
+    def register_source(self, queue, exchange):
+        log("Registering source on queue %s" % (queue))
 
-        self.pwe.add_fd_event(pipe, 1, "", self.receive_source)
+        if queue not in self.sources:
+            self.sources.append(queue)
 
     def create_listener(self, port):
 
@@ -1173,7 +1068,6 @@ class NNTSCExporter:
             log("Failed to set SO_REUSEADDR: %s" % (msg[1]))
             return -1
 
-
         try:
             s.bind(('', port))
         except error, msg:
@@ -1188,7 +1082,7 @@ class NNTSCExporter:
 
         return s
 
-    def configure(self, conf_fname, dbtimeout):
+    def configure(self, conf_fname, dbtimeout, exchangeid):
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:
             sys.exit(0)
@@ -1200,15 +1094,64 @@ class NNTSCExporter:
         self.dbconf = dbconf
         self.dbtimeout = dbtimeout
 
-        listen_sock = self.create_listener(self.listen_port)
+        self.listen_sock = self.create_listener(self.listen_port)
 
-        if listen_sock == -1:
+        if self.listen_sock == -1:
             return -1
 
-        self.pwe.add_fd_event(listen_sock, 1, None, self.accept_connection)
+        self.livequeue = initExportConsumer(nntsc_conf, 'exporter', exchangeid)
+       
+        if self.livequeue == None:
+            log("Failed to initialise consumer for exporter")
+            return -1
+        return 0 
 
     def run(self):
-        self.pwe.run()
+        # Start up our listener thread
+        if self.listen_sock == None:
+            log("Must successfully call configure before calling run on the exporter!")
+            return
+        
+        listenthread = NNTSCListener(self.listen_sock, self)
+        listenthread.daemon = True
+        listenthread.start()
+        
+        # Prepare our export queue consumer
+        for s in self.sources:
+            self.livequeue.bind_queue(s)
+        self.livequeue.configure_consumer(self.receive_source)
+
+        # Start reading from the queue
+        self.livequeue.run_consumer()
+        
+
+
+class NNTSCListener(threading.Thread):
+    def __init__(self, sock, parent):
+        threading.Thread.__init__(self)
+        self.parent = parent
+        self.sock = sock
+
+    def run(self):
+        while 1:
+            # Wait for any sign of an incoming connection
+            listener = [self.sock]
+
+            inpready, outready, exready = select.select(listener, [], [])
+            
+            if self.sock not in inpready:
+                continue
+            
+            # Accept the connection
+            try:
+                client, addr = self.sock.accept()
+            except error, msg:
+                log("Error accepting connection: %s" % (msg[1]))
+                break
+
+            # Create a new client entry
+            self.parent.createClient(client)
+
 
 if __name__ == '__main__':
 

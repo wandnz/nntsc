@@ -137,7 +137,7 @@ class NNTSCClient:
             return -1;
 
         try:
-            received = self.sock.recv(4096)
+            received = self.sock.recv(256000)
         except error, msg:
             print >> sys.stderr, "Error receiving data from client: %s" % (msg[1])
             return -1
@@ -185,13 +185,12 @@ class NNTSCClient:
             msgdict['streams'] = arrived
 
         if header[1] == NNTSC_HISTORY:
-            name, stream_id, data, more, binsize, agg = pickle.loads(self.buf[header_end:total_len])
+            name, stream_id, data, more, binsize = pickle.loads(self.buf[header_end:total_len])
             msgdict['collection'] = name
             msgdict['streamid'] = stream_id
             msgdict['data'] = data
             msgdict['more'] = more
             msgdict['binsize'] = binsize
-            msgdict['aggregator'] = agg
 
         if header[1] == NNTSC_LIVE:
             name, stream_id, data = pickle.loads(self.buf[header_end:total_len])

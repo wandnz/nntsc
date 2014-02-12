@@ -112,7 +112,7 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
 
 
     if streamid >= 0 and exp != None:
-        exp.send((1, (colid, "rrd_muninbytes", streamid, props)))
+        exp.publishStream(colid, "rrd_muninbytes", streamid, props)
 
     return streamid
 
@@ -158,7 +158,8 @@ def insert_data(db, exp, stream, ts, line):
         logger.log(e)
         return DB_GENERIC_ERROR
 
-    exp.send((0, ("rrd_muninbytes", stream, ts, exportdict)))
+    if exp is not None:
+        exp.publishLiveData("rrd_muninbytes", stream, ts, exportdict)
 
     return DB_NO_ERROR
 

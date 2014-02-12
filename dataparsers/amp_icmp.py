@@ -19,7 +19,6 @@
 #
 # $Id$
 
-
 from sqlalchemy import Table, Column, Integer, \
         String, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.types import Integer, String
@@ -125,7 +124,7 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
         
 
     if streamid >= 0 and exp != None:
-        exp.send((1, (colid, "amp_icmp", streamid, props)))
+        exp.publishStream(colid, "amp_icmp", streamid, props)
 
     return streamid
 
@@ -150,8 +149,8 @@ def insert_data(db, exp, stream, ts, result):
         logger.log(e)
         return DB_GENERIC_ERROR
 
-
-    exp.send((0, ("amp_icmp", stream, ts, result)))
+    if exp != None:
+        exp.publishLiveData("amp_icmp", stream, ts, result)
 
     return DB_NO_ERROR
 

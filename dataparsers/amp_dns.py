@@ -82,7 +82,7 @@ def insert_stream(db, exp, data, timestamp):
         
 
     if streamid >= 0 and exp != None:
-        exp.send((1, (colid, "amp_dns", streamid, props)))
+        exp.publishStream(colid, "amp_dns", streamid, props)
 
     return streamid
 
@@ -172,7 +172,9 @@ def insert_data(db, exp, stream, ts, result):
         logger.log(e)
         return DB_GENERIC_ERROR
 
-    exp.send((0, ("amp_dns", stream, ts, result)))
+    if exp != None:
+        exp.publishLiveData("amp_dns", stream, ts, result)
+
     return DB_NO_ERROR
 
 def split_result(alldata, result):

@@ -38,14 +38,12 @@ class DataCollector():
     def start_module(self, name, mod, conf):
         try:
             streams = self.db.select_streams_by_module(name)
-
-            pipe_recv, pipe_send = Pipe(False)
-
+            queue = name
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
-                    pipe_send))
+                    queue, self.exchangeid))
             p.daemon = True
 
-            self.exporter.register_source(pipe_recv)
+            self.exporter.register_source(queue, self.exchangeid)
             self.processes.append(p)
         except Exception, e:
             raise
@@ -86,7 +84,15 @@ class DataCollector():
                 dbconf["host"])
 
         self.db.connect_db();
-        self.exporter.configure(self.config, self.querytimeout)
+        exchangeid = get_nntsc_config(nntsc_conf, "liveexport", "exchangeid")
+        if exchangeid == "NNTSCConfigError":
+            logger.log("Invalid exchange identifier for NNTSC exporter")
+            sys.exit(1)
+        
+        self.exchangeid = "nntsclive-" + exchangeid
+
+        if self.exporter.configure(self.config, self.querytimeout, self.exchangeid) == -1:
+            sys.exit(1)
 
         self.processes = []
         self.config = nntsc_conf

@@ -25,6 +25,7 @@ import sys
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
         DB_GENERIC_ERROR
 from libnntsc.configurator import *
+from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 import pika
 from ampsave.importer import import_data_functions
 from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns, amp_http
@@ -34,7 +35,7 @@ import logging
 import libnntscclient.logger as logger
 
 class AmpModule:
-    def __init__(self, tests, nntsc_config, exp):
+    def __init__(self, tests, nntsc_config, expqueue, exchange):
 
         logging.basicConfig()
         dbconf = get_nntsc_db_config(nntsc_config)
@@ -45,7 +46,6 @@ class AmpModule:
                 dbconf["host"])
 
         self.db.connect_db()
-        self.exporter = exp
 
         # the amp modules understand how to extract the test data from the blob
         self.amp_modules = import_data_functions()
@@ -71,6 +71,11 @@ class AmpModule:
             elif testtype == "http":
                 key = amp_http.create_existing_stream(i)
 
+
+        self.initSource(nntsc_config)
+        self.exporter = initExportPublisher(nntsc_config, expqueue, exchange)
+
+    def initSource(self, nntsc_config):
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
         if username == "NNTSCConfigError":
@@ -80,77 +85,26 @@ class AmpModule:
         if password == "NNTSCConfigError":
             logger.log("Invalid password option for AMP")
             sys.exit(1)
-        self.host = get_nntsc_config(nntsc_config, "amp", "host")
-        if self.host == "NNTSCConfigError":
+        host = get_nntsc_config(nntsc_config, "amp", "host")
+        if host == "NNTSCConfigError":
             logger.log("Invalid host option for AMP")
             sys.exit(1)
-        self.port = get_nntsc_config(nntsc_config, "amp", "port")
-        if self.port == "NNTSCConfigError":
+        port = get_nntsc_config(nntsc_config, "amp", "port")
+        if port == "NNTSCConfigError":
             logger.log("Invalid port option for AMP")
             sys.exit(1)
-        self.ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
-        if self.ssl == "NNTSCConfigError":
+        ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
+        if ssl == "NNTSCConfigError":
             logger.log("Invalid ssl option for AMP")
             sys.exit(1)
-        self.queue = get_nntsc_config(nntsc_config, "amp", "queue")
-        if self.queue == "NNTSCConfigError":
+        queue = get_nntsc_config(nntsc_config, "amp", "queue")
+        if queue == "NNTSCConfigError":
             logger.log("Invalid queue option for AMP")
             sys.exit(1)
 
-        self.credentials = pika.PlainCredentials(username, password)
-        self.connect_rabbit()
+        self.source = PikaConsumer('', queue, host, port, 
+                ssl, username, password)
 
-    def connect_rabbit(self):
-        """ Connect to a rabbitmq server """
-        # Connect to rabbitmq -- try again if the connection fails
-        attempts = 1
-
-        while True:
-            try:
-                self.connection = pika.BlockingConnection(
-                        pika.ConnectionParameters(
-                                host=self.host,
-                                port=int(self.port),
-                                ssl=self.ssl,
-                                credentials=self.credentials)
-                        )
-                break
-            except Exception:
-                delay = attempts * 10.0
-                if delay > 120:
-                    delay = 120.0
-                logger.log("Failed to connect to RabbitMQ (attempt %d), trying again in %.0f seconds" % (attempts, delay))
-                time.sleep(delay)
-                attempts += 1
-                continue
-
-        self.channel = self.connection.channel()
-        self.channel.queue_declare(queue=self.queue, durable=True)
-        # limit to only one outstanding message at a time
-        self.channel.basic_qos(prefetch_count=1)
-        self.channel.basic_consume(self.process_data, queue=self.queue)
-
-        #self.connection.add_on_close_callback(self.on_connection_closed)
-        #self.channel.add_on_close_callback(self.on_channel_closed)
-        #self.channel.add_on_cancel_callback(self.on_consumer_cancelled)
-
-        # TODO: Add some sort of callback in the event of the server going
-        # away
-
-    def on_connection_closed(self, connection, reply_code, reply_text):
-        """ Callback for when connection is closed """
-        logger.log("Connection to RabbitMQ closed, trying again shortly: (%s) %s" % (reply_code, reply_text))
-
-    def on_channel_closed(self, channel, reply_code, reply_text):
-        """ Callback for when channel is closed """
-        logger.log("Channel %i was closed: (%s) %s" % (channel, reply_code, reply_text))
-        self.connection.close()
-
-    def on_consumer_cancelled(self, frame):
-        """ Callback for when consumer is cancelled """
-        logger.log("Consumer was cancelled remotely, shutting down")
-        if self.channel:
-            self.channel.close()
 
     def process_data(self, channel, method, properties, body):
         """ Process a single message from the queue.
@@ -191,8 +145,8 @@ class AmpModule:
                     self.db.commit_transaction()
 
                     if test in self.collections:
-                        self.exporter.send((2, (self.collections[test], \
-                                properties.timestamp)))
+                        self.exporter.publishPush(self.collections[test], \
+                                properties.timestamp)
                     channel.basic_ack(delivery_tag = method.delivery_tag)
                     break
 
@@ -225,16 +179,14 @@ class AmpModule:
         """ Run forever, calling the process_data callback for each message """
 
         logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
+        self.source.connect()
+        self.source.configure_consumer(self.process_data)
 
-        try:
-            self.channel.start_consuming()
-        except KeyboardInterrupt:
-            self.channel.stop_consuming()
-        logger.log("AMP: Closing connection to RabbitMQ")
-        self.connection.close()
+        self.source.run_consumer()
+        logger.log("AMP: Closed connection to RabbitMQ")
 
-def run_module(tests, config, exp):
-    amp = AmpModule(tests, config, exp)
+def run_module(tests, config, key, exchange):
+    amp = AmpModule(tests, config, key, exchange)
     amp.run()
 
 def tables(db):
