@@ -203,7 +203,8 @@ def insert_stream(db, exp, source, data, timestamp):
         return DB_GENERIC_ERROR
 
 
-    exp.send((1, (colid, "amp_http", streamid, props)))
+    if exp != None and streamid >= 0:
+        exp.publishStream(colid, "amp_http", streamid, props)
     return streamid
 
 
@@ -380,7 +381,8 @@ def export_http_row(exp, stream, ts, objid, testinfo, serverinfo, objinfo):
     # Add in elements that aren't in one of the three info dicts
     merged['object_id'] = objid
 
-    exp.send((0, ("amp_http", stream, ts, merged)))
+    if exp != None:
+        exp.publishLiveData("amp_http", stream, ts, merged)
     return 0
 
 

@@ -38,14 +38,13 @@ class DataCollector():
     def start_module(self, name, mod, conf):
         try:
             streams = self.db.select_streams_by_module(name)
-
-            pipe_recv, pipe_send = Pipe(False)
-
+            exchange = 'nntsclive'
+            queue = name
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
-                    pipe_send))
+                    queue, exchange))
             p.daemon = True
 
-            self.exporter.register_source(pipe_recv)
+            self.exporter.register_source(queue, exchange)
             self.processes.append(p)
         except Exception, e:
             raise
@@ -86,7 +85,8 @@ class DataCollector():
                 dbconf["host"])
 
         self.db.connect_db();
-        self.exporter.configure(self.config, self.querytimeout)
+        if self.exporter.configure(self.config, self.querytimeout) == -1:
+            sys.exit(1)
 
         self.processes = []
         self.config = nntsc_conf

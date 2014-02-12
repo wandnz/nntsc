@@ -29,9 +29,10 @@ from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
 import libnntscclient.logger as logger
 import sys, rrdtool, socket, time
+from libnntsc.pikaqueue import initExportPublisher
 
 class RRDModule:
-    def __init__(self, rrds, nntsc_conf, exp):
+    def __init__(self, rrds, nntsc_conf, expqueue, exchange):
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
@@ -41,7 +42,6 @@ class RRDModule:
                 dbconf["host"])
         self.db.connect_db()
 
-        self.exporter = exp
         self.smokepings = {}
         self.muninbytes = {}
         self.rrds = {}
@@ -57,7 +57,7 @@ class RRDModule:
             else:
                 self.rrds[filename] = [r]
 
-
+        self.exporter = initExportPublisher(nntsc_conf, expqueue, exchange)
 
     def rejig_ts(self, endts, r):
         # Doing dumbass stuff that I shouldn't have to do to ensure
@@ -293,8 +293,8 @@ def insert_rrd_streams(db, conf):
     return DB_NO_ERROR
 
 
-def run_module(rrds, config, exp):
-    rrd = RRDModule(rrds, config, exp)
+def run_module(rrds, config, key, exchange):
+    rrd = RRDModule(rrds, config, key, exchange)
     rrd.run()
 
 

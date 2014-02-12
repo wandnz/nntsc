@@ -125,8 +125,9 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
 
 
     if streamid >= 0 and exp != None:
-        exp.send((1, (colid, "lpi_packets", streamid, \
-                {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 'protocol':proto})))
+        exp.publishStream(colid, "lpi_packets", streamid, \
+                    {'source':mon, 'user':user, 'dir':dir, 'freq':freq, \
+                    'protocol':proto})
 
     return streamid
 
@@ -155,7 +156,8 @@ def insert_data(db, exp, stream_id, ts, value):
         logger.log(e)
         return DB_GENERIC_ERROR
 
-    exp.send((0, ("lpi_packets", stream_id, ts, {"packets":value})))
+    if exp != None:
+        exp.publishLiveData("lpi_packets", stream_id, ts, {"packets":value})
     return 0
 
 def process_data(db, exp, protomap, data):

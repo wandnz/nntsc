@@ -23,7 +23,6 @@
 
 
 import sys, socket, time, struct, getopt, pickle
-from pywandevent.pywandevent import PyWandEvent
 from socket import *
 from multiprocessing import Pipe, Queue
 import Queue as StdQueue
@@ -33,6 +32,7 @@ from libnntsc.dbselect import DBSelector
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
+from libnntsc.pikaqueue import initExportConsumer
 
 # There are 3 classes defined in this file that form a hierarchy for
 # exporting live and/or historical data to clients.
@@ -792,36 +792,30 @@ class NNTSCClient(threading.Thread):
 
 class NNTSCExporter:
     def __init__(self, port):
-        self.pwe = PyWandEvent()
-
         self.listen_port = port
+        self.listen_sock = None
         self.dbconf = None
         self.collections = {}
         self.subscribers = {}
+        self.sources = []
+        self.livequeue = None
 
-        # TODO Combine into a single dict
-        self.client_sockets = {}
-        self.client_threads = {}
-        self.client_store = {}
-        self.client_timers = {}
+        self.clients = {}
+        self.clientlock = threading.Lock()
+        self.sublock = threading.Lock()
+
 
     def deregister_client(self, sock):
 
-        #log("Dropping client on fd %d" % (sock.fileno()))
-        if sock in self.client_sockets:
-            del self.client_sockets[sock]
-        if sock in self.client_threads:
-            del self.client_threads[sock]
-        if sock in self.client_timers:
-            del self.client_timers[sock]
-        if sock in self.client_store:
-            del self.client_store[sock]
+        self.clientlock.acquire()
+        if sock in self.clients:
+            del self.clients[sock]
+        self.clientlock.release()
 
-    def drop_source(self, sock):
-        log("Dropping source on fd %d" % (sock.fileno()))
-
-        self.pwe.del_fd_event(sock)
-        sock.close()
+    def drop_source(self, key):
+        log("Dropping source on queue %s" % (key))
+        if self.livequeue:
+            self.livequeue.unbind_queue(key)
 
     def filter_columns(self, cols, data, stream_id, timestamp):
 
@@ -839,6 +833,7 @@ class NNTSCExporter:
 
     def register_stream(self, streams, sock, cols, start, end, name):
 
+        self.sublock.acquire()
         for s in streams:
             if self.subscribers.has_key(s):
                 self.subscribers[s].append((sock, cols, start, end, name))
@@ -847,109 +842,131 @@ class NNTSCExporter:
 
             if name in self.collections and sock in self.collections[name]:
                 self.collections[name][sock] += 1
-             
+            #log("Registered stream %d for socket %d" % (s, sock.fileno()))
+        self.sublock.release()     
 
 
     def register_collection(self, sock, col):
+        self.sublock.acquire()
         if self.collections.has_key(col):
             if sock not in self.collections[col]:
                 self.collections[col][sock] = 0
         else:
             self.collections[col] = {sock: 0}
+        #log("Registered collection %s for socket %d" % (col, sock.fileno()))
+        self.sublock.release()
 
-    def export_push(self, received, fd):
+    def export_push(self, received, key):
         try:
             collid, timestamp = received
         except ValueError:
-            log("Incorrect data format from source %d" % (fd))
+            log("Incorrect data format from source %s" % (key))
             log("Format should be (colid, timestamp)")
-            self.drop_source(sock)
-            return
-
-        # Only export PUSH if someone is subscribed to a stream from the
-        # collection in question
-        if collid not in self.collections:
-            return 0
-
+            self.drop_source(key)
+            return -1
+        
         pushdata = pickle.dumps((collid, timestamp))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, len(pushdata))
 
+        self.sublock.acquire()
+        # Only export PUSH if someone is subscribed to a stream from the
+        # collection in question
+        if collid not in self.collections:
+            self.sublock.release()
+            return 0
+
         active = {}
+        self.clientlock.acquire()
         for sock, subbed in self.collections[collid].items():
-            if sock not in self.client_sockets:
+            if sock not in self.clients.keys():
                 continue
             if subbed == 0:
                 active[sock] = subbed
                 continue
             
-            store = self.client_store[sock]
-            store.append((header, pushdata))
+            try:
+                self.clients[sock]['queue'].put((header, pushdata))
+            except StdQueue.Full:
+                # This may not actually stop the client thread,
+                # but apparently killing threads is bad so let's
+                # hope the thread picks up that we closed its
+                # socket and can exit itself nicely
+                sock.close()
+                #self.deregister_client(sock)
+                continue
 
-            if self.client_timers[sock] == -1:
-                self.client_timers[sock] = self.pwe.add_timer_event(
-                        0, 100, sock, self.queue_callback)
 
             active[sock] = subbed
-            pipesend = self.client_sockets[sock]
+        self.clientlock.release()
         self.collections[collid] = active
+        self.sublock.release()
 
         return 0
 
-    def export_new_stream(self, received, fd):
+    def export_new_stream(self, received, key):
 
         try:
             coll_id, coll_name, stream_id, properties = received
         except ValueError:
-            log("Incorrect data format from source %d" % (fd))
+            log("Incorrect data format from source %s" % (key))
             log("Format should be (collection id, collection name, streamid, values dict)")
             return -1
 
         if not isinstance(properties, dict):
             log("Values should expressed as a dictionary")
             return -1
-
-        if coll_id not in self.collections.keys():
-            return 0
-
-        #log("Exporting new stream %d to interested clients" % (stream_id))
+        
         properties['stream_id'] = stream_id
 
         ns_data = pickle.dumps((coll_id, False, [properties]))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_STREAMS,
                 len(ns_data))
 
+        self.sublock.acquire()
+        if coll_id not in self.collections.keys():
+            self.sublock.release()
+            return 0
+
+        #log("Exporting new stream %d to interested clients" % (stream_id))
+
         active = {}
+        
+        self.clientlock.acquire()
         for sock, subbed in self.collections[coll_id].items():
-            if sock not in self.client_sockets:
+            if sock not in self.clients.keys():
+                continue
+            try:
+                self.clients[sock]['queue'].put((header, ns_data))
+            except StdQueue.Full:
+                # This may not actually stop the client thread,
+                # but apparently killing threads is bad so let's
+                # hope the thread picks up that we closed its
+                # socket and can exit itself nicely
+                sock.close()
+                #self.deregister_client(sock)
                 continue
             
-            store = self.client_store[sock]
-            store.append((header, ns_data))
-
-            if self.client_timers[sock] == -1:
-                self.client_timers[sock] = self.pwe.add_timer_event(
-                        0, 100, sock, self.queue_callback)
-
             active[sock] = subbed
+        self.clientlock.release()
         self.collections[coll_id] = active
-
+        self.sublock.release()
         return 0
 
-    def export_live_data(self, received, fd):
+    def export_live_data(self, received, key):
 
         try:
             name, stream_id, timestamp, values = received
         except ValueError:
-            log("Incorrect data format from source %d" % (fd))
+            log("Incorrect data format from source %s" % (key))
             log("Format should be (name, streamid, timestamp, values dict)")
-            self.drop_source(sock)
-            return
+            return -1
 
         if not isinstance(values, dict):
             log("Values should expressed as a dictionary")
-            self.drop_source(sock)
-            return
+            return -1
 
+        self.sublock.acquire()
+        self.clientlock.acquire()
         if stream_id in self.subscribers.keys():
             active = []
 
@@ -968,94 +985,65 @@ class NNTSCExporter:
                 header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE,
                         len(contents))
 
-                if sock in self.client_sockets:
-                    store = self.client_store[sock]
-                    store.append((header, contents))
-
-                    if self.client_timers[sock] == -1:
-                        self.client_timers[sock] = self.pwe.add_timer_event(
-                                0, 100, sock, self.queue_callback)
-
+                if sock in self.clients.keys():
+                    try:
+                        self.clients[sock]['queue'].put((header, contents))
+                    except StdQueue.Full:
+                        # This may not actually stop the client thread,
+                        # but apparently killing threads is bad so let's
+                        # hope the thread picks up that we closed its
+                        # socket and can exit itself nicely
+                        sock.close()
+                        #self.deregister_client(sock)
+                        continue
+                    #log("Pushed live data onto queue for stream %d" % (stream_id))
                     if results != {}:
                         active.append((sock, columns, start, end, col))
             self.subscribers[stream_id] = active
+        self.clientlock.release()
+        self.sublock.release()
 
         return 0
 
-    def receive_source(self, fd, evtype, sock, data):
+    def receive_source(self, channel, method, properties, body):
 
-        try:
-            obj = sock.recv()
-        except EOFError, msg:
-            log("Error receiving data from source %d: %s" % (fd, msg))
-            self.drop_source(sock)
-            return
+        key = method.routing_key
 
-        msgtype, contents = obj
+        msgtype, contents = pickle.loads(body)
 
         if msgtype == 0:
-            ret = self.export_live_data(contents, sock.fileno())
+            ret = self.export_live_data(contents, key)
         if msgtype == 1:
-            ret = self.export_new_stream(contents, sock.fileno())
+            ret = self.export_new_stream(contents, key)
         if msgtype == 2:
-            ret = self.export_push(contents, sock.fileno())
+            ret = self.export_push(contents, key)
 
+        channel.basic_ack(delivery_tag = method.delivery_tag)
+        if ret == -1:
+            self.drop_source(key)
+    
         return ret
 
-    def queue_callback(self, pwe, client):
-        sock = client
-        queue = self.client_sockets[sock]
-        store = self.client_store[sock]
+    def createClient(self, clientfd): 
+        log("Creating client on fd %d" % (clientfd.fileno()))
+        queue = Queue(1000000)
+        clientfd.setblocking(0)
 
-        #log("Prepush: Queue size is currently %u" % queue.qsize())
-        while len(store) > 0:
-            try:
-                queue.put(store[0], False)
-            except StdQueue.Full:
-                break
-
-            store = store[1:]
-        #log("Postpush: Queue size is currently %u" % queue.qsize())
-
-        if len(store) > 0:
-            self.client_timers[sock] = self.pwe.add_timer_event(0, 100, \
-                    sock, self.queue_callback)
-        else:
-            self.client_timers[sock] = -1
-
-        # Probably unnecessary?
-        self.client_store[sock] = store
-
-    def accept_connection(self, fd, evtype, sock, data):
-
-        try:
-            client, addr = sock.accept()
-        except error, msg:
-            log("Error accepting connection: %s" % (msg[1]))
-            return
-
-        #log("Accepted connection on fd %d" % (client.fileno()))
-
-        
-        queue = Queue(10000000)
-        client.setblocking(0)
-
-        cthread = NNTSCClient(client, self, queue, self.dbconf, \
+        cthread = NNTSCClient(clientfd, self, queue, self.dbconf, \
                 self.dbtimeout)
         cthread.daemon = True
         cthread.start()
-        self.client_sockets[client] = queue
-        self.client_threads[client] = cthread
-        self.client_store[client] = []
-        self.client_timers[client] = -1
 
-        #self.pwe.add_fd_event(client, 1, "", self.receive_client)
+        self.clientlock.acquire()
+        self.clients[clientfd] = {'queue':queue, 'thread':cthread}
+        self.clientlock.release()
 
 
-    def register_source(self, pipe):
-        log("Registering source on fd %d" % (pipe.fileno()))
+    def register_source(self, queue, exchange):
+        log("Registering source on queue %s" % (queue))
 
-        self.pwe.add_fd_event(pipe, 1, "", self.receive_source)
+        if queue not in self.sources:
+            self.sources.append(queue)
 
     def create_listener(self, port):
 
@@ -1070,7 +1058,6 @@ class NNTSCExporter:
         except error, msg:
             log("Failed to set SO_REUSEADDR: %s" % (msg[1]))
             return -1
-
 
         try:
             s.bind(('', port))
@@ -1098,15 +1085,64 @@ class NNTSCExporter:
         self.dbconf = dbconf
         self.dbtimeout = dbtimeout
 
-        listen_sock = self.create_listener(self.listen_port)
+        self.listen_sock = self.create_listener(self.listen_port)
 
-        if listen_sock == -1:
+        if self.listen_sock == -1:
             return -1
 
-        self.pwe.add_fd_event(listen_sock, 1, None, self.accept_connection)
+        self.livequeue = initExportConsumer(nntsc_conf, 'exporter', 'nntsclive')
+       
+        if self.livequeue == None:
+            log("Failed to initialise consumer for exporter")
+            return -1
+        return 0 
 
     def run(self):
-        self.pwe.run()
+        # Start up our listener thread
+        if self.listen_sock == None:
+            log("Must successfully call configure before calling run on the exporter!")
+            return
+        
+        listenthread = NNTSCListener(self.listen_sock, self)
+        listenthread.daemon = True
+        listenthread.start()
+        
+        # Prepare our export queue consumer
+        for s in self.sources:
+            self.livequeue.bind_queue(s)
+        self.livequeue.configure_consumer(self.receive_source)
+
+        # Start reading from the queue
+        self.livequeue.run_consumer()
+        
+
+
+class NNTSCListener(threading.Thread):
+    def __init__(self, sock, parent):
+        threading.Thread.__init__(self)
+        self.parent = parent
+        self.sock = sock
+
+    def run(self):
+        while 1:
+            # Wait for any sign of an incoming connection
+            listener = [self.sock]
+
+            inpready, outready, exready = select.select(listener, [], [])
+            
+            if self.sock not in inpready:
+                continue
+            
+            # Accept the connection
+            try:
+                client, addr = self.sock.accept()
+            except error, msg:
+                log("Error accepting connection: %s" % (msg[1]))
+                break
+
+            # Create a new client entry
+            self.parent.createClient(client)
+
 
 if __name__ == '__main__':
 

@@ -132,7 +132,7 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
 
 
     if streamid >= 0 and exp != None:
-        exp.send((1, (colid, "amp_traceroute", streamid, props)))
+        exp.publishStream(colid, "amp_traceroute", streamid, props)
 
     return streamid
 
@@ -166,7 +166,8 @@ def insert_data(db, exp, stream, ts, result):
         return DB_GENERIC_ERROR
         
 
-    exp.send((0, ("amp_traceroute", stream, ts, result)))
+    if exp != None:
+        exp.publishLiveData("amp_icmp", stream, ts, result)
 
     return DB_NO_ERROR
 

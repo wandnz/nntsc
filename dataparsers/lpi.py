@@ -25,15 +25,14 @@ from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
-
+from libnntsc.pikaqueue import initExportPublisher
 import libnntscclient.logger as logger
 
 import time
 
 class LPIModule:
-    def __init__(self, existing, nntsc_conf, exp):
+    def __init__(self, existing, nntsc_conf, expqueue, exchange):
 
-        self.exporter = exp
         self.enabled = True
         self.wait = 15
         self.current_header = {}
@@ -76,6 +75,8 @@ class LPIModule:
                 lpi_packets.create_existing_stream(s)
             if s['modsubtype'] == "users":
                 lpi_users.create_existing_stream(s)
+
+        self.exporter = initExportPublisher(nntsc_conf, expqueue, exchange)
 
     def process_stats(self, data):
         if data == {}:
@@ -200,8 +201,8 @@ class LPIModule:
             self.server_fd.close()
 
 
-def run_module(existing, config, exp):
-    lpi = LPIModule(existing, config, exp)
+def run_module(existing, config, key, exchange):
+    lpi = LPIModule(existing, config, key, exchange)
     lpi.run()
 
 def tables(db):
