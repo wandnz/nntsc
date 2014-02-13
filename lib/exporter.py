@@ -1055,11 +1055,11 @@ class NNTSCExporter:
         self.clientlock.release()
 
 
-    def register_source(self, queue, exchange):
-        log("Registering source on queue %s" % (queue))
+    def register_source(self, key, queue):
+        log("Registering source on key %s" % (key))
 
-        if queue not in self.sources:
-            self.sources.append(queue)
+        if key not in self.sources:
+            self.sources.append(key)
 
     def create_listener(self, port):
 
@@ -1089,7 +1089,7 @@ class NNTSCExporter:
 
         return s
 
-    def configure(self, conf_fname, dbtimeout, exchangeid):
+    def configure(self, conf_fname, dbtimeout, queueid):
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:
             sys.exit(0)
@@ -1106,7 +1106,7 @@ class NNTSCExporter:
         if self.listen_sock == -1:
             return -1
 
-        self.livequeue = initExportConsumer(nntsc_conf, 'exporter', exchangeid)
+        self.livequeue = initExportConsumer(nntsc_conf, queueid, 'nntsclive')
        
         if self.livequeue == None:
             log("Failed to initialise consumer for exporter")

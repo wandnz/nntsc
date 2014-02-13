@@ -5,7 +5,7 @@ import libnntscclient.logger as logger
 from libnntsc.configurator import get_nntsc_config
 
 class PikaBasic(object):
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword):
+    def __init__(self, exchange, host, port, ssl, user, pword):
         self._connection = None
         self._channel = None
         self._host = host
@@ -13,8 +13,6 @@ class PikaBasic(object):
         self._ssl = ssl
         self._credentials = pika.PlainCredentials(user, pword)
         self._exchangename = exchange
-        self._queue = None
-        self._queuename = queuename
     
     def _pikaConnect(self, host, port, ssl, creds):
         attempts = 1
@@ -49,28 +47,13 @@ class PikaBasic(object):
                     type='direct')
         
    
-    def bind_queue(self, key): 
-        if self._queue == None:
-            res = self._channel.queue_declare(queue=self._queuename, durable=True)
-            self._queue = res.method.queue
-        
-        self._channel.queue_bind(exchange = self._exchangename, 
-                queue=self._queue, routing_key=key)
-
-    def unbind_queue(self, key):
-        if self._queue == None:
-            return
-
-        self._channel.queue_unbind(queue=self._queue, 
-                exchange=self._exchangename, routing_key=key)
-
 
 class PikaPublisher(PikaBasic):
     
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword):
-        super(PikaPublisher, self).__init__(exchange, queuename, host, port,
+    def __init__(self, exchange, key, host, port, ssl, user, pword):
+        super(PikaPublisher, self).__init__(exchange, host, port,
                 ssl, user, pword)
-        self._pubkey = queuename
+        self._pubkey = key
 
     def publish_data(self, data, contenttype, key=None):
 
@@ -103,8 +86,10 @@ class PikaPublisher(PikaBasic):
 
 class PikaConsumer(PikaBasic):
     def __init__(self, exchange, queuename, host, port, ssl, user, pword):
-        super(PikaConsumer, self).__init__(exchange, queuename, host, port,
+        super(PikaConsumer, self).__init__(exchange, host, port,
                 ssl, user, pword)
+        self._queue = None
+        self._queuename = queuename
 
     def configure_consumer(self, callback):
         self._channel.basic_qos(prefetch_count=1)
@@ -123,6 +108,22 @@ class PikaConsumer(PikaBasic):
                 break
 
         self._connection.close()
+    
+    def bind_queue(self, key): 
+        if self._queue == None:
+            res = self._channel.queue_declare(queue=self._queuename, durable=True)
+            self._queue = res.method.queue
+        
+        self._channel.queue_bind(exchange = self._exchangename, 
+                queue=self._queue, routing_key=key)
+
+    def unbind_queue(self, key):
+        if self._queue == None:
+            return
+
+        self._channel.queue_unbind(queue=self._queue, 
+                exchange=self._exchangename, routing_key=key)
+
 
 def parseExportOptions(conf):
     username = get_nntsc_config(conf, "liveexport", "username")
@@ -140,12 +141,12 @@ def parseExportOptions(conf):
 
     return username, password, port 
 
-def initExportPublisher(conf, queuename, exchange):
+def initExportPublisher(conf, key, exchange):
     username, password, port = parseExportOptions(conf)
     if username == None:
         return None
 
-    exporter = PikaPublisher(exchange, queuename, 'localhost', port, False, 
+    exporter = PikaPublisher(exchange, key, 'localhost', port, False, 
             username, password)
     if exporter == None:
         logger.log("Failed to create live exporter for %s -- no live export will occur" % (queuename))
