@@ -10,7 +10,7 @@ except ImportError:
         from distutils.core import setup
 
 setup(name="libnntsc-client",
-	version="1.1",
+	version="1.2",
 	description="Client API for Nathan\'s Network Time Series Collector",
 	author = "Shane Alcock",
 	author_email = "contact@wand.net.nz",

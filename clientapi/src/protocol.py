@@ -25,6 +25,8 @@ import sys
 nntsc_hdr_fmt = "!BBL"
 nntsc_req_fmt = "!LLQ"
 
+NNTSC_CLIENTAPI_VERSION="1.2"
+
 NNTSC_REQ_COLLECTION = 0
 NNTSC_REQ_STREAMS = 1
 NNTSC_REQ_SCHEMA = 2
@@ -42,5 +44,6 @@ NNTSC_PERCENTILE = 8
 NNTSC_PUSH = 9
 NNTSC_ACTIVE_STREAMS = 10
 NNTSC_REGISTER_COLLECTION = 11
+NNTSC_VERSION_CHECK=12
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

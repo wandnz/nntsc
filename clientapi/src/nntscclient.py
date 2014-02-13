@@ -30,16 +30,37 @@ class NNTSCClient:
     def __init__(self, sock):
         self.sock = sock
         self.buf = ""
+        self.sentversion = False
 
     def disconnect(self):
         if self.sock != None:
             self.sock.close()
         self.sock = None
 
+    def send_version_check(self):
+        return 0
+
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_VERSION_CHECK, 
+                len(NNTSC_CLIENTAPI_VERSION))
+            
+        try:
+            self.sock.sendall(header + NNTSC_CLIENTAPI_VERSION)
+        except error, msg:
+            print >> sys.stderr, "Error sending NNTSC_CLIENTAPI_VERSION: %s" % (msg[1])
+            return -1
+
+        self.sentversion = True
+        return 0
+        
+
     def send_request(self, reqtype, col, start=0):
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_REQUEST on a closed socket!"
             return -1;
+
+        if self.sentversion == False:
+            if self.send_version_check() == -1:
+                return -1 
 
         if reqtype == NNTSC_REQ_COLLECTION:
             col = 0
@@ -61,6 +82,9 @@ class NNTSCClient:
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_SUBSCRIBE on a closed socket!"
             return -1;
+        if self.sentversion == False:
+            if self.send_version_check() == -1:
+                return -1 
 
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for 
@@ -85,6 +109,9 @@ class NNTSCClient:
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_AGGREGATE on a closed socket!"
             return -1;
+        if self.sentversion == False:
+            if self.send_version_check() == -1:
+                return -1 
         
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for 
@@ -111,6 +138,10 @@ class NNTSCClient:
         if self.sock == None:
             print >> sys.stderr, "Cannot send NNTSC_PERCENTILE on a closed socket!"
             return -1;
+        
+        if self.sentversion == False:
+            if self.send_version_check() == -1:
+                return -1 
         
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for 
@@ -161,6 +192,16 @@ class NNTSCClient:
             return -1, {}
 
         msgdict = {}
+
+        if header[1] == NNTSC_VERSION_CHECK:
+            version = pickle.loads(self.buf[header_end:total_len])
+            if version != NNTSC_CLIENTAPI_VERSION:
+                print >> sys.stderr, "Current NNTSC Client version %s does not match version required by server (%s)" % (NNTSC_CLIENTAPI_VERSION, version)
+                print >> sys.stderr, "Closing client socket"
+                self.disconnect()
+                return -1, {}
+            else:
+                print >> sys.stderr, "Version check passed"
 
         if header[1] == NNTSC_COLLECTIONS:
             col_list = pickle.loads(self.buf[header_end:total_len])
