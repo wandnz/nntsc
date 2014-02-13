@@ -38,11 +38,13 @@ class DataCollector():
     def start_module(self, name, mod, conf):
         try:
             streams = self.db.select_streams_by_module(name)
+
+            routingkey = self.queueid + "-" + name
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
-                    name, 'nntsclive'))
+                    routingkey, 'nntsclive'))
             p.daemon = True
 
-            self.exporter.register_source(name, self.queueid)
+            self.exporter.register_source(routingkey, self.queueid)
             self.processes.append(p)
         except Exception, e:
             raise
