@@ -172,7 +172,11 @@ class NNTSCClient:
                 # None tells the caller that they should disconnect
                 return -1, None
             else:
-                logger.log("NNTSC Protocol version check passed")
+                #logger.log("NNTSC Protocol version check passed")
+                # Don't return these to the caller, just try and read
+                # another message
+                self.buf = self.buf[total_len:]
+                return -1, {}
 
         if header[1] == NNTSC_COLLECTIONS:
             col_list = pickle.loads(self.buf[header_end:total_len])
