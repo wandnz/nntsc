@@ -198,8 +198,8 @@ class NNTSCClient:
             if version != NNTSC_CLIENTAPI_VERSION:
                 print >> sys.stderr, "Current NNTSC Client version %s does not match version required by server (%s)" % (NNTSC_CLIENTAPI_VERSION, version)
                 print >> sys.stderr, "Closing client socket"
-                self.disconnect()
-                return -1, {}
+                # None tells the caller that they should disconnect
+                return -1, None
             else:
                 print >> sys.stderr, "Version check passed"
 
