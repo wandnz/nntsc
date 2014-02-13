@@ -25,7 +25,7 @@ import sys
 nntsc_hdr_fmt = "!BBL"
 nntsc_req_fmt = "!LLQ"
 
-NNTSC_CLIENTAPI_VERSION="1.2"
+NNTSC_CLIENTAPI_VERSION="1.3"
 
 NNTSC_REQ_COLLECTION = 0
 NNTSC_REQ_STREAMS = 1
