@@ -762,6 +762,13 @@ class NNTSCClient(threading.Thread):
     def run(self):
         running = 1
 
+        # Tell the client what version of the client API they need
+        contents = pickle.dumps(NNTSC_CLIENTAPI_VERSION)
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_VERSION_CHECK, 
+                len(contents))
+
+        self.transmit_client(header + contents)
+
         while running:
             # Process any live data on the queue first
             if len(self.outstanding) == 0 and self.receive_live() == -1:
@@ -1034,7 +1041,7 @@ class NNTSCExporter:
         return ret
 
     def createClient(self, clientfd): 
-        log("Creating client on fd %d" % (clientfd.fileno()))
+        #log("Creating client on fd %d" % (clientfd.fileno()))
         queue = Queue(1000000)
         clientfd.setblocking(0)
 
