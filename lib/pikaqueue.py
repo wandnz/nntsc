@@ -3,6 +3,7 @@ import time
 import pickle
 import libnntscclient.logger as logger
 from libnntsc.configurator import get_nntsc_config
+import logging
 
 class PikaBasic(object):
     def __init__(self, exchange, host, port, ssl, user, pword):
@@ -14,6 +15,8 @@ class PikaBasic(object):
         self._credentials = pika.PlainCredentials(user, pword)
         self._exchangename = exchange
     
+        logging.basicConfig()
+
     def _pikaConnect(self, host, port, ssl, creds):
         attempts = 1
         connection = None
