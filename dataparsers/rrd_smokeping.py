@@ -131,7 +131,7 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
     #        highrows=rows, lasttimestamp=0)
 
     if streamid >= 0 and exp != None:
-        exp.send((1, (colid, "rrd_smokeping", streamid, props)))
+        exp.publishStream(colid, "rrd_smokeping", streamid, props)
 
     return streamid
 
@@ -185,8 +185,8 @@ def insert_data(db, exp, stream, ts, line):
         logger.log(e)
         return DB_GENERIC_ERROR
 
-
-    exp.send((0, ("rrd_smokeping", stream, ts, exportdict)))
+    if exp != None:
+        exp.publishLiveData("rrd_smokeping", stream, ts, exportdict)
 
     return DB_NO_ERROR
 
