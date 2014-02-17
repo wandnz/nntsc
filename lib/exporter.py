@@ -533,6 +533,8 @@ class DBWorker(threading.Thread):
                 job = self.parent.jobs.get(True)
             except StdQueue.Empty:
                 continue
+            except EOFError:
+                break
 
             # Don't have a db connection open for the lifetime of
             # this thread if we aren't using it otherwise we run the
@@ -686,6 +688,9 @@ class NNTSCClient(threading.Thread):
         # History has all been sent for this label, so we can now release
         # any live data we were storing for those streams
 
+        if label not in self.waitlabels:
+            return 0
+
         assert(label in self.waitlabels)
         streams = self.waitlabels[label]
         data = self.savedlive[label]
@@ -825,6 +830,8 @@ class NNTSCClient(threading.Thread):
                 obj = self.releasedlive.get(False)
             except StdQueue.Empty:
                 return 0
+            except EOFError:
+                return -1
 
             sendobj = obj[0] + obj[1]
             # Just reflect the objects directly to the client
@@ -914,8 +921,6 @@ class NNTSCClient(threading.Thread):
         self.transmit_client(header + contents)
 
         while running:
-            # Process any live data on the queue first
-            
             input = [self.sock]
             
             if self.write_required():
@@ -932,7 +937,7 @@ class NNTSCClient(threading.Thread):
                         running = 0
                         break
 
-            if s in outready:
+            if self.sock in outready:
                 if len(self.outstanding) > 0:
                     if self.transmit_client(self.outstanding) == -1:
                         running = 0
