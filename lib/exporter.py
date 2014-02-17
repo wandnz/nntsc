@@ -223,6 +223,7 @@ class DBWorker(threading.Thread):
         name, start, end, cols, labels, aggs = pickle.loads(submsg)
         now = int(time.time())
 
+        origstart = start
         if start == 0 or start == None:
             start = now
         if end == 0:
@@ -244,6 +245,9 @@ class DBWorker(threading.Thread):
         else:
             stoppoint = end
 
+        # Register our interest in these streams before we start querying, so
+        # the client can stockpile any live data that arrives while we're
+        # busy querying the db.
         for lab, streams in labels.items():
             if self._subscribe_streams(streams, stoppoint, end, cols, name, lab) == -1:
                 return -1
@@ -273,6 +277,15 @@ class DBWorker(threading.Thread):
             if queryend >= stoppoint:
                 queryend = stoppoint
                 more = False
+
+                # Horrible method of ensuring that any uncommitted historical
+                # data is committed before we start our final query. 
+                # Otherwise, we will miss the last datapoint(s) due to them
+                # not being present in the table when we make our query. 
+                #
+                # TODO Find a better method of dealing with this problem!
+                if origstart == start:
+                    time.sleep(30)
             else:
                 more = True
 
