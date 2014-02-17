@@ -273,7 +273,6 @@ class DBWorker(threading.Thread):
             #if end == None:
             #    stoppoint = int(time.time())
 
-            print start, queryend, stoppoint
             if queryend >= stoppoint:
                 queryend = stoppoint
                 more = False
