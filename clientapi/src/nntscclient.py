@@ -25,6 +25,7 @@
 import sys,getopt,struct,pickle,time
 from socket import *
 from libnntscclient.protocol import *
+import libnntscclient.logger as logger
 
 class NNTSCClient:
     def __init__(self, sock):
@@ -38,7 +39,7 @@ class NNTSCClient:
 
     def send_request(self, reqtype, col, start=0):
         if self.sock == None:
-            print >> sys.stderr, "Cannot send NNTSC_REQUEST on a closed socket!"
+            logger.log("Cannot send NNTSC_REQUEST on a closed socket!")
             return -1;
 
         if reqtype == NNTSC_REQ_COLLECTION:
@@ -52,14 +53,14 @@ class NNTSCClient:
         try:
             self.sock.sendall(header + request)
         except error, msg:
-            print >> sys.stderr, "Error sending NNTSC_REQUEST %d for collection %d: %s" % (reqtype, col, msg[1])
+            logger.log("Error sending NNTSC_REQUEST %d for collection %d: %s" % (reqtype, col, msg[1]))
             return -1
 
         return 0
 
     def subscribe_streams(self, name, columns, labels, start, end, aggs):
         if self.sock == None:
-            print >> sys.stderr, "Cannot send NNTSC_SUBSCRIBE on a closed socket!"
+            logger.log("Cannot send NNTSC_SUBSCRIBE on a closed socket!")
             return -1;
 
         # Our "labels" are actually a list of streams, which is how we used to
@@ -74,7 +75,7 @@ class NNTSCClient:
         try:
             self.sock.sendall(header + contents)
         except error, msg:
-            print >> sys.stderr, "Error sending NNTSC_SUBSCRIBE for %s: %s" % (name, msg[1])
+            logger.log("Error sending NNTSC_SUBSCRIBE for %s: %s" % (name, msg[1]))
             return -1
 
         return 0
@@ -83,7 +84,7 @@ class NNTSCClient:
             groupcolumns=[], aggfunc="avg"):
 
         if self.sock == None:
-            print >> sys.stderr, "Cannot send NNTSC_AGGREGATE on a closed socket!"
+            logger.log("Cannot send NNTSC_AGGREGATE on a closed socket!")
             return -1;
         
         # Our "labels" are actually a list of streams, which is how we used to
@@ -99,7 +100,7 @@ class NNTSCClient:
         try:
             self.sock.sendall(header + contents)
         except error, msg:
-            print >> sys.stderr, "Error sending NNTSC_AGGREGATE for %s: %s" % (col, msg[1])
+            logger.log("Error sending NNTSC_AGGREGATE for %s: %s" % (col, msg[1]))
             return -1
 
         return 0
@@ -109,8 +110,9 @@ class NNTSCClient:
             otheraggfunc="avg"): 
 
         if self.sock == None:
-            print >> sys.stderr, "Cannot send NNTSC_PERCENTILE on a closed socket!"
+            logger.log("Cannot send NNTSC_PERCENTILE on a closed socket!")
             return -1;
+        
         
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for 
@@ -126,20 +128,20 @@ class NNTSCClient:
         try:
             self.sock.sendall(header + contents)
         except error, msg:
-            print >> sys.stderr, "Error sending NNTSC_PERCENTILE for %s: %s" % (col, msg[1])
+            logger.log("Error sending NNTSC_PERCENTILE for %s: %s" % (col, msg[1]))
             return -1
 
         return 0
 
     def receive_message(self):
         if self.sock == None:
-            print >> sys.stderr, "Cannot receive messages on a closed socket!"
+            logger.log("Cannot receive messages on a closed socket!")
             return -1;
 
         try:
             received = self.sock.recv(256000)
         except error, msg:
-            print >> sys.stderr, "Error receiving data from client: %s" % (msg[1])
+            logger.log("Error receiving data from client: %s" % (msg[1]))
             return -1
 
         if len(received) == 0:
@@ -161,6 +163,20 @@ class NNTSCClient:
             return -1, {}
 
         msgdict = {}
+
+        if header[1] == NNTSC_VERSION_CHECK:
+            version = pickle.loads(self.buf[header_end:total_len])
+            if version != NNTSC_CLIENTAPI_VERSION:
+                logger.log("Current NNTSC Client version %s does not match version required by server (%s)" % (NNTSC_CLIENTAPI_VERSION, version))
+                logger.log("Closing client socket")
+                # None tells the caller that they should disconnect
+                return -1, None
+            else:
+                #logger.log("NNTSC Protocol version check passed")
+                # Don't return these to the caller, just try and read
+                # another message
+                self.buf = self.buf[total_len:]
+                return -1, {}
 
         if header[1] == NNTSC_COLLECTIONS:
             col_list = pickle.loads(self.buf[header_end:total_len])

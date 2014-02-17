@@ -38,12 +38,13 @@ class DataCollector():
     def start_module(self, name, mod, conf):
         try:
             streams = self.db.select_streams_by_module(name)
-            queue = name
+
+            routingkey = self.queueid + "-" + name
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
-                    queue, self.exchangeid))
+                    routingkey, 'nntsclive'))
             p.daemon = True
 
-            self.exporter.register_source(queue, self.exchangeid)
+            self.exporter.register_source(routingkey, self.queueid)
             self.processes.append(p)
         except Exception, e:
             raise
@@ -84,14 +85,14 @@ class DataCollector():
                 dbconf["host"])
 
         self.db.connect_db();
-        exchangeid = get_nntsc_config(nntsc_conf, "liveexport", "exchangeid")
-        if exchangeid == "NNTSCConfigError":
-            logger.log("Invalid exchange identifier for NNTSC exporter")
+        queueid = get_nntsc_config(nntsc_conf, "liveexport", "queueid")
+        if queueid == "NNTSCConfigError":
+            logger.log("Invalid queueid identifier for NNTSC exporter")
             sys.exit(1)
         
-        self.exchangeid = "nntsclive-" + exchangeid
+        self.queueid = queueid
 
-        if self.exporter.configure(self.config, self.querytimeout, self.exchangeid) == -1:
+        if self.exporter.configure(self.config, self.querytimeout, self.queueid) == -1:
             sys.exit(1)
 
         self.processes = []

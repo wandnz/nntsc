@@ -223,6 +223,7 @@ class DBWorker(threading.Thread):
         name, start, end, cols, labels, aggs = pickle.loads(submsg)
         now = int(time.time())
 
+        origstart = start
         if start == 0 or start == None:
             start = now
         if end == 0:
@@ -234,29 +235,56 @@ class DBWorker(threading.Thread):
                 if self._enqueue_history(name, lab, [], False, 0) == -1:
                     return -1 
 
-                if self._subscribe_streams(streams, start, end, cols, name) == -1:
+                if self._subscribe_streams(streams, start, end, cols, name, lab) == -1:
                     return -1
 
             return 0
-
+        
         if end == None:
             stoppoint = int(time.time())
         else:
             stoppoint = end
 
-        while start < stoppoint:
+        # Register our interest in these streams before we start querying, so
+        # the client can stockpile any live data that arrives while we're
+        # busy querying the db.
+        for lab, streams in labels.items():
+            if self._subscribe_streams(streams, stoppoint, end, cols, name, lab) == -1:
+                return -1
+
+        while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY
     
             # If we were asked for data up until "now", make sure we account
             # for the time taken to make earlier queries otherwise we'll
             # miss any new data inserted while we were querying previous
             # weeks of data
-            if end == None:
-                stoppoint = int(time.time())
+            #
+            # We're still going to miss anything that arrives between here and
+            # whenever we manage to complete the last query but we want
+            # our data to arrive in order (i.e. history before any live), so
+            # that's kinda tricky. Usually, we're only going to miss one 
+            # measurement though.
+            #
+            # XXX Can we subscribe before doing the last query and then
+            # funnel any live data into temporary storage until the query
+            # completes. Once we're caught up, throw all that saved live data
+            # onto the queue. 
+            #if end == None:
+            #    stoppoint = int(time.time())
 
             if queryend >= stoppoint:
                 queryend = stoppoint
                 more = False
+
+                # Horrible method of ensuring that any uncommitted historical
+                # data is committed before we start our final query. 
+                # Otherwise, we will miss the last datapoint(s) due to them
+                # not being present in the table when we make our query. 
+                #
+                # TODO Find a better method of dealing with this problem!
+                if origstart == start:
+                    time.sleep(30)
             else:
                 more = True
 
@@ -274,11 +302,6 @@ class DBWorker(threading.Thread):
 
             start = queryend + 1
 
-        # Once we've finished fetching and sending history, subscribe to the
-        # streams that belonged to our labels
-        for lab, streams in labels.items():
-            if self._subscribe_streams(streams, start, end, cols, name) == -1:
-                return -1
 
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
@@ -371,9 +394,9 @@ class DBWorker(threading.Thread):
         return 0
 
 
-    def _subscribe_streams(self, streams, start, subend, cols, name):
+    def _subscribe_streams(self, streams, start, subend, cols, name, label):
         try:
-            self.queue.put((NNTSC_SUBSCRIBE, (streams, start, subend, cols, name)), False)
+            self.queue.put((NNTSC_SUBSCRIBE, (streams, start, subend, cols, name, label)), False)
         except StdQueue.Full:
             log("DBWorker tried to push subscribe but result queue was full!")
             return -1
@@ -390,6 +413,13 @@ class DBWorker(threading.Thread):
         except error, msg:
             log("Unable to push history onto full worker queue")
             return -1
+
+        if not more:
+            try:
+                self.queue.put((NNTSC_HISTORY_DONE, label), False)
+            except error, msg:
+                log("Unable to push history onto full worker queue")
+                return -1
 
         return 0
 
@@ -617,7 +647,13 @@ class NNTSCClient(threading.Thread):
         self.workdone = Queue(20000)
         self.recvbuf = ""
         self.jobs = Queue(100000)
+        self.releasedlive = Queue(100000)
         self.outstanding = ""
+
+
+        self.waitstreams = {}
+        self.waitlabels = {}
+        self.savedlive = {} 
         
         self.workers = []
         # Create some worker threads for handling the database queries
@@ -631,9 +667,84 @@ class NNTSCClient(threading.Thread):
             self.workers.append(worker)
 
     def subscribe_stream(self, submsg):
-        streams, start, end, cols, name = submsg
-        self.parent.register_stream(streams, self.sock, cols, start, end, name)
+        streams, start, end, cols, name, label = submsg
 
+        if label not in self.waitlabels:
+            self.waitlabels[label] = streams
+        else:
+            return
+        
+        for s in streams:
+            self.waitstreams[s] = label
+
+        assert(label not in self.savedlive)
+        self.savedlive[label] = []
+
+        self.parent.register_stream(streams, self.sock, cols, start, end, name, label)
+
+    def finish_subscribe(self, label):
+        # History has all been sent for this label, so we can now release
+        # any live data we were storing for those streams
+
+        assert(label in self.waitlabels)
+        streams = self.waitlabels[label]
+        data = self.savedlive[label]
+
+        if len(data) != 0:
+            ts = 0
+            
+            for d in data:
+                contents = pickle.loads(d[1])
+
+                if ts == 0:
+                    ts = d[2]
+
+                if d[2] != ts:
+                    # Chuck a PUSH on the queue
+                    pushdata = pickle.dumps((contents[0], ts))
+                    header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, 
+                            len(pushdata))
+                    
+                    try:
+                        self.releasedlive.put((header, pushdata))
+                    except StdQueue.Full:
+                        log("Could not release stored live data, queue full")
+                        log("Dropping client")
+                        return -1
+                    
+                    ts = d[2]
+
+                
+                try:
+                    self.releasedlive.put(d)
+                except StdQueue.Full:
+                    log("Could not release stored live data, queue full")
+                    log("Dropping client")
+                    return -1
+
+                if contents[1] == 5:
+                    log("Released data for stream %d: %d" % (contents[1], d[2]))
+            
+            # One final push
+            pushdata = pickle.dumps((contents[0], ts))
+            header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, 
+                    len(pushdata))
+            try:
+                self.releasedlive.put((header, pushdata))
+            except StdQueue.Full:
+                log("Could not release stored live data, queue full")
+                log("Dropping client")
+                return -1
+
+        del(self.savedlive[label])
+        
+        for s in streams:
+            if s in self.waitstreams:
+                del(self.waitstreams[s])
+
+        del self.waitlabels[label]
+           
+        return 0    
     def client_message(self, msg):
         error = 0
         header = struct.unpack(nntsc_hdr_fmt, msg[0:struct.calcsize(nntsc_hdr_fmt)])
@@ -689,20 +800,38 @@ class NNTSCClient(threading.Thread):
             except StdQueue.Empty:
                 return 0
             
-            # Just reflect the objects directly to the client
             sendobj = obj[0] + obj[1]
+            contents = pickle.loads(obj[1])
+            streamid = contents[1]
 
-            totalsent = 0
-            while totalsent < len(sendobj):
-                try:
-                    sent = self.sock.send(sendobj[totalsent:])
-                except:
-                    return -1
-                if sent == 0:
-                    return -1
-                totalsent += sent
+            if streamid in self.waitstreams:
+                # Still waiting for history to come back for this stream.
+                # Save this live data so we can send it after the history is
+                # complete.
+                lab = self.waitstreams[streamid]
+                self.savedlive[lab].append(obj)
+                #log("Saving data for stream %d -- %s" % (streamid, lab))
+                continue
 
-        return totalsent
+            # Just reflect the objects directly to the client
+            if self.transmit_client(sendobj) == -1:
+                return -1
+
+        return 0
+       
+    def send_released(self):
+        while 1:
+            try:
+                obj = self.releasedlive.get(False)
+            except StdQueue.Empty:
+                return 0
+
+            sendobj = obj[0] + obj[1]
+            # Just reflect the objects directly to the client
+            if self.transmit_client(sendobj) == -1:
+                return -1
+        
+        return 0    
         
     def transmit_client(self, result):
         try:
@@ -751,7 +880,10 @@ class NNTSCClient(threading.Thread):
                     
             elif response == NNTSC_SUBSCRIBE:
                 self.subscribe_stream(result)
-
+            elif response == NNTSC_HISTORY_DONE:
+                if self.finish_subscribe(result) == -1:
+                    return -1
+            
             else:
                 # Response type was invalid
                 log("Received invalid response from worker thread: %d" % (response))
@@ -759,18 +891,34 @@ class NNTSCClient(threading.Thread):
 
         return 0
 
+    def write_required(self):
+        if len(self.outstanding) > 0:
+            return True
+        if self.workdone.qsize() > 0:
+            return True
+        if self.livequeue.qsize() > 0:
+            return True
+        if self.releasedlive.qsize() > 0:
+            return True
+
+        return False
+
     def run(self):
         running = 1
 
+        # Tell the client what version of the client API they need
+        contents = pickle.dumps(NNTSC_CLIENTAPI_VERSION)
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_VERSION_CHECK, 
+                len(contents))
+
+        self.transmit_client(header + contents)
+
         while running:
             # Process any live data on the queue first
-            if len(self.outstanding) == 0 and self.receive_live() == -1:
-                log("Failed to push live data to client -- dropping")
-                running = 0
-                break
-
+            
             input = [self.sock]
-            if len(self.outstanding) > 0 or self.workdone.qsize() > 0:
+            
+            if self.write_required():
                 writer = [self.sock]
             else:
                 writer = []
@@ -784,11 +932,23 @@ class NNTSCClient(threading.Thread):
                         running = 0
                         break
 
-            for s in outready:
-                if s == self.sock:
-                    if self.receive_worker() == -1:
+            if s in outready:
+                if len(self.outstanding) > 0:
+                    if self.transmit_client(self.outstanding) == -1:
                         running = 0
                         break
+                elif self.releasedlive.qsize() > 0:
+                    if self.send_released() == -1:
+                        running = 0
+                        break
+                elif self.livequeue.qsize() > 0:
+                    if self.receive_live() == -1:
+                        running = 0
+                        break
+                elif self.receive_worker() == -1:
+                    running = 0
+                    break
+
 
         #log("Closing client thread on fd %d" % self.sock.fileno())
         self.parent.deregister_client(self.sock)
@@ -840,15 +1000,16 @@ class NNTSCExporter:
 
         return results
 
-    def register_stream(self, streams, sock, cols, start, end, name):
+    def register_stream(self, streams, sock, cols, start, end, name, label):
 
         self.sublock.acquire()
+
         for s in streams:
             if self.subscribers.has_key(s):
                 self.subscribers[s].append((sock, cols, start, end, name))
             else:
                 self.subscribers[s] = [(sock, cols, start, end, name)]
-
+            
             if name in self.collections and sock in self.collections[name]:
                 self.collections[name][sock] += 1
             #log("Registered stream %d for socket %d" % (s, sock.fileno()))
@@ -996,7 +1157,7 @@ class NNTSCExporter:
 
                 if sock in self.clients.keys():
                     try:
-                        self.clients[sock]['queue'].put((header, contents))
+                        self.clients[sock]['queue'].put((header, contents, timestamp))
                     except StdQueue.Full:
                         # This may not actually stop the client thread,
                         # but apparently killing threads is bad so let's
@@ -1034,7 +1195,7 @@ class NNTSCExporter:
         return ret
 
     def createClient(self, clientfd): 
-        log("Creating client on fd %d" % (clientfd.fileno()))
+        #log("Creating client on fd %d" % (clientfd.fileno()))
         queue = Queue(1000000)
         clientfd.setblocking(0)
 
@@ -1048,11 +1209,11 @@ class NNTSCExporter:
         self.clientlock.release()
 
 
-    def register_source(self, queue, exchange):
-        log("Registering source on queue %s" % (queue))
+    def register_source(self, key, queue):
+        log("Registering source on key %s" % (key))
 
-        if queue not in self.sources:
-            self.sources.append(queue)
+        if key not in self.sources:
+            self.sources.append(key)
 
     def create_listener(self, port):
 
@@ -1082,7 +1243,7 @@ class NNTSCExporter:
 
         return s
 
-    def configure(self, conf_fname, dbtimeout, exchangeid):
+    def configure(self, conf_fname, dbtimeout, queueid):
         nntsc_conf = load_nntsc_config(conf_fname)
         if nntsc_conf == 0:
             sys.exit(0)
@@ -1099,7 +1260,7 @@ class NNTSCExporter:
         if self.listen_sock == -1:
             return -1
 
-        self.livequeue = initExportConsumer(nntsc_conf, 'exporter', exchangeid)
+        self.livequeue = initExportConsumer(nntsc_conf, queueid, 'nntsclive')
        
         if self.livequeue == None:
             log("Failed to initialise consumer for exporter")
