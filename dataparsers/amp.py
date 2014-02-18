@@ -23,7 +23,7 @@
 import sys
 
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR
+        DB_GENERIC_ERROR, DB_INTERRUPTED
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 import pika
@@ -157,6 +157,11 @@ class AmpModule:
                     logger.log("AMP -- Data error, acknowledging and moving on")
                     channel.basic_ack(delivery_tag = method.delivery_tag)
                     break
+
+                elif code == DB_INTERRUPTED:
+                    logger.log("Interrupt while processing AMP data")
+                    channel.close()
+                    return            
 
                 else:
                     # Some other error cropped up. Best approach here is to 

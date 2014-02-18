@@ -24,7 +24,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.types import Integer, String, Float
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR
+        DB_GENERIC_ERROR, DB_INTERRUPTED
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
 import libnntscclient.logger as logger
@@ -150,6 +150,10 @@ class RRDModule:
                         if code == DB_DATA_ERROR:
                             logger.log("Bad RRD Data, skipping row")
 
+                        if code == DB_INTERRUPTED:
+                            logger.log("Interrupt in RRD module")
+                            return
+
                         current += step
 
                     self.db.update_timestamp([r['stream_id']],
@@ -271,6 +275,9 @@ def insert_rrd_streams(db, conf):
                 if code == DB_DATA_ERROR:
                     logger.log("Invalid RRD stream description")
                     return code
+                if code == DB_INTERRUPTED:
+                    logger.log("RRD stream processing interrupted")
+                    return code
                     
             parameters = {}
             subtype = x[1]
@@ -286,6 +293,9 @@ def insert_rrd_streams(db, conf):
             return code
         if code == DB_DATA_ERROR:
             logger.log("Invalid RRD stream description")
+            return code
+        if code == DB_INTERRUPTED:
+            logger.log("RRD stream processing interrupted")
             return code
 
     db.commit_transaction()

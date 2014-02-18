@@ -176,7 +176,7 @@ def register(db):
 def insert_stream(db, exp, source, data, timestamp):
     name = "http %s:%s" % (source, data['url'])
 
-    props = {"name": name, "source":source, "url":data['url'],
+    props = {"source":source, "url":data['url'],
             "persist":data['keep_alive'],
             "max_connections":data['max_connections'],
             "max_connections_per_server":data['max_connections_per_server'],
@@ -185,27 +185,8 @@ def insert_stream(db, exp, source, data, timestamp):
             "pipelining_max_requests":data['pipelining_maxrequests'],
             "caching":data['caching']}
 
-    colid, streamid = db.register_new_stream("amp", "http", name, timestamp)
-
-    if colid < 0:
-        return colid
-
-    st = db.metadata.tables[STREAM_TABLE_NAME]
-    try:
-        result = db.conn.execute(st.insert(), stream_id=streamid, **props)
-    except (IntegrityError, DataError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-
-    if exp != None and streamid >= 0:
-        exp.publishStream(colid, "amp_http", streamid, props)
-    return streamid
+    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "http", name,
+            timestamp, props)
 
 
 def insert_test(db, stream, timestamp, data):

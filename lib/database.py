@@ -41,6 +41,7 @@ from libnntscclient.logger import *
 DB_NO_ERROR = 0
 DB_DATA_ERROR = -1
 DB_GENERIC_ERROR = -2
+DB_INTERRUPTED = -3
 
 class CreateView(DDLElement):
     def __init__(self, name, selectable):
@@ -429,5 +430,70 @@ class Database:
                 firsttimestamp=ts))
         result.close()
 
+    def insert_stream(self, liveexp, tablename, basecol, submodule, name, 
+            timestamp, streamprops):
+
+        colid, streamid = self.register_new_stream(basecol, submodule, 
+                name, timestamp)
+
+        if colid < 0:
+            return colid
+
+        # insert stream into our stream table
+        st = self.metadata.tables[tablename]
+
+        try:
+            result = self.conn.execute(st.insert(), stream_id=streamid,
+                **streamprops)
+        except (IntegrityError, DataError, ProgrammingError) as e:
+            self.rollback_transaction()
+            logger.log(e)
+            return DB_DATA_ERROR
+        except SQLAlchemyError as e:
+            self.rollback_transaction()
+            logger.log(e)
+            return DB_GENERIC_ERROR
+        except KeyboardInterrupt as e:
+            self.rollback_transaction()
+            return DB_INTERRUPTED
+
+        if liveexp != None and streamid > 0:
+            streamprops["name"] = name
+            liveexp.publishStream(colid, basecol + "_" + submodule,
+                    streamid, streamprops)
+
+        return streamid
+
+    def insert_data(self, liveexp, tablename, collection, stream, ts, result,
+            insertfunc=None):
+   
+        # insertfunc allows callers to provide custom SQL to insert their
+        # data -- required if casts are required (e.g. amp-traceroute)
+    
+        # If no insertfunc is provided, use the generic sqlalchemy insert 
+        if insertfunc == None:
+            dt = self.metadata.tables[tablename]
+            insertfunc = dt.insert()
+
+        try:
+            self.conn.execute(insertfunc, stream_id=stream, timestamp=ts,
+                    **result)
+        except (DataError, IntegrityError, ProgrammingError) as e:
+            self.rollback_transaction()
+            logger.log(e)
+            return DB_DATA_ERROR
+        except SQLAlchemyError as e:
+            self.rollback_transaction()
+            logger.log(e)
+            return DB_GENERIC_ERROR
+        except KeyboardInterrupt as e:
+            self.rollback_transaction()
+            return DB_INTERRUPTED
+
+        if liveexp != None:
+            liveexp.publishLiveData(collection, stream, ts, result)
+
+        return DB_NO_ERROR
+     
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

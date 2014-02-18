@@ -56,35 +56,14 @@ def create_existing_stream(s):
 def insert_stream(db, exp, data, timestamp):
     name = "dns %s:%s:%s" % (data['source'], data['destination'], data['query'])
 
-    props = {"name":name}
+    props = {}
 
     for k,v in data.items():
         if k in streamkeys:
             props[k] = v
 
-    colid, streamid = db.register_new_stream("amp", "dns", name, timestamp)
-    if colid < 0:
-        return colid
-
-    st = db.metadata.tables[STREAM_TABLE_NAME]
-
-    try:
-        result = db.conn.execute(st.insert(), stream_id=streamid,
-            **data)
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-        
-
-    if streamid >= 0 and exp != None:
-        exp.publishStream(colid, "amp_dns", streamid, props)
-
-    return streamid
+    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "dns", name,
+            timestamp, props)
 
 def stream_table(db):
     if STREAM_TABLE_NAME in db.metadata.tables:
@@ -148,34 +127,13 @@ def data_table(db):
 def insert_data(db, exp, stream, ts, result):
     global partitions
 
-    dt = db.metadata.tables[DATA_TABLE_NAME]
-
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7,
             ["timestamp", "stream_id"])
     partitions.update(ts)
 
+    return db.insert_data(exp, DATA_TABLE_NAME, "amp_dns", stream, ts, result)
 
-    try:
-        db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts, **result)
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        # These errors suggest that we have some bad data that we may be
-        # able to just throw away and carry on
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        # All other errors imply an issue with the database itself or the
-        # way we have been using it. Restarting the database connection is
-        # a better course of action in this case.
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-    if exp != None:
-        exp.publishLiveData("amp_dns", stream, ts, result)
-
-    return DB_NO_ERROR
 
 def split_result(alldata, result):
 
