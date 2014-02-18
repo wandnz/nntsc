@@ -80,41 +80,13 @@ def data_table(db):
 def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
         rows, label):
 
-    props = {"name":name, "filename":filename, "switch":switch,
+    props = {"filename":filename, "switch":switch,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
-    colid, streamid = db.register_new_stream("rrd", "muninbytes", name, 0)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, "rrd", "muninbytes", name,
+            0, props)
 
-    if colid < 0:
-        return colid
-
-    st = db.metadata.tables[STREAM_TABLE_NAME]
-
-    try:
-        result = db.conn.execute(st.insert(), stream_id=streamid,
-                filename=filename, switch=switch, interface=interface,
-                direction=dir, minres=minres, highrows=rows,
-                interfacelabel=label)
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        # These errors suggest that we have some bad data that we may be
-        # able to just throw away and carry on
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        # All other errors imply an issue with the database itself or the
-        # way we have been using it. Restarting the database connection is
-        # a better course of action in this case.
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-
-    if streamid >= 0 and exp != None:
-        exp.publishStream(colid, "rrd_muninbytes", streamid, props)
-
-    return streamid
 
 def insert_data(db, exp, stream, ts, line):
     global partitions
@@ -135,35 +107,12 @@ def insert_data(db, exp, stream, ts, line):
             kwargs[line_map[i]] = val
         exportdict[line_map[i]] = val
 
-    dt = db.metadata.tables[DATA_TABLE_NAME]
-
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 30, ["timestamp", "stream_id"])
     partitions.update(ts)
 
-    try:
-        db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,
-                **kwargs)
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        # These errors suggest that we have some bad data that we may be
-        # able to just throw away and carry on
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        # All other errors imply an issue with the database itself or the
-        # way we have been using it. Restarting the database connection is
-        # a better course of action in this case.
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-    if exp is not None:
-        exp.publishLiveData("rrd_muninbytes", stream, ts, exportdict)
-
-    return DB_NO_ERROR
-
-
+    return db.insert_data(exp, DATA_TABLE_NAME, "rrd_muninbytes", stream, ts,
+            exportdict)
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

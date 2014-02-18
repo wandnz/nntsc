@@ -98,61 +98,21 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
 
     name = "icmp %s:%s:%s:%s" % (source, dest, address, size)
 
-    props = {"name":name, "source":source, "destination":dest,
+    props = {"source":source, "destination":dest,
             "packet_size":size, "datastyle":"rtt_ms", "address":address}
 
-    colid, streamid = db.register_new_stream("amp", "icmp", name, timestamp)
-
-    if colid < 0:
-        return colid
-
-    # insert stream into our stream table
-    st = db.metadata.tables[STREAM_TABLE_NAME]
-
-    try:
-        result = db.conn.execute(st.insert(), stream_id=streamid,
-                source=source, destination=dest, packet_size=size,
-                address=address, datastyle="rtt_ms")
-    except (IntegrityError, DataError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-        
-
-    if streamid >= 0 and exp != None:
-        exp.publishStream(colid, "amp_icmp", streamid, props)
-
-    return streamid
+    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "icmp", name,
+            timestamp, props)
 
 def insert_data(db, exp, stream, ts, result):
     """ Insert a new measurement into the database and export to listeners """
     global partitions
 
-    dt = db.metadata.tables[DATA_TABLE_NAME]
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id", "packet_size"])
     partitions.update(ts)
 
-    try:
-        db.conn.execute(dt.insert(), stream_id=stream, timestamp=ts,
-                **result)
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-    if exp != None:
-        exp.publishLiveData("amp_icmp", stream, ts, result)
-
-    return DB_NO_ERROR
+    return db.insert_data(exp, DATA_TABLE_NAME, "amp_icmp", stream, ts, result)
 
 def process_data(db, exp, timestamp, data, source):
     """ Process a data object, which can contain 1 or more sets of results """

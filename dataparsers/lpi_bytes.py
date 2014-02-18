@@ -104,68 +104,23 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
     namestr = "%s %s bytes for user %s -- measured from %s every %s seconds" \
             % (proto, dirstr, user, mon, freq)
 
-    colid, streamid = db.register_new_stream("lpi", "bytes", namestr, ts)
+    props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 
+            'protocol':proto}
 
-    if colid < 0:
-        return colid
+    return db.insert_stream(exp, STREAM_TABLE_NAME, "lpi", "bytes", namestr,
+            ts, props)
 
-    st = db.metadata.tables[STREAM_TABLE_NAME]
-    try:
-        result = db.conn.execute(st.insert(), stream_id=streamid,
-                source=mon, user=user, dir=dir, freq=freq, protocol=proto)
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        # These errors suggest that we have some bad data that we may be
-        # able to just throw away and carry on
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        # All other errors imply an issue with the database itself or the
-        # way we have been using it. Restarting the database connection is
-        # a better course of action in this case.
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-    if streamid >= 0 and exp != None:
-        exp.publishStream(colid, "lpi_bytes", streamid, 
-                    {'source':mon, 'user':user, 'dir':dir, 'freq':freq,
-                    'protocol':proto})
-
-    return streamid
 
 def insert_data(db, exp, stream_id, ts, value):
     global partitions
-    global foo
-
-    dt = db.metadata.tables[DATA_TABLE_NAME]
 
     if partitions == None:
         partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id"])
 
     partitions.update(ts)
 
-    try:
-        db.conn.execute(dt.insert(), stream_id=stream_id, timestamp=ts, bytes=value)
-
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        # These errors suggest that we have some bad data that we may be
-        # able to just throw away and carry on
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        # All other errors imply an issue with the database itself or the
-        # way we have been using it. Restarting the database connection is
-        # a better course of action in this case.
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-    if exp != None:
-        exp.publishLiveData("lpi_bytes", stream_id, ts, {"bytes":value})
-    return DB_NO_ERROR
-
+    result = {"bytes": value}
+    return db.insert_data(exp, DATA_TABLE_NAME, "lpi_bytes", stream_id, ts, result) 
 def process_data(db, exp, protomap, data):
 
     mon = data['id']

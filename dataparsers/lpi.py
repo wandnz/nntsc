@@ -21,7 +21,7 @@
 
 
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR
+        DB_GENERIC_ERROR, DB_INTERRUPTED
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
@@ -189,6 +189,9 @@ class LPIModule:
                         self.db.connect_db()
                         logger.log("LPIModule: Database reconnected")
                         code = self.process_stats(data)
+                   
+                    if code == DB_INTERRUPTED:
+                        break
                     
                     if code == DB_DATA_ERROR:
                         # Bad data -- reconnect to server  

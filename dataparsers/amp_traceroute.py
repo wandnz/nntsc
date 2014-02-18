@@ -104,37 +104,12 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
 
     name = "traceroute %s:%s:%s:%s" % (source, dest, address, size)
 
-    props = {"name":name, "source":source, "destination":dest,
+    props = {"source":source, "destination":dest,
             "packet_size":size, "datastyle":"traceroute",
             "address": address}
 
-    colid, streamid = db.register_new_stream("amp", "traceroute", name,
-            timestamp)
-
-    if colid < 0:
-        return colid
-
-    # insert stream into our stream table
-    st = db.metadata.tables[STREAM_TABLE_NAME]
-
-    try:
-        result = db.conn.execute(st.insert(), stream_id=streamid,
-                source=source, destination=dest, packet_size=size,
-                address=address, datastyle="traceroute")
-    except (DataError, ProgrammingError, IntegrityError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-
-
-    if streamid >= 0 and exp != None:
-        exp.publishStream(colid, "amp_traceroute", streamid, props)
-
-    return streamid
+    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "traceroute", name,
+            timestamp, props)
 
 
 def insert_data(db, exp, stream, ts, result):
@@ -146,30 +121,18 @@ def insert_data(db, exp, stream, ts, result):
                 ["timestamp", "stream_id", "packet_size"])
     partitions.update(ts)
 
-    try:
-        # sqlalchemy is again totally useless and makes it impossible to cast
-        # types on insert, so lets do it ourselves.
-        db.conn.execute(text("INSERT INTO %s ("
+    # sqlalchemy is again totally useless and makes it impossible to cast
+    # types on insert, so lets do it ourselves.
+    insertfunc = text("INSERT INTO %s ("
                     "stream_id, timestamp, packet_size, length, error_type, "
                     "error_code, hop_rtt, path) VALUES ("
                     ":stream_id, :timestamp, :packet_size, :length, "
                     ":error_type, :error_code, CAST(:hop_rtt AS integer[]),"
-                    "CAST(:path AS inet[]))" % DATA_TABLE_NAME),
-                    stream_id=stream, timestamp=ts, **result)
-    except (IntegrityError, DataError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR
-        
+                    "CAST(:path AS inet[]))" % DATA_TABLE_NAME)
 
-    if exp != None:
-        exp.publishLiveData("amp_icmp", stream, ts, result)
+    return db.insert_data(exp, DATA_TABLE_NAME, "amp_traceroute", stream,
+            ts, result, insertfunc)
 
-    return DB_NO_ERROR
 
 
 def process_data(db, exp, timestamp, data, source):
