@@ -153,7 +153,8 @@ class DBWorker(threading.Thread):
             generator = self.db.select_aggregated_data(name, labels, aggcols,
                     start, queryend, groupcols, binsize, aggfunc)
 
-            if self._query_history(generator, name, labels, more) == -1:
+            if self._query_history(generator, name, labels, more, start,
+                        queryend) == -1:
                 return -1
             start = queryend + 1
 
@@ -205,7 +206,8 @@ class DBWorker(threading.Thread):
             generator = self.db.select_percentile_data(name, labels, ntilecols,
                     othercols, start, queryend, binsize, ntileagg, otheragg)
 
-            if self._query_history(generator, name, labels, more) == -1:
+            if self._query_history(generator, name, labels, more, start,
+                        queryend) == -1:
                 return -1
             start = queryend + 1
 
@@ -297,7 +299,8 @@ class DBWorker(threading.Thread):
                 generator = self.db.select_data(name, labels, cols, start,
                         queryend)
 
-            if (self._query_history(generator, name, labels, more)) == -1:
+            if (self._query_history(generator, name, labels, more, start,
+                        queryend)) == -1:
                 return -1
 
             start = queryend + 1
@@ -306,7 +309,7 @@ class DBWorker(threading.Thread):
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
 
-    def _query_history(self, rowgen, name, labels, more):
+    def _query_history(self, rowgen, name, labels, more, start, end):
 
         currlabel = -1
         historysize = 0
@@ -314,7 +317,16 @@ class DBWorker(threading.Thread):
         observed = set([])
 
         # Get any historical data that we've been asked for
-        for row, tscol, binsize in rowgen:
+        for row, tscol, binsize, cancelled in rowgen:
+
+            if cancelled:
+                # If the query was cancelled, let the client know that
+                # the absence of data for this time range is due to a 
+                # database query timeout rather than a lack of data
+                if self._enqueue_cancel(name, labels, start, end, more) == -1:
+                    return -1
+                return 0
+                
 
             # Limit the amount of history we export at any given time
             # to prevent us from using too much memory during processing
@@ -404,6 +416,16 @@ class DBWorker(threading.Thread):
             return -1
         return 0
 
+    def _enqueue_cancel(self, name, labels, start, end, more):
+        contents = pickle.dumps((name, start, end, more, labels))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_QUERY_CANCELLED, len(contents))
+
+        try:
+            self.queue.put((NNTSC_QUERY_CANCELLED, header + contents), False)
+        except error, msg:
+            log("Unable to push query cancelled message onto full worker queue")
+            return -1
+        return 0
 
     def _enqueue_history(self, name, label, history, more, freq, lastts):
 
@@ -880,7 +902,8 @@ class NNTSCClient(threading.Thread):
             # A worker has completed a job, let's form up a response to
             # send to our client
             if response in [NNTSC_COLLECTIONS, NNTSC_SCHEMAS, NNTSC_STREAMS, \
-                        NNTSC_HISTORY, NNTSC_ACTIVE_STREAMS]:
+                        NNTSC_HISTORY, NNTSC_ACTIVE_STREAMS, \
+                        NNTSC_QUERY_CANCELLED]:
                 return self.transmit_client(result)
 
             elif response == NNTSC_REGISTER_COLLECTION:

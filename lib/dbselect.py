@@ -475,8 +475,8 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         fetched = self._query_data_generator()
-        for row in fetched:
-            yield (row, tscol, binsize)
+        for row, cancelled in fetched:
+            yield (row, tscol, binsize, cancelled)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -595,8 +595,8 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         fetched = self._query_data_generator()
-        for row in fetched:
-            yield (row, tscol, binsize)
+        for row, cancelled in fetched:
+            yield (row, tscol, binsize, cancelled)
 
 
     def _generate_label_case(self, labels):
@@ -1028,8 +1028,8 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         fetched = self._query_data_generator()
-        for row in fetched:
-            yield (row, "binstart", binsize)
+        for row, cancelled in fetched:
+            yield (row, "binstart", binsize, cancelled)
 
 
     # This generator is called by a generator function one level up, but
@@ -1047,12 +1047,13 @@ class DBSelector:
                 self.conn.rollback()
                 #info = sql % params
                 #log("DBSelector: Query cancelled")
-                break
+                yield None, True
+                #break
 
             if fetched == []:
                 break
 
             for row in fetched:
-                yield row
+                yield row, False
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

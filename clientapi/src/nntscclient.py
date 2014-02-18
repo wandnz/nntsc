@@ -219,6 +219,14 @@ class NNTSCClient:
             msgdict['collection'] = colid
             msgdict['timestamp'] = timestamp
 
+        if header[1] == NNTSC_QUERY_CANCELLED:
+            name, start, end, more, labels = pickle.loads(self.buf[header_end:total_len])
+            msgdict['collection'] = name
+            msgdict['start'] = start
+            msgdict['end'] = end
+            msgdict['more'] = more
+            msgdict['labels'] = labels
+
         self.buf = self.buf[total_len:]
         return header[1], msgdict
 
