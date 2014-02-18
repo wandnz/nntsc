@@ -125,7 +125,7 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], False, 0) == -1:
+                if self._enqueue_history(name, lab, [], False, 0, now) == -1:
                     return -1 
             return 0
 
@@ -178,7 +178,7 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], False, 0) == -1:
+                if self._enqueue_history(name, lab, [], False, 0, now) == -1:
                     return -1 
 
             return 0
@@ -232,7 +232,7 @@ class DBWorker(threading.Thread):
         if start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], False, 0) == -1:
+                if self._enqueue_history(name, lab, [], False, 0, start) == -1:
                     return -1 
 
                 if self._subscribe_streams(streams, start, end, cols, name, lab) == -1:
@@ -249,7 +249,7 @@ class DBWorker(threading.Thread):
         # the client can stockpile any live data that arrives while we're
         # busy querying the db.
         for lab, streams in labels.items():
-            if self._subscribe_streams(streams, stoppoint, end, cols, name, lab) == -1:
+            if self._subscribe_streams(streams, start, end, cols, name, lab) == -1:
                 return -1
 
         while start <= stoppoint:
@@ -283,8 +283,8 @@ class DBWorker(threading.Thread):
                 # not being present in the table when we make our query. 
                 #
                 # TODO Find a better method of dealing with this problem!
-                if origstart == start:
-                    time.sleep(30)
+                #if origstart == start:
+                #    time.sleep(5)
             else:
                 more = True
 
@@ -331,9 +331,10 @@ class DBWorker(threading.Thread):
                            
                     # Export the history to the pipe
                     freq = self._calc_frequency(freqstats, binsize)
+                    lastts = freqstats['lastts']
 
                     assert(currlabel in labels)
-                    if self._enqueue_history(name, currlabel, history, thismore, freq) == -1:
+                    if self._enqueue_history(name, currlabel, history, thismore, freq, lastts) == -1:
                         return -1
                     
                 # Reset all our counters etc.
@@ -377,7 +378,8 @@ class DBWorker(threading.Thread):
         if historysize != 0:
             # Make sure we write out the last stream
             freq = self._calc_frequency(freqstats, binsize)
-            if self._enqueue_history(name, currlabel, history, more, freq) == -1:
+            lastts = freqstats['lastts']
+            if self._enqueue_history(name, currlabel, history, more, freq, lastts) == -1:
                 return -1
 
         # Also remember to export empty history for any streams that had
@@ -388,7 +390,7 @@ class DBWorker(threading.Thread):
         missing = allstreams - observed
         for m in missing:
             assert (m in labels)
-            if self._enqueue_history(name, m, [], more, 0) == -1:
+            if self._enqueue_history(name, m, [], more, 0, 0) == -1:
                 return -1
 
         return 0
@@ -403,7 +405,7 @@ class DBWorker(threading.Thread):
         return 0
 
 
-    def _enqueue_history(self, name, label, history, more, freq):
+    def _enqueue_history(self, name, label, history, more, freq, lastts):
 
         contents = pickle.dumps((name, label, history, more, freq))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
@@ -416,7 +418,7 @@ class DBWorker(threading.Thread):
 
         if not more:
             try:
-                self.queue.put((NNTSC_HISTORY_DONE, label), False)
+                self.queue.put((NNTSC_HISTORY_DONE, label, lastts), False)
             except error, msg:
                 log("Unable to push history onto full worker queue")
                 return -1
@@ -684,7 +686,7 @@ class NNTSCClient(threading.Thread):
 
         self.parent.register_stream(streams, self.sock, cols, start, end, name, label)
 
-    def finish_subscribe(self, label):
+    def finish_subscribe(self, label, lasthist):
         # History has all been sent for this label, so we can now release
         # any live data we were storing for those streams
 
@@ -719,7 +721,9 @@ class NNTSCClient(threading.Thread):
                     
                     ts = d[2]
 
-                
+                if d[2] <= lasthist:
+                    continue
+
                 try:
                     self.releasedlive.put(d)
                 except StdQueue.Full:
@@ -727,9 +731,6 @@ class NNTSCClient(threading.Thread):
                     log("Dropping client")
                     return -1
 
-                if contents[1] == 5:
-                    log("Released data for stream %d: %d" % (contents[1], d[2]))
-            
             # One final push
             pushdata = pickle.dumps((contents[0], ts))
             header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, 
@@ -888,7 +889,9 @@ class NNTSCClient(threading.Thread):
             elif response == NNTSC_SUBSCRIBE:
                 self.subscribe_stream(result)
             elif response == NNTSC_HISTORY_DONE:
-                if self.finish_subscribe(result) == -1:
+                label = obj[1]
+                timestamp = obj[2]
+                if self.finish_subscribe(label, timestamp) == -1:
                     return -1
             
             else:
