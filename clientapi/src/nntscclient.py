@@ -231,7 +231,7 @@ class NNTSCClient:
                 msgdict['boundary'] = data[1]
             
             if request == NNTSC_HISTORY:
-                collection, start, end, more, labels = data
+                collection, labels, start, end, more = data
                 msgdict['collection'] = collection
                 msgdict['start'] = start
                 msgdict['end'] = end
