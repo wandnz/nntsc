@@ -220,12 +220,23 @@ class NNTSCClient:
             msgdict['timestamp'] = timestamp
 
         if header[1] == NNTSC_QUERY_CANCELLED:
-            name, start, end, more, labels = pickle.loads(self.buf[header_end:total_len])
-            msgdict['collection'] = name
-            msgdict['start'] = start
-            msgdict['end'] = end
-            msgdict['more'] = more
-            msgdict['labels'] = labels
+            request, data = pickle.loads(self.buf[header_end:total_len])
+            msgdict['request'] = request
+
+            if request == NNTSC_SCHEMAS:
+                msgdict['colid'] = data
+           
+            if request in [NNTSC_STREAMS, NNTSC_ACTIVE_STREAMS] :
+                msgdict['collection'] = data[0]
+                msgdict['boundary'] = data[1]
+            
+            if request == NNTSC_HISTORY:
+                collection, start, end, more, labels = data
+                msgdict['collection'] = collection
+                msgdict['start'] = start
+                msgdict['end'] = end
+                msgdict['more'] = more
+                msgdict['labels'] = labels
 
         self.buf = self.buf[total_len:]
         return header[1], msgdict
