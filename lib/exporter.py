@@ -28,7 +28,7 @@ from multiprocessing import Pipe, Queue
 import Queue as StdQueue
 import threading, select
 
-from libnntsc.dbselect import DBSelector
+from libnntsc.dbselect import DBSelector, NNTSCDatabaseTimeout
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
@@ -309,6 +309,23 @@ class DBWorker(threading.Thread):
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return 0
 
+    def _cancel_history(self, name, labels, start, end, more):
+        # If the query was cancelled, let the client know that
+        # the absence of data for this time range is due to a 
+        # database query timeout rather than a lack of data
+        if self._enqueue_cancel(NNTSC_HISTORY, (name, labels, start, end, more)) == -1:
+            return -1
+
+        if not more:
+            for lab in labels:
+                try:
+                    self.queue.put((NNTSC_HISTORY_DONE, lab, 0), False)
+                except StdQueue.Full:
+                    log("Unable to push history onto full worker queue")
+                    return -1
+
+        return 0
+
     def _query_history(self, rowgen, name, labels, more, start, end):
 
         currlabel = -1
@@ -320,12 +337,7 @@ class DBWorker(threading.Thread):
         for row, tscol, binsize, cancelled in rowgen:
 
             if cancelled:
-                # If the query was cancelled, let the client know that
-                # the absence of data for this time range is due to a 
-                # database query timeout rather than a lack of data
-                if self._enqueue_cancel(name, labels, start, end, more) == -1:
-                    return -1
-                return 0
+                return self._cancel_history(name, labels, start, end, more)
                 
 
             # Limit the amount of history we export at any given time
@@ -416,8 +428,8 @@ class DBWorker(threading.Thread):
             return -1
         return 0
 
-    def _enqueue_cancel(self, name, labels, start, end, more):
-        contents = pickle.dumps((name, start, end, more, labels))
+    def _enqueue_cancel(self, reqtype, data):
+        contents = pickle.dumps((reqtype, data))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_QUERY_CANCELLED, len(contents))
 
         try:
@@ -434,14 +446,14 @@ class DBWorker(threading.Thread):
 
         try:
             self.queue.put((NNTSC_HISTORY, header + contents), False)
-        except error, msg:
+        except StdQueue.Full:
             log("Unable to push history onto full worker queue")
             return -1
 
         if not more:
             try:
                 self.queue.put((NNTSC_HISTORY_DONE, label, lastts), False)
-            except error, msg:
+            except StdQueue.Full:
                 log("Unable to push history onto full worker queue")
                 return -1
 
@@ -449,7 +461,14 @@ class DBWorker(threading.Thread):
 
     def _request_collections(self):
         # Requesting the collection list
-        cols = self.db.list_collections()
+        try:
+            cols = self.db.list_collections()
+        except NNTSCDatabaseTimeout as e:
+            log("Query timed out while fetching collections")
+            if self._enqueue_cancel(NNTSC_COLLECTIONS, None) == -1:
+                log("Failed to enqueue CANCELLED message")
+                return -1
+            return 0
 
         shrink = []
         for c in cols:
@@ -467,7 +486,16 @@ class DBWorker(threading.Thread):
         return 0
 
     def _request_schemas(self, col_id):
-        stream_schema, data_schema = self.db.get_collection_schema(col_id)
+
+        try:
+            stream_schema, data_schema = self.db.get_collection_schema(col_id)
+        except NNTSCDatabaseTimeout as e:
+            log("Query timed out while fetching schemas for collection %d" % (col_id))
+
+            if self._enqueue_cancel(NNTSC_SCHEMAS, col_id) == -1:
+                log("Failed to enqueue CANCELLED message")
+                return -1
+            return 0
 
         result = pickle.dumps((col_id, stream_schema, data_schema))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(result))
@@ -480,10 +508,25 @@ class DBWorker(threading.Thread):
         return 0
 
     def _request_streams(self, col, bound, request):
+        
         if request == NNTSC_STREAMS:
-            streams = self.db.select_streams_by_collection(col, bound)
+            try:
+                streams = self.db.select_streams_by_collection(col, bound)
+            except NNTSCDatabaseTimeout as e:
+                log("Query timed out while fetching streams for collection %s" % (col))
+                if self._enqueue_cancel(NNTSC_STREAMS, (col, bound)):
+                    log("Failed to enqueue CANCELLED message")
+                    return -1
+                return 0
         elif request == NNTSC_ACTIVE_STREAMS:
-            streams = self.db.select_active_streams_by_collection(col, bound)
+            try:
+                streams = self.db.select_active_streams_by_collection(col, bound)
+            except NNTSCDatabaseTimeout as e:
+                log("Query timed out while fetching active streams for collection %s" % (col))
+                if self._enqueue_cancel(NNTSC_ACTIVE_STREAMS, (col, bound)):
+                    log("Failed to enqueue CANCELLED message")
+                    return -1
+                return 0
         else:
             log("Got into request streams with bad request: %d" % request)
             return -1
