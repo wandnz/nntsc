@@ -482,7 +482,13 @@ class DBSelector:
         params = tuple(binparam + from_params + [start_time, stop_time] +
                 all_streams + [start_time, stop_time])
 
-        self.datacursor.execute(sql, params)
+        try:
+            self.datacursor.execute(sql, params)
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            self.datacursor = None
+            yield (None, None, None, True) 
+        
 
         fetched = self._query_data_generator()
         for row, cancelled in fetched:
@@ -679,7 +685,6 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
-            return None, []
 
         assert(self.basiccursor.rowcount == 1)
 
@@ -700,7 +705,6 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
-            return None, []
 
 
         columns = []

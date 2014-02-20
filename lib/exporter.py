@@ -613,9 +613,11 @@ class DBWorker(threading.Thread):
             if self.process_job(job) == -1:
                 break
             self.db.close()
+            self.db = None
 
         # Thread is over, tidy up
-        self.db.close()
+        if self.db is not None:
+            self.db.close()
 
     def _calc_frequency(self, freqdata, binsize):
 
