@@ -10,11 +10,18 @@ import time
 #  * named cursors allow us to easily deal with large result sets
 #  * documentation that makes sense
 
+class NNTSCDatabaseTimeout(Exception):
+    def __init__(self, secs):
+        self.timeout = secs
+    def __str__(self):
+        return "Database Query timed out after %d secs" % (self.timeout)
+
 class DBSelector:
     def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None,
             timeout=0):
 
         self.dbselid = uniqueid
+        self.timeout = timeout
         connstr = "dbname=%s user=%s" % (dbname, dbuser)
         if dbpass != "" and dbpass != None:
             connstr += " password=%s" % (dbpass)
@@ -127,7 +134,7 @@ class DBSelector:
             self.basiccursor.execute("SELECT * from collections")
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return []
+            raise NNTSCDatabaseTimeout(self.timeout)
         
         while True:
             row = self.basiccursor.fetchone()
@@ -157,7 +164,7 @@ class DBSelector:
                 (colid,))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return [], []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
         tables = self.basiccursor.fetchone()
 
@@ -168,7 +175,7 @@ class DBSelector:
                     "SELECT * from %s LIMIT 1" % (tables['streamtable']))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return [], []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
         streamcolnames = [cn[0] for cn in self.basiccursor.description]
 
@@ -177,7 +184,7 @@ class DBSelector:
                     "SELECT * from %s LIMIT 1" % (tables['datatable']))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return [], []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
         datacolnames = [cn[0] for cn in self.basiccursor.description]
         return streamcolnames, datacolnames
@@ -212,7 +219,7 @@ class DBSelector:
                     "SELECT * from collections where module=%s", (mod,))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
         streamtables = {}
 
@@ -229,6 +236,7 @@ class DBSelector:
                 self.basiccursor.execute(sql, (cid,))
             except psycopg2.extensions.QueryCanceledError:
                 self.conn.rollback()
+                raise NNTSCDatabaseTimeout(self.timeout)
                 return []
 
 
@@ -267,8 +275,8 @@ class DBSelector:
                     "SELECT * from collections where id=%s", (coll,))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return []
-        
+            raise NNTSCDatabaseTimeout(self.timeout)
+       
         assert(self.basiccursor.rowcount == 1)
 
         coldata = self.basiccursor.fetchone()
@@ -276,11 +284,12 @@ class DBSelector:
         tname = coldata['streamtable']
         sql = """SELECT * FROM streams, %s WHERE streams.id = %s.stream_id
                  AND streams.id > %s""" % (tname, tname, "%s")
+        
         try:
             self.basiccursor.execute(sql, (minid,))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
         selected = []
         while True:
@@ -315,7 +324,7 @@ class DBSelector:
             self.basiccursor.execute(sql, (coll, lastactivity))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
         active = []
         while True:
@@ -406,9 +415,10 @@ class DBSelector:
 
         # Find the data table and make sure we are only querying for
         # valid columns
-        table, columns = self._get_data_table(col)
-        if table == None:
-            return
+        try:
+            table, columns = self._get_data_table(col)
+        except NNTSCDatabaseTimeout as e:
+            yield (None, None, None, True)
 
         # XXX get rid of stream_id, ideally it wouldnt even get to here
         if "stream_id" in groupcols:
@@ -472,11 +482,17 @@ class DBSelector:
         params = tuple(binparam + from_params + [start_time, stop_time] +
                 all_streams + [start_time, stop_time])
 
-        self.datacursor.execute(sql, params)
+        try:
+            self.datacursor.execute(sql, params)
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            self.datacursor = None
+            yield (None, None, None, True) 
+        
 
         fetched = self._query_data_generator()
-        for row in fetched:
-            yield (row, tscol, binsize)
+        for row, cancelled in fetched:
+            yield (row, tscol, binsize, cancelled)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -522,9 +538,10 @@ class DBSelector:
             start_time = stop_time - (24 * 60 * 60)
 
         # Find the data table for the requested collection
-        table, columns = self._get_data_table(col)
-        if table == None:
-            return
+        try:
+            table, columns = self._get_data_table(col)
+        except NNTSCDatabaseTimeout as e:
+            yield (None, None, None, True)
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
@@ -595,8 +612,8 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         fetched = self._query_data_generator()
-        for row in fetched:
-            yield (row, tscol, binsize)
+        for row, cancelled in fetched:
+            yield (row, tscol, binsize, cancelled)
 
 
     def _generate_label_case(self, labels):
@@ -667,7 +684,7 @@ class DBSelector:
                     "SELECT * from collections where id=%s", (col,))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return None, []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
         assert(self.basiccursor.rowcount == 1)
 
@@ -687,7 +704,7 @@ class DBSelector:
                 (tname,))
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return None, []
+            raise NNTSCDatabaseTimeout(self.timeout)
 
 
         columns = []
@@ -933,9 +950,11 @@ class DBSelector:
 
         # Find the data table and make sure we are only querying for
         # valid columns
-        table, columns = self._get_data_table(col)
-        if table == None:
-            return
+        try:
+            table, columns = self._get_data_table(col)
+        except NNTSCDatabaseTimeout as e:
+            yield (None, None, None, True)
+        
         ntilecols = self._sanitise_columns(columns, ntilecols)
         othercols = self._sanitise_columns(columns, othercols)
 
@@ -1028,8 +1047,8 @@ class DBSelector:
         self.datacursor.execute(sql, params)
 
         fetched = self._query_data_generator()
-        for row in fetched:
-            yield (row, "binstart", binsize)
+        for row, cancelled in fetched:
+            yield (row, "binstart", binsize, cancelled)
 
 
     # This generator is called by a generator function one level up, but
@@ -1047,12 +1066,13 @@ class DBSelector:
                 self.conn.rollback()
                 #info = sql % params
                 #log("DBSelector: Query cancelled")
-                break
+                yield None, True
+                #break
 
             if fetched == []:
                 break
 
             for row in fetched:
-                yield row
+                yield row, False
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
