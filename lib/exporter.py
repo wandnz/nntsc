@@ -29,7 +29,7 @@ import Queue as StdQueue
 import threading, select
 
 from libnntsc.dbselect import DBSelector, NNTSCDatabaseTimeout, \
-    NNTSCDatabaseDisconnect
+    NNTSCDatabaseDisconnect, DB_QUERY_OK, DB_QUERY_CANCEL, DB_QUERY_RETRY
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
@@ -161,9 +161,9 @@ class DBWorker(threading.Thread):
             error = self._query_history(generator, name, labels, more, start,
                     queryend)
 
-            if error == -1:
+            if error == DB_QUERY_CANCEL:
                 return error
-            if error == -2:
+            if error == DB_QUERY_RETRY:
                 continue
             start = queryend + 1
 
@@ -218,9 +218,9 @@ class DBWorker(threading.Thread):
             error = self._query_history(generator, name, labels, more, start,
                     queryend)
 
-            if error == -1:
+            if error == DB_QUERY_CANCEL:
                 return error
-            if error == -2:
+            if error == DB_QUERY_RETRY:
                 continue
             start = queryend + 1
 
@@ -306,9 +306,9 @@ class DBWorker(threading.Thread):
             error = self._query_history(generator, name, labels, more, start,
                     queryend)
 
-            if error == -1:
+            if error == DB_QUERY_CANCEL:
                 return error
-            if error == -2:
+            if error == DB_QUERY_RETRY:
                 continue
 
             start = queryend + 1
@@ -346,12 +346,12 @@ class DBWorker(threading.Thread):
 
             # -1 means that the query was cancelled due to a timeout -- let
             # the querier know that they got cancelled
-            if errorcode == -1:
+            if errorcode == DB_QUERY_CANCEL:
                 return self._cancel_history(name, labels, start, end, more)
 
             # -2 means that the database disappeared on us -- reconnect and
             # try to resume from where we got up to before
-            if errorcode == -2:
+            if errorcode == DB_QUERY_RETRY:
                 if self._reconnect_database() == -1:
                     return -1
                 return errorcode

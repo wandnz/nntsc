@@ -10,6 +10,10 @@ import time
 #  * named cursors allow us to easily deal with large result sets
 #  * documentation that makes sense
 
+DB_QUERY_OK = 0
+DB_QUERY_CANCEL = -1
+DB_QUERY_RETRY = -2
+
 class NNTSCDatabaseTimeout(Exception):
     def __init__(self, secs):
         self.timeout = secs
@@ -441,9 +445,9 @@ class DBSelector:
         try:
             table, columns = self._get_data_table(col)
         except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, -1)
+            yield (None, None, None, DB_QUERY_CANCEL)
         except NNTSCDatabaseDisconnect as e:
-            yield (None, None, None, -2)
+            yield (None, None, None, DB_QUERY_RETRY)
             
 
         # XXX get rid of stream_id, ideally it wouldnt even get to here
@@ -513,10 +517,10 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             self.datacursor = None
-            yield (None, None, None, -1)
+            yield (None, None, None, DB_QUERY_CANCEL)
         except psycopg2.OperationalError:
             self.datacursor = None
-            yield (None, None, None, -2) 
+            yield (None, None, None, DB_QUERY_RETRY) 
         
 
         fetched = self._query_data_generator()
@@ -570,9 +574,9 @@ class DBSelector:
         try:
             table, columns = self._get_data_table(col)
         except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, -1)
+            yield (None, None, None, DB_QUERY_CANCEL)
         except NNTSCDatabaseDisconnect as e:
-            yield (None, None, None, -2)
+            yield (None, None, None, DB_QUERY_RETRY)
 
 
         # Make sure we only query for columns that are in the data table
@@ -989,9 +993,9 @@ class DBSelector:
         try:
             table, columns = self._get_data_table(col)
         except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, -1)
+            yield (None, None, None, DB_QUERY_CANCEL)
         except NNTSCDatabaseDisconnect as e:
-            yield (None, None, None, -2)
+            yield (None, None, None, DB_QUERY_RETRY)
             
         
         ntilecols = self._sanitise_columns(columns, ntilecols)
@@ -1105,15 +1109,15 @@ class DBSelector:
                 self.conn.rollback()
                 #info = sql % params
                 #log("DBSelector: Query cancelled")
-                yield None, -1
+                yield None, DB_QUERY_CANCEL 
                 #break
             except psycopg2.OperationalError:
-                yield None, -2
+                yield None, DB_QUERY_RETRY
 
             if fetched == []:
                 break
 
             for row in fetched:
-                yield row, 0
+                yield row, DB_QUERY_OK
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
