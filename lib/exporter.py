@@ -1336,11 +1336,14 @@ class NNTSCExporter:
         if self.listen_sock == -1:
             return -1
 
-        self.livequeue = initExportConsumer(nntsc_conf, queueid, 'nntsclive')
+        if queueid != None:
+            self.livequeue = initExportConsumer(nntsc_conf, queueid, 
+                    'nntsclive')
        
-        if self.livequeue == None:
-            log("Failed to initialise consumer for exporter")
-            return -1
+            if self.livequeue == None:
+                log("Failed to initialise consumer for exporter")
+                return -1
+
         return 0 
 
     def run(self):
@@ -1352,14 +1355,24 @@ class NNTSCExporter:
         listenthread = NNTSCListener(self.listen_sock, self)
         listenthread.daemon = True
         listenthread.start()
-        
-        # Prepare our export queue consumer
-        for s in self.sources:
-            self.livequeue.bind_queue(s)
-        self.livequeue.configure_consumer(self.receive_source)
+       
+        if self.livequeue is not None:
+         
+            # Prepare our export queue consumer
+            for s in self.sources:
+                self.livequeue.bind_queue(s)
+            self.livequeue.configure_consumer(self.receive_source)
 
-        # Start reading from the queue
-        self.livequeue.run_consumer()
+            # Start reading from the queue
+            self.livequeue.run_consumer()
+        else:
+            while 1:
+                try:
+                    listenthread.join(1)
+                except KeyboardInterrupt:
+                    break
+                except:
+                    raise
         
 
 

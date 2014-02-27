@@ -85,18 +85,22 @@ class DataCollector():
                 dbconf["host"])
 
         self.db.connect_db();
-        queueid = get_nntsc_config(nntsc_conf, "liveexport", "queueid")
-        if queueid == "NNTSCConfigError":
-            logger.log("Invalid queueid identifier for NNTSC exporter")
-            sys.exit(1)
+        self.processes = []
         
-        self.queueid = queueid
+        if not self.exportonly:
+            queueid = get_nntsc_config(nntsc_conf, "liveexport", "queueid")
+            if queueid == "NNTSCConfigError":
+                logger.log("Invalid queueid identifier for NNTSC exporter")
+                sys.exit(1)
+        
+            self.queueid = queueid
+        else:
+            self.queueid = None
 
         if self.exporter.configure(self.config, self.querytimeout, self.queueid) == -1:
             sys.exit(1)
-
-        self.processes = []
         self.config = nntsc_conf
+
 
     def run(self):
 
@@ -115,6 +119,7 @@ class DataCollector():
                 p.join()
             except:
                 raise
+        
 
     def get_processes(self):
         return self.processes
