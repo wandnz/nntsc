@@ -21,7 +21,7 @@
 
 
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED
+        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
@@ -182,7 +182,7 @@ class LPIModule:
                     self.update_seen(data)
                     code = self.process_stats(data)
                     
-                    while (code == DB_GENERIC_ERROR):
+                    while (code in [DB_GENERIC_ERROR, DB_OPERATIONAL_ERROR]):
                         # Database error -- reconnect to database
                         logger.log("LPIModule: Database Error")
                         time.sleep(5)

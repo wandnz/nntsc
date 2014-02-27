@@ -42,6 +42,7 @@ DB_NO_ERROR = 0
 DB_DATA_ERROR = -1
 DB_GENERIC_ERROR = -2
 DB_INTERRUPTED = -3
+DB_OPERATIONAL_ERROR = -4
 
 class CreateView(DDLElement):
     def __init__(self, name, selectable):
@@ -413,8 +414,13 @@ class Database:
         self.trans = self.conn.begin()
 
     def rollback_transaction(self):
-        self.trans.rollback()
-        self.trans = self.conn.begin()
+        try:
+            self.trans.rollback()
+            self.trans = self.conn.begin()
+        except OperationalError as e:
+            # DB has gone away, can't rollback
+            self.trans = None
+            return
 
     def update_timestamp(self, stream_ids, lasttimestamp):
         if len(stream_ids) == 0:
@@ -449,6 +455,10 @@ class Database:
             self.rollback_transaction()
             logger.log(e)
             return DB_DATA_ERROR
+        except OperationalError as e:
+            # Don't rollback as the database has probably gone away
+            logger.log(e)
+            return DB_OPERATIONAL_ERROR
         except SQLAlchemyError as e:
             self.rollback_transaction()
             logger.log(e)
@@ -482,6 +492,10 @@ class Database:
             self.rollback_transaction()
             logger.log(e)
             return DB_DATA_ERROR
+        except OperationalError as e:
+            # Don't rollback as the database has probably gone away
+            logger.log(e)
+            return DB_OPERATIONAL_ERROR
         except SQLAlchemyError as e:
             self.rollback_transaction()
             logger.log(e)

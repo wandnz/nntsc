@@ -24,7 +24,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.types import Integer, String, Float
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED
+        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
 import libnntscclient.logger as logger
@@ -126,7 +126,7 @@ class RRDModule:
                                         self.exporter, r['stream_id'], current, 
                                         line)
 
-                            if code == DB_GENERIC_ERROR:
+                            if code in [DB_GENERIC_ERROR, DB_OPERATIONAL_ERROR]:
                                 logger.log("RRDModule: Database Error")
                                 time.sleep(5)
                                 self.db.connect_db()
