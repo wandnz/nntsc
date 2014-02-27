@@ -16,6 +16,12 @@ class NNTSCDatabaseTimeout(Exception):
     def __str__(self):
         return "Database Query timed out after %d secs" % (self.timeout)
 
+class NNTSCDatabaseDisconnect(Exception):
+    def __init__(self):
+        pass
+    def __str__(self):
+        return "Connection to NNTSC Database was lost"
+
 class DBSelector:
     def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None,
             timeout=0):
@@ -135,6 +141,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
         
         while True:
             row = self.basiccursor.fetchone()
@@ -165,6 +173,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
         tables = self.basiccursor.fetchone()
 
@@ -176,6 +186,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
         streamcolnames = [cn[0] for cn in self.basiccursor.description]
 
@@ -185,6 +197,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
         datacolnames = [cn[0] for cn in self.basiccursor.description]
         return streamcolnames, datacolnames
@@ -220,6 +234,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
         streamtables = {}
 
@@ -237,7 +253,8 @@ class DBSelector:
             except psycopg2.extensions.QueryCanceledError:
                 self.conn.rollback()
                 raise NNTSCDatabaseTimeout(self.timeout)
-                return []
+            except psycopg2.OperationalError:
+                raise NNTSCDatabaseDisconnect()
 
 
             while True:
@@ -276,6 +293,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
        
         assert(self.basiccursor.rowcount == 1)
 
@@ -290,6 +309,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
         selected = []
         while True:
@@ -325,6 +346,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
         active = []
         while True:
@@ -418,7 +441,10 @@ class DBSelector:
         try:
             table, columns = self._get_data_table(col)
         except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, True)
+            yield (None, None, None, -1)
+        except NNTSCDatabaseDisconnect as e:
+            yield (None, None, None, -2)
+            
 
         # XXX get rid of stream_id, ideally it wouldnt even get to here
         if "stream_id" in groupcols:
@@ -487,7 +513,10 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             self.datacursor = None
-            yield (None, None, None, True) 
+            yield (None, None, None, -1)
+        except psycopg2.OperationalError:
+            self.datacursor = None
+            yield (None, None, None, -2) 
         
 
         fetched = self._query_data_generator()
@@ -541,7 +570,10 @@ class DBSelector:
         try:
             table, columns = self._get_data_table(col)
         except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, True)
+            yield (None, None, None, -1)
+        except NNTSCDatabaseDisconnect as e:
+            yield (None, None, None, -2)
+
 
         # Make sure we only query for columns that are in the data table
         selectcols = self._sanitise_columns(columns, selectcols)
@@ -685,6 +717,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
         assert(self.basiccursor.rowcount == 1)
 
@@ -705,6 +739,8 @@ class DBSelector:
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
             raise NNTSCDatabaseTimeout(self.timeout)
+        except psycopg2.OperationalError:
+            raise NNTSCDatabaseDisconnect()
 
 
         columns = []
@@ -953,7 +989,10 @@ class DBSelector:
         try:
             table, columns = self._get_data_table(col)
         except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, True)
+            yield (None, None, None, -1)
+        except NNTSCDatabaseDisconnect as e:
+            yield (None, None, None, -2)
+            
         
         ntilecols = self._sanitise_columns(columns, ntilecols)
         othercols = self._sanitise_columns(columns, othercols)
@@ -1066,13 +1105,15 @@ class DBSelector:
                 self.conn.rollback()
                 #info = sql % params
                 #log("DBSelector: Query cancelled")
-                yield None, True
+                yield None, -1
                 #break
+            except psycopg2.OperationalError:
+                yield None, -2
 
             if fetched == []:
                 break
 
             for row in fetched:
-                yield row, False
+                yield row, 0
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
