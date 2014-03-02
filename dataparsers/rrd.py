@@ -156,8 +156,26 @@ class RRDModule:
 
                         current += step
 
-                    self.db.update_timestamp([r['stream_id']],
-                            r['lasttimestamp'])
+                    while 1:
+                        code = self.db.update_timestamp([r['stream_id']],
+                                r['lasttimestamp'])
+
+                        if code in [DB_GENERIC_ERROR, DB_OPERATIONAL_ERROR]:
+                            logger.log("RRDModule: Database Error")
+                            time.sleep(5)
+                            self.db.connect_db()
+                            logger.log("RRDModule: Database reconnected")
+                            continue
+
+                        break
+
+                    if code == DB_DATA_ERROR:
+                        logger.log("Bad Update for RRD Data, skipping update")
+
+                    if code == DB_INTERRUPTED:
+                        logger.log("RRDModule: Interrupt in RRD module")
+                        return
+
             self.db.commit_transaction()
 
             time.sleep(30)

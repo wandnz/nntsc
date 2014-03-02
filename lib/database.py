@@ -23,7 +23,7 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint, event, DDL, Index
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError,\
-        ProgrammingError, DataError
+        ProgrammingError, DataError, InvalidRequestError, InterfaceError
 from sqlalchemy.sql import and_, or_, not_, text
 from sqlalchemy.sql.expression import select, outerjoin, func, label
 from sqlalchemy.engine.url import URL
@@ -83,30 +83,37 @@ class Database:
 
     def connect_db(self):
 
-        if not self.init_error and self.trans is not None:
+        if self.trans is not None:
             self.commit_transaction() 
 
         if self.conn is not None:
             self.conn.close()
 
         self.init_error = False
+        
         self.engine = create_engine(self.connect_string, echo=False,
                 implicit_returning = False)
 
-        self.__reflect_db()
+        while self.__reflect_db() == -1:
+           time.sleep(5) 
 
         self.conn = self.engine.connect()
+
         self.trans = self.conn.begin()
+        return 0
 
     def __reflect_db(self):
         self.metadata = MetaData(self.engine)
         try:
             self.metadata.reflect(bind=self.engine)
-        except OperationalError, e:
-            log("Error binding to database %s" % (self.dbname))
-            log("Are you sure you've specified the right database name?")
-            self.init_error = True
-            sys.exit(1)
+        except OperationalError as e:
+            if "does not exist" in e.args[0]:
+                log("Error binding to database %s" % (self.dbname))
+                log("Are you sure you've specified the right database name?")
+                sys.exit(1)
+            else:
+                log(e) 
+            return -1
 
         # reflect() is supposed to take a 'views' argument which will
         # force it to reflects views as well as tables, but our version of
@@ -117,9 +124,14 @@ class Database:
         for v in views:
             view_table = Table(v, self.metadata, autoload=True)
 
+        return 0
+
+    def reconnect(self):
+        time.sleep(5)
+        self.connect_db()
 
     def __del__(self):
-        if not self.init_error:
+        if self.conn is not None:
             self.commit_transaction()
             self.conn.close()
 
@@ -249,18 +261,26 @@ class Database:
         # Insert entry into the stream table
         sttable = self.metadata.tables['streams']
 
-        try:
-            result = self.conn.execute(sttable.insert(), collection=col_id,
-                    name=name, lasttimestamp=0, firsttimestamp=ts)
-        except (DataError, ProgrammingError, IntegrityError) as e:
-            log(e)
-            log("Failed to register stream %s for %s:%s, probably already exists" % (name, mod, subtype))
-            #print >> sys.stderr, e
-            return DB_DATA_ERROR, -1
-        except SQLAlchemyError as e:
-            log(e)
-            log("Failed to register stream %s for %s:%s due to SQLAlchemy error" % (name, mod, subtype))
-            return DB_GENERIC_ERROR, -1
+        while 1:
+
+            try:
+                result = self.conn.execute(sttable.insert(), collection=col_id,
+                        name=name, lasttimestamp=0, firsttimestamp=ts)
+            except (DataError, ProgrammingError, IntegrityError) as e:
+                log(e)
+                log("Failed to register stream %s for %s:%s, probably already exists" % (name, mod, subtype))
+                #print >> sys.stderr, e
+                return DB_DATA_ERROR, -1
+            except OperationalError as e:
+                log("Database became unavailable while registering stream")
+                self.reconnect()
+                continue
+            except SQLAlchemyError as e:
+                log(e)
+                log("Failed to register stream %s for %s:%s due to SQLAlchemy error" % (name, mod, subtype))
+                return DB_GENERIC_ERROR, -1
+
+            break
 
         # Return the new stream id
         newid = result.inserted_primary_key
@@ -408,8 +428,11 @@ class Database:
 
         try:
             self.trans.commit()
-        except:
+        except InvalidRequestError as e:
             self.trans.rollback()
+            self.trans = None
+            return
+        except:
             raise
         self.trans = self.conn.begin()
 
@@ -417,17 +440,36 @@ class Database:
         try:
             self.trans.rollback()
             self.trans = self.conn.begin()
-        except OperationalError as e:
+        except (OperationalError, InterfaceError) as e:
             # DB has gone away, can't rollback
             self.trans = None
             return
 
     def update_timestamp(self, stream_ids, lasttimestamp):
         if len(stream_ids) == 0:
-            return
+            return DB_NO_ERROR
         sql = "UPDATE streams SET lasttimestamp=%s "
         sql += "WHERE id IN (%s)" % (",".join(["%s"] * len(stream_ids)))
-        self.conn.execute(sql, tuple([lasttimestamp] + stream_ids))
+
+        while 1:    
+            try:
+                self.conn.execute(sql, tuple([lasttimestamp] + stream_ids))
+            except OperationalError as e:
+                self.reconnect()
+                continue
+            except (IntegrityError, DataError, ProgrammingError) as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_DATA_ERROR
+            except KeyboardInterrupt as e:
+                self.rollback_transaction()
+                return DB_INTERRUPTED
+            except SQLAlchemyError as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_GENERIC_ERROR
+
+            return DB_NO_ERROR
 
     def set_firsttimestamp(self, stream_id, ts):
         table = self.metadata.tables['streams']
@@ -448,24 +490,28 @@ class Database:
         # insert stream into our stream table
         st = self.metadata.tables[tablename]
 
-        try:
-            result = self.conn.execute(st.insert(), stream_id=streamid,
-                **streamprops)
-        except (IntegrityError, DataError, ProgrammingError) as e:
-            self.rollback_transaction()
-            logger.log(e)
-            return DB_DATA_ERROR
-        except OperationalError as e:
-            # Don't rollback as the database has probably gone away
-            logger.log(e)
-            return DB_OPERATIONAL_ERROR
-        except SQLAlchemyError as e:
-            self.rollback_transaction()
-            logger.log(e)
-            return DB_GENERIC_ERROR
-        except KeyboardInterrupt as e:
-            self.rollback_transaction()
-            return DB_INTERRUPTED
+        while 1:
+
+            try:
+                result = self.conn.execute(st.insert(), stream_id=streamid,
+                    **streamprops)
+            except (IntegrityError, DataError, ProgrammingError) as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_DATA_ERROR
+            except OperationalError as e:
+                # Don't rollback as the database has probably gone away
+                log("Operational Error while inserting stream")
+                self.reconnect()
+                continue
+            except SQLAlchemyError as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_GENERIC_ERROR
+            except KeyboardInterrupt as e:
+                self.rollback_transaction()
+                return DB_INTERRUPTED
+            break
 
         if liveexp != None and streamid > 0:
             streamprops["name"] = name
@@ -485,24 +531,29 @@ class Database:
             dt = self.metadata.tables[tablename]
             insertfunc = dt.insert()
 
-        try:
-            self.conn.execute(insertfunc, stream_id=stream, timestamp=ts,
-                    **result)
-        except (DataError, IntegrityError, ProgrammingError) as e:
-            self.rollback_transaction()
-            logger.log(e)
-            return DB_DATA_ERROR
-        except OperationalError as e:
-            # Don't rollback as the database has probably gone away
-            logger.log(e)
-            return DB_OPERATIONAL_ERROR
-        except SQLAlchemyError as e:
-            self.rollback_transaction()
-            logger.log(e)
-            return DB_GENERIC_ERROR
-        except KeyboardInterrupt as e:
-            self.rollback_transaction()
-            return DB_INTERRUPTED
+        while 1:
+
+            try:
+                self.conn.execute(insertfunc, stream_id=stream, timestamp=ts,
+                        **result)
+            except (DataError, IntegrityError, ProgrammingError) as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_DATA_ERROR
+            except OperationalError as e:
+                # Don't rollback as the database has probably gone away
+                log("Operational Error while inserting data")
+                self.reconnect()
+                continue
+            except SQLAlchemyError as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_GENERIC_ERROR
+            except KeyboardInterrupt as e:
+                self.rollback_transaction()
+                return DB_INTERRUPTED
+
+            break
 
         if liveexp != None:
             liveexp.publishLiveData(collection, stream, ts, result)

@@ -176,7 +176,6 @@ def process_data(db, exp, timestamp, data, source):
         if res != DB_NO_ERROR:
             return res
         done[stream_id] = 0
-    db.update_timestamp(done.keys(), timestamp)
-    return DB_NO_ERROR
+    return db.update_timestamp(done.keys(), timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

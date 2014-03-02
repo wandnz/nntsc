@@ -182,21 +182,15 @@ class LPIModule:
                     self.update_seen(data)
                     code = self.process_stats(data)
                     
-                    while (code in [DB_GENERIC_ERROR, DB_OPERATIONAL_ERROR]):
-                        # Database error -- reconnect to database
-                        logger.log("LPIModule: Database Error")
-                        time.sleep(5)
-                        self.db.connect_db()
-                        logger.log("LPIModule: Database reconnected")
-                        code = self.process_stats(data)
-                   
-                    if code == DB_INTERRUPTED:
+                    if code in [DB_INTERRUPTED, DB_GENERIC_ERROR]:
                         break
                     
                     if code == DB_DATA_ERROR:
                         # Bad data -- reconnect to server  
                         logger.log("LPIModule: Invalid Statistics Data")
                         break
+
+                    assert(code != DB_OPERATIONAL_ERROR)
 
                 if rec_type == -1:
                     break

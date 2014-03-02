@@ -153,7 +153,6 @@ def process_data(db, exp, protomap, data):
         if res != DB_NO_ERROR:
             return res
         done.append(stream_id)
-    db.update_timestamp(done, data['ts'])
-    return DB_NO_ERROR
+    return db.update_timestamp(done, data['ts'])
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
