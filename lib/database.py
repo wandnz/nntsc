@@ -473,10 +473,30 @@ class Database:
 
     def set_firsttimestamp(self, stream_id, ts):
         table = self.metadata.tables['streams']
-        result = self.conn.execute(table.update().where( \
-                table.c.id==stream_id).values( \
-                firsttimestamp=ts))
+        
+        while 1:
+            try:
+                result = self.conn.execute(table.update().where( \
+                    table.c.id==stream_id).values( \
+                    firsttimestamp=ts))
+                break
+            except OperationalError as e:
+                self.reconnect()
+                continue
+            except (IntegrityError, DataError, ProgrammingError) as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_DATA_ERROR
+            except KeyboardInterrupt as e:
+                self.rollback_transaction()
+                return DB_INTERRUPTED
+            except SQLAlchemyError as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_GENERIC_ERROR
+
         result.close()
+        return DB_NO_ERROR
 
     def insert_stream(self, liveexp, tablename, basecol, submodule, name, 
             timestamp, streamprops):

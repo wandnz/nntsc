@@ -181,10 +181,14 @@ class LPIModule:
                 if rec_type == 0:
                     self.update_seen(data)
                     code = self.process_stats(data)
-                    
-                    if code in [DB_INTERRUPTED, DB_GENERIC_ERROR]:
+                   
+                    if code == DB_INTERRUPTED:
                         break
-                    
+                        
+                    if code == DB_GENERIC_ERROR:
+                        logger.log("Database error while processing LPI data")
+                        break
+                         
                     if code == DB_DATA_ERROR:
                         # Bad data -- reconnect to server  
                         logger.log("LPIModule: Invalid Statistics Data")

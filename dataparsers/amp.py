@@ -163,18 +163,17 @@ class AmpModule:
                     logger.log("Interrupt while processing AMP data")
                     channel.close()
                     return            
+                
+                elif code == DB_GENERIC_ERROR:
+                    logger.log("Database error while processing AMP data")
+                    channel.close()
+                    return
 
                 else:
-                    # Some other error cropped up. Best approach here is to 
-                    # reconnect to the database and try to process the message
-                    # again. Unfortunately SQLAlchemy gives us no indication
-                    # of whether the connect was successful until we try to
-                    # operate on the connection, so we'll just have to loop
-                    # around and try process the message again
-                    logger.log("AMP -- reconnecting to database after error")
-                    time.sleep(5)
-                    self.db.connect_db()
-                    logger.log("AMP -- reconnected")
+                    logger.log("Unknown error code returned by database: %d" % (code))
+                    logger.log("Shutting down AMP module")
+                    channel.close()
+                    return
 
             else:
                 # ignore any messages that don't have user_id set
