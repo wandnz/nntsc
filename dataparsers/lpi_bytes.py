@@ -120,7 +120,9 @@ def insert_data(db, exp, stream_id, ts, value):
     partitions.update(ts)
 
     result = {"bytes": value}
-    return db.insert_data(exp, DATA_TABLE_NAME, "lpi_bytes", stream_id, ts, result) 
+
+    return db.insert_data(exp, DATA_TABLE_NAME, "lpi_bytes", stream_id, ts, result)
+
 def process_data(db, exp, protomap, data):
 
     mon = data['id']
@@ -150,10 +152,12 @@ def process_data(db, exp, protomap, data):
                 lpi_bytes_streams[(mon, user, dir, freq, protomap[p])] = stream_id
 
         code = insert_data(db, exp, stream_id, data['ts'], val)
+        
         if code != DB_NO_ERROR:
             return code
         done.append(stream_id)
-    db.update_timestamp(done, data['ts'])
-    return 0
+   
+    return db.update_timestamp(done, data['ts'])
+    
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

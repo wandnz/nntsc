@@ -21,7 +21,7 @@
 
 
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED
+        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
@@ -181,22 +181,20 @@ class LPIModule:
                 if rec_type == 0:
                     self.update_seen(data)
                     code = self.process_stats(data)
-                    
-                    while (code == DB_GENERIC_ERROR):
-                        # Database error -- reconnect to database
-                        logger.log("LPIModule: Database Error")
-                        time.sleep(5)
-                        self.db.connect_db()
-                        logger.log("LPIModule: Database reconnected")
-                        code = self.process_stats(data)
                    
                     if code == DB_INTERRUPTED:
                         break
-                    
+                        
+                    if code == DB_GENERIC_ERROR:
+                        logger.log("Database error while processing LPI data")
+                        break
+                         
                     if code == DB_DATA_ERROR:
                         # Bad data -- reconnect to server  
                         logger.log("LPIModule: Invalid Statistics Data")
                         break
+
+                    assert(code != DB_OPERATIONAL_ERROR)
 
                 if rec_type == -1:
                     break

@@ -28,7 +28,8 @@ from multiprocessing import Pipe, Queue
 import Queue as StdQueue
 import threading, select
 
-from libnntsc.dbselect import DBSelector, NNTSCDatabaseTimeout
+from libnntsc.dbselect import DBSelector, NNTSCDatabaseTimeout, \
+    NNTSCDatabaseDisconnect, DB_QUERY_OK, DB_QUERY_CANCEL, DB_QUERY_RETRY
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
@@ -84,6 +85,8 @@ from libnntsc.pikaqueue import initExportConsumer
 MAX_HISTORY_QUERY = (24 * 60 * 60 * 7)
 MAX_WORKERS = 2
 
+DB_WORKER_MAX_RETRIES = 3
+
 class DBWorker(threading.Thread):
     def __init__(self, parent, queue, dbconf, threadid, timeout):
         threading.Thread.__init__(self)
@@ -99,6 +102,8 @@ class DBWorker(threading.Thread):
 
         if jobtype == -1:
             return -1
+   
+        self.retries = 0
     
         if jobtype == NNTSC_REQUEST:
             return self.process_request(jobdata)
@@ -153,9 +158,13 @@ class DBWorker(threading.Thread):
             generator = self.db.select_aggregated_data(name, labels, aggcols,
                     start, queryend, groupcols, binsize, aggfunc)
 
-            if self._query_history(generator, name, labels, more, start,
-                        queryend) == -1:
-                return -1
+            error = self._query_history(generator, name, labels, more, start,
+                    queryend)
+
+            if error == DB_QUERY_CANCEL:
+                return error
+            if error == DB_QUERY_RETRY:
+                continue
             start = queryend + 1
 
             # If we were asked for data up until "now", make sure we account
@@ -206,9 +215,13 @@ class DBWorker(threading.Thread):
             generator = self.db.select_percentile_data(name, labels, ntilecols,
                     othercols, start, queryend, binsize, ntileagg, otheragg)
 
-            if self._query_history(generator, name, labels, more, start,
-                        queryend) == -1:
-                return -1
+            error = self._query_history(generator, name, labels, more, start,
+                    queryend)
+
+            if error == DB_QUERY_CANCEL:
+                return error
+            if error == DB_QUERY_RETRY:
+                continue
             start = queryend + 1
 
             # If we were asked for data up until "now", make sure we account
@@ -278,15 +291,6 @@ class DBWorker(threading.Thread):
             if queryend >= stoppoint:
                 queryend = stoppoint
                 more = False
-
-                # Horrible method of ensuring that any uncommitted historical
-                # data is committed before we start our final query. 
-                # Otherwise, we will miss the last datapoint(s) due to them
-                # not being present in the table when we make our query. 
-                #
-                # TODO Find a better method of dealing with this problem!
-                #if origstart == start:
-                #    time.sleep(5)
             else:
                 more = True
 
@@ -299,9 +303,13 @@ class DBWorker(threading.Thread):
                 generator = self.db.select_data(name, labels, cols, start,
                         queryend)
 
-            if (self._query_history(generator, name, labels, more, start,
-                        queryend)) == -1:
-                return -1
+            error = self._query_history(generator, name, labels, more, start,
+                    queryend)
+
+            if error == DB_QUERY_CANCEL:
+                return error
+            if error == DB_QUERY_RETRY:
+                continue
 
             start = queryend + 1
 
@@ -334,10 +342,19 @@ class DBWorker(threading.Thread):
         observed = set([])
 
         # Get any historical data that we've been asked for
-        for row, tscol, binsize, cancelled in rowgen:
+        for row, tscol, binsize, errorcode in rowgen:
 
-            if cancelled:
+            # -1 means that the query was cancelled due to a timeout -- let
+            # the querier know that they got cancelled
+            if errorcode == DB_QUERY_CANCEL:
                 return self._cancel_history(name, labels, start, end, more)
+
+            # -2 means that the database disappeared on us -- reconnect and
+            # try to resume from where we got up to before
+            if errorcode == DB_QUERY_RETRY:
+                if self._reconnect_database() == -1:
+                    return -1
+                return errorcode
                 
 
             # Limit the amount of history we export at any given time
@@ -459,16 +476,35 @@ class DBWorker(threading.Thread):
 
         return 0
 
+    def _reconnect_database(self):
+        if self.retries >= DB_WORKER_MAX_RETRIES:
+            return -1
+        self.retries += 1
+        log("Worker thread %s reconnecting to NNTSC database: attempt %d" % \
+                (self.threadid, self.retries))
+
+        self._connect_database()
+        return 0
+
     def _request_collections(self):
         # Requesting the collection list
-        try:
-            cols = self.db.list_collections()
-        except NNTSCDatabaseTimeout as e:
-            log("Query timed out while fetching collections")
-            if self._enqueue_cancel(NNTSC_COLLECTIONS, None) == -1:
-                log("Failed to enqueue CANCELLED message")
-                return -1
-            return 0
+        while 1:
+             
+            try:
+                cols = self.db.list_collections()
+            except NNTSCDatabaseTimeout as e:
+                log("Query timed out while fetching collections")
+                if self._enqueue_cancel(NNTSC_COLLECTIONS, None) == -1:
+                    log("Failed to enqueue CANCELLED message")
+                    return -1
+                return 0
+            except NNTSCDatabaseDisconnect as e:
+                log("Database disappeared while fetching collections")
+                if self._reconnect_database() == -1:
+                    return -1
+                continue
+            break
+
 
         shrink = []
         for c in cols:
@@ -487,15 +523,22 @@ class DBWorker(threading.Thread):
 
     def _request_schemas(self, col_id):
 
-        try:
-            stream_schema, data_schema = self.db.get_collection_schema(col_id)
-        except NNTSCDatabaseTimeout as e:
-            log("Query timed out while fetching schemas for collection %d" % (col_id))
+        while 1:
+            try:
+                stream_schema, data_schema = self.db.get_collection_schema(col_id)
+            except NNTSCDatabaseTimeout as e:
+                log("Query timed out while fetching schemas for collection %d" % (col_id))
 
-            if self._enqueue_cancel(NNTSC_SCHEMAS, col_id) == -1:
-                log("Failed to enqueue CANCELLED message")
-                return -1
-            return 0
+                if self._enqueue_cancel(NNTSC_SCHEMAS, col_id) == -1:
+                    log("Failed to enqueue CANCELLED message")
+                    return -1
+                return 0
+            except NNTSCDatabaseDisconnect as e:
+                log("Database disappeared while fetching schemas for collection %d" % (col_id))
+                if self._reconnect_database() == -1:
+                    return -1
+                continue
+            break
 
         result = pickle.dumps((col_id, stream_schema, data_schema))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(result))
@@ -510,23 +553,38 @@ class DBWorker(threading.Thread):
     def _request_streams(self, col, bound, request):
         
         if request == NNTSC_STREAMS:
-            try:
-                streams = self.db.select_streams_by_collection(col, bound)
-            except NNTSCDatabaseTimeout as e:
-                log("Query timed out while fetching streams for collection %s" % (col))
-                if self._enqueue_cancel(NNTSC_STREAMS, (col, bound)):
-                    log("Failed to enqueue CANCELLED message")
-                    return -1
-                return 0
+            while 1:
+                try:
+                    streams = self.db.select_streams_by_collection(col, bound)
+                except NNTSCDatabaseTimeout as e:
+                    log("Query timed out while fetching streams for collection %s" % (col))
+                    if self._enqueue_cancel(NNTSC_STREAMS, (col, bound)):
+                        log("Failed to enqueue CANCELLED message")
+                        return -1
+                    return 0
+                except NNTSCDatabaseDisconnect as e:
+                    log("Database disappeared while fetching streams for collection %d" % (col))
+                    if self._reconnect_database() == -1:
+                        return -1
+                    continue
+                break
+        
         elif request == NNTSC_ACTIVE_STREAMS:
-            try:
-                streams = self.db.select_active_streams_by_collection(col, bound)
-            except NNTSCDatabaseTimeout as e:
-                log("Query timed out while fetching active streams for collection %s" % (col))
-                if self._enqueue_cancel(NNTSC_ACTIVE_STREAMS, (col, bound)):
-                    log("Failed to enqueue CANCELLED message")
-                    return -1
-                return 0
+            while 1:
+                try:
+                    streams = self.db.select_active_streams_by_collection(col, bound)
+                except NNTSCDatabaseTimeout as e:
+                    log("Query timed out while fetching active streams for collection %s" % (col))
+                    if self._enqueue_cancel(NNTSC_ACTIVE_STREAMS, (col, bound)):
+                        log("Failed to enqueue CANCELLED message")
+                        return -1
+                    return 0
+                except NNTSCDatabaseDisconnect as e:
+                    log("Database disappeared while fetching active streams for collection %d" % (col))
+                    if self._reconnect_database() == -1:
+                        return -1
+                    continue
+                break
         else:
             log("Got into request streams with bad request: %d" % request)
             return -1
@@ -591,6 +649,11 @@ class DBWorker(threading.Thread):
 
         return 0
 
+    def _connect_database(self):
+        self.db = DBSelector(self.threadid, self.dbconf["name"], 
+                self.dbconf["user"],
+                self.dbconf["pass"], self.dbconf["host"], self.timeout)
+
     def run(self):
         running = 1
 
@@ -607,9 +670,7 @@ class DBWorker(threading.Thread):
             # this thread if we aren't using it otherwise we run the
             # risk of inactive threads preventing us from contacting
             # the database
-            self.db = DBSelector(self.threadid, self.dbconf["name"], 
-                    self.dbconf["user"],
-                    self.dbconf["pass"], self.dbconf["host"], self.timeout)
+            self._connect_database()
             if self.process_job(job) == -1:
                 break
             self.db.close()
@@ -618,6 +679,7 @@ class DBWorker(threading.Thread):
         # Thread is over, tidy up
         if self.db is not None:
             self.db.close()
+        self.parent.disconnect()
 
     def _calc_frequency(self, freqdata, binsize):
 
@@ -721,7 +783,7 @@ class NNTSCClient(threading.Thread):
         self.releasedlive = Queue(100000)
         self.outstanding = ""
 
-
+        self.running = 0
         self.waitstreams = {}
         self.waitlabels = {}
         self.savedlive = {} 
@@ -817,7 +879,8 @@ class NNTSCClient(threading.Thread):
 
         del self.waitlabels[label]
            
-        return 0    
+        return 0   
+         
     def client_message(self, msg):
         error = 0
         header = struct.unpack(nntsc_hdr_fmt, msg[0:struct.calcsize(nntsc_hdr_fmt)])
@@ -981,8 +1044,12 @@ class NNTSCClient(threading.Thread):
 
         return False
 
+    def disconnect(self):
+        self.running = 0
+
+
     def run(self):
-        running = 1
+        self.running = 1
 
         # Tell the client what version of the client API they need
         contents = pickle.dumps(NNTSC_CLIENTAPI_VERSION)
@@ -991,7 +1058,7 @@ class NNTSCClient(threading.Thread):
 
         self.transmit_client(header + contents)
 
-        while running:
+        while self.running:
             input = [self.sock]
             
             if self.write_required():
@@ -1005,24 +1072,24 @@ class NNTSCClient(threading.Thread):
             for s in inpready:
                 if s == self.sock:
                     if self.receive_client() == 0:
-                        running = 0
+                        self.running = 0
                         break
 
             if self.sock in outready:
                 if len(self.outstanding) > 0:
                     if self.transmit_client(self.outstanding) == -1:
-                        running = 0
+                        self.running = 0
                         break
                 elif self.releasedlive.qsize() > 0:
                     if self.send_released() == -1:
-                        running = 0
+                        self.running = 0
                         break
                 elif self.livequeue.qsize() > 0:
                     if self.receive_live() == -1:
-                        running = 0
+                        self.running = 0
                         break
                 elif self.receive_worker() == -1:
-                    running = 0
+                    self.running = 0
                     break
 
 

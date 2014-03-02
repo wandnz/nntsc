@@ -24,7 +24,7 @@ from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint
 from sqlalchemy.types import Integer, String, Float
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED
+        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
 import libnntscclient.logger as logger
@@ -115,26 +115,16 @@ class RRDModule:
                             break
 
                         code = DB_DATA_ERROR
-                        while 1:
-                            if r['modsubtype'] == "smokeping":
-                                code = rrd_smokeping.insert_data(self.db, 
-                                        self.exporter, r['stream_id'], current, 
-                                        line)
+                        if r['modsubtype'] == "smokeping":
+                            code = rrd_smokeping.insert_data(self.db, 
+                                    self.exporter, r['stream_id'], current, 
+                                    line)
 
-                            if r['modsubtype'] == "muninbytes":
-                                code = rrd_muninbytes.insert_data(self.db, 
-                                        self.exporter, r['stream_id'], current, 
-                                        line)
+                        if r['modsubtype'] == "muninbytes":
+                            code = rrd_muninbytes.insert_data(self.db, 
+                                    self.exporter, r['stream_id'], current, 
+                                    line)
 
-                            if code == DB_GENERIC_ERROR:
-                                logger.log("RRDModule: Database Error")
-                                time.sleep(5)
-                                self.db.connect_db()
-                                logger.log("RRDModule: Database reconnected")
-                                continue
-
-                            break
-                        
                         if code == DB_NO_ERROR:
                             if current > r['lasttimestamp']:
                                 r['lasttimestamp'] = current
@@ -144,8 +134,13 @@ class RRDModule:
                             # the first data point
                             if (r['firsttimestamp'] == 0):
                                 r['firsttimestamp'] = current;
-                                self.db.set_firsttimestamp(r['stream_id'], 
-                                        current)
+                                code = self.db.set_firsttimestamp(
+                                            r['stream_id'], 
+                                            current)
+
+                        if code == DB_GENERIC_ERROR:
+                            logger.log("Database error while inserting RRD data")
+                            return
 
                         if code == DB_DATA_ERROR:
                             logger.log("Bad RRD Data, skipping row")
@@ -156,8 +151,19 @@ class RRDModule:
 
                         current += step
 
-                    self.db.update_timestamp([r['stream_id']],
+                    code = self.db.update_timestamp([r['stream_id']],
                             r['lasttimestamp'])
+
+                    if code == DB_GENERIC_ERROR:
+                        logger.log("Database error while updating RRD stream")
+                        return
+                    if code == DB_DATA_ERROR:
+                        logger.log("Bad Update for RRD Data, skipping update")
+
+                    if code == DB_INTERRUPTED:
+                        logger.log("RRDModule: Interrupt in RRD module")
+                        return
+
             self.db.commit_transaction()
 
             time.sleep(30)

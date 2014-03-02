@@ -189,9 +189,7 @@ def process_data(db, exp, timestamp, data, source):
             return res
         done[stream_id] = 0
 
-    db.update_timestamp(done.keys(), timestamp)
-
-    return DB_NO_ERROR
+    return db.update_timestamp(done.keys(), timestamp)
 
 
 def register(db):

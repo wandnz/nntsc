@@ -23,7 +23,7 @@
 import sys
 
 from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED
+        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 import pika
@@ -38,12 +38,12 @@ class AmpModule:
     def __init__(self, tests, nntsc_config, expqueue, exchange):
 
         logging.basicConfig()
-        dbconf = get_nntsc_db_config(nntsc_config)
-        if dbconf == {}:
+        self.dbconf = get_nntsc_db_config(nntsc_config)
+        if self.dbconf == {}:
             sys.exit(1)
-
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
-                dbconf["host"])
+        
+        self.db = Database(self.dbconf["name"], self.dbconf["user"], 
+                self.dbconf["pass"], self.dbconf["host"])
 
         self.db.connect_db()
 
@@ -74,6 +74,7 @@ class AmpModule:
 
         self.initSource(nntsc_config)
         self.exporter = initExportPublisher(nntsc_config, expqueue, exchange)
+
 
     def initSource(self, nntsc_config):
         # Parse connection info
@@ -162,18 +163,17 @@ class AmpModule:
                     logger.log("Interrupt while processing AMP data")
                     channel.close()
                     return            
+                
+                elif code == DB_GENERIC_ERROR:
+                    logger.log("Database error while processing AMP data")
+                    channel.close()
+                    return
 
                 else:
-                    # Some other error cropped up. Best approach here is to 
-                    # reconnect to the database and try to process the message
-                    # again. Unfortunately SQLAlchemy gives us no indication
-                    # of whether the connect was successful until we try to
-                    # operate on the connection, so we'll just have to loop
-                    # around and try process the message again
-                    logger.log("AMP -- reconnecting to database after error")
-                    time.sleep(5)
-                    self.db.connect_db()
-                    logger.log("AMP -- reconnected")
+                    logger.log("Unknown error code returned by database: %d" % (code))
+                    logger.log("Shutting down AMP module")
+                    channel.close()
+                    return
 
             else:
                 # ignore any messages that don't have user_id set
