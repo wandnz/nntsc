@@ -27,7 +27,6 @@ from sqlalchemy.exc import IntegrityError, OperationalError, DataError, \
         ProgrammingError, SQLAlchemyError
 from sqlalchemy.dialects import postgresql
 import libnntscclient.logger as logger
-from libnntsc.partition import PartitionedTable
 from libnntsc.database import DB_NO_ERROR, DB_DATA_ERROR, DB_GENERIC_ERROR
 
 import sys, string
@@ -36,7 +35,6 @@ STREAM_TABLE_NAME="streams_lpi_flows"
 DATA_TABLE_NAME="data_lpi_flows"
 
 lpi_flows_streams = {}
-partitions = None
 
 def stream_table(db):
 
@@ -113,18 +111,11 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, metric, ts):
     props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq,
             'protocol':proto, 'metric':metric}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "lpi", "flows", namestr,
-            ts, props)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+            "lpi", "flows", namestr, ts, props)
 
 
 def insert_data(db, exp, stream_id, ts, value):
-    global partitions
-
-    if partitions == None:
-        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id"])
-
-    partitions.update(ts)
-
     result = {"flows":value}
     return db.insert_data(exp, DATA_TABLE_NAME, "lpi_flows", stream_id, ts, result)
 

@@ -25,7 +25,6 @@ from sqlalchemy.types import Integer, String
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError,\
         ProgrammingError
 from sqlalchemy.dialects import postgresql
-from libnntsc.partition import PartitionedTable
 from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
 import libnntscclient.logger as logger
 
@@ -33,7 +32,6 @@ STREAM_TABLE_NAME = "streams_amp_icmp"
 DATA_TABLE_NAME = "data_amp_icmp"
 
 amp_icmp_streams = {}
-partitions = None
 
 def stream_table(db):
     """ Specify the description of an icmp stream, used to create the table """
@@ -101,16 +99,11 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     props = {"source":source, "destination":dest,
             "packet_size":size, "datastyle":"rtt_ms", "address":address}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "icmp", name,
-            timestamp, props)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME,
+            "amp", "icmp", name, timestamp, props)
 
 def insert_data(db, exp, stream, ts, result):
     """ Insert a new measurement into the database and export to listeners """
-    global partitions
-
-    if partitions == None:
-        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id", "packet_size"])
-    partitions.update(ts)
 
     return db.insert_data(exp, DATA_TABLE_NAME, "amp_icmp", stream, ts, result)
 

@@ -226,6 +226,10 @@ class Database:
     def register_collection(self, mod, subtype, stable, dtable):
         table = self.metadata.tables['collections']
 
+        # TODO Maybe check if the collection exists first -- this is
+        # mostly just so we don't waste collection ids, which tends to
+        # bug me for some reason
+
         try:
             self.conn.execute(table.insert(), module=mod, modsubtype=subtype,
                     streamtable=stable, datatable=dtable)
@@ -237,7 +241,7 @@ class Database:
 
         self.commit_transaction()
 
-    def register_new_stream(self, mod, subtype, name, ts):
+    def register_new_stream(self, mod, subtype, name, ts, basedata):
 
         # Find the appropriate collection id
         coltable = self.metadata.tables['collections']
@@ -286,6 +290,39 @@ class Database:
         newid = result.inserted_primary_key
         result.close()
 
+        datatablename = basedata + "_" + str(newid[0])
+
+        # Create a new data table for this stream, using the "base" data
+        # table as a template
+        while 1:
+            query = "CREATE TABLE %s AS SELECT * FROM %s WHERE stream_id=0" % \
+                    (datatablename, basedata)
+            try:
+                result = self.conn.execute(query)
+            except OperationalError as e:
+                log("Database became unavailable while creating new data table")
+                self.reconnect()
+                continue
+            except (DataError, ProgrammingError, IntegrityError) as e:
+                log(e)
+                log("Failed to create data table for new stream %s-%s:%s" % \
+                        (str(newid[0]), mod, subtype))
+                return DB_DATA_ERROR, -1
+            except SQLAlchemyError as e:
+                log(e)
+                log("Failed to create data table for new stream %s-%s:%s" % \
+                        (str(newid[0]), mod, subtype))
+                return DB_GENERIC_ERROR, -1
+            break
+
+        self.commit_transaction()
+
+        try:
+            self.metadata.reflect(bind=self.engine)
+        except OperationalError as e:
+            log("Database became unavailable while binding new data table")
+            self.reconnect()
+        
         return col_id, newid[0]
 
     def __delete_everything(self, engine):
@@ -498,11 +535,11 @@ class Database:
         result.close()
         return DB_NO_ERROR
 
-    def insert_stream(self, liveexp, tablename, basecol, submodule, name, 
-            timestamp, streamprops):
+    def insert_stream(self, liveexp, tablename, datatable, basecol, submodule, 
+            name, timestamp, streamprops):
 
         colid, streamid = self.register_new_stream(basecol, submodule, 
-                name, timestamp)
+                name, timestamp, datatable)
 
         if colid < 0:
             return colid
@@ -548,7 +585,7 @@ class Database:
     
         # If no insertfunc is provided, use the generic sqlalchemy insert 
         if insertfunc == None:
-            dt = self.metadata.tables[tablename]
+            dt = self.metadata.tables[tablename + "_" + str(stream)]
             insertfunc = dt.insert()
 
         while 1:

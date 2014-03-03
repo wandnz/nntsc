@@ -26,12 +26,10 @@ from sqlalchemy.types import Integer, String, Float, BigInteger
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError,\
         ProgrammingError, DataError
 import libnntscclient.logger as logger
-from libnntsc.partition import PartitionedTable
 from libnntsc.database import DB_NO_ERROR, DB_GENERIC_ERROR, DB_DATA_ERROR
 
 STREAM_TABLE_NAME = "streams_rrd_muninbytes"
 DATA_TABLE_NAME = "data_rrd_muninbytes"
-partitions = None
 
 def stream_table(db):
 
@@ -84,12 +82,11 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "rrd", "muninbytes", name,
-            0, props)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, "rrd", 
+            "muninbytes", name, 0, props)
 
 
 def insert_data(db, exp, stream, ts, line):
-    global partitions
     assert(len(line) == 1)
 
     kwargs = {}
@@ -106,10 +103,6 @@ def insert_data(db, exp, stream, ts, line):
         if val != None:
             kwargs[line_map[i]] = val
         exportdict[line_map[i]] = val
-
-    if partitions == None:
-        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 30, ["timestamp", "stream_id"])
-    partitions.update(ts)
 
     return db.insert_data(exp, DATA_TABLE_NAME, "rrd_muninbytes", stream, ts,
             exportdict)

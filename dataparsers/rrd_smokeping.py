@@ -25,13 +25,10 @@ from sqlalchemy.types import Integer, String, Float
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
         SQLAlchemyError, DataError
 import libnntscclient.logger as logger
-from libnntsc.partition import PartitionedTable
 from libnntsc.database import DB_NO_ERROR, DB_GENERIC_ERROR, DB_DATA_ERROR
 
 STREAM_TABLE_NAME="streams_rrd_smokeping"
 DATA_TABLE_NAME="data_rrd_smokeping"
-
-partitions = None
 
 def stream_table(db):
 
@@ -100,12 +97,11 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
     props = {"filename":fname, "source":source, "host":host,
             "minres":minres, "highrows":rows}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "rrd", "smokeping", name,
-            timestamp, props)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, "rrd", 
+            "smokeping", name, 0, props)
 
 
 def insert_data(db, exp, stream, ts, line):
-    global partitions
     # This is terrible :(
 
     kwargs = {}
@@ -130,10 +126,6 @@ def insert_data(db, exp, stream, ts, line):
             kwargs[line_map[i]] = val
 
         exportdict[line_map[i]] = val
-
-    if partitions == None:
-        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 30, ["timestamp", "stream_id"])
-    partitions.update(ts)
 
     return db.insert_data(exp, DATA_TABLE_NAME, "rrd_smokeping", stream, ts, 
             exportdict)

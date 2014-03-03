@@ -26,7 +26,6 @@ from sqlalchemy.types import Integer, String, Float, Boolean
 from sqlalchemy.exc import DataError, IntegrityError, OperationalError, \
         SQLAlchemyError, ProgrammingError
 from sqlalchemy.dialects import postgresql
-from libnntsc.partition import PartitionedTable
 from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
 import libnntscclient.logger as logger
 
@@ -34,7 +33,6 @@ STREAM_TABLE_NAME = "streams_amp_dns"
 DATA_TABLE_NAME = "data_amp_dns"
 
 amp_dns_streams = {}
-partitions = None
 
 streamkeys = ['destination', 'instance', 'address', 'query', 'query_type',
     'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid', 'source']
@@ -62,8 +60,8 @@ def insert_stream(db, exp, data, timestamp):
         if k in streamkeys:
             props[k] = v
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "dns", name,
-            timestamp, props)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME,
+            "amp", "dns", name, timestamp, props)
 
 def stream_table(db):
     if STREAM_TABLE_NAME in db.metadata.tables:
@@ -125,13 +123,6 @@ def data_table(db):
 
 
 def insert_data(db, exp, stream, ts, result):
-    global partitions
-
-    if partitions == None:
-        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7,
-            ["timestamp", "stream_id"])
-    partitions.update(ts)
-
     return db.insert_data(exp, DATA_TABLE_NAME, "amp_dns", stream, ts, result)
 
 

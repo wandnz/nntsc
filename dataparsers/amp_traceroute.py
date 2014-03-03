@@ -27,7 +27,6 @@ from sqlalchemy.types import Integer, String
 from sqlalchemy.exc import IntegrityError, OperationalError, DataError, \
         ProgrammingError, SQLAlchemyError
 from sqlalchemy.dialects import postgresql
-from libnntsc.partition import PartitionedTable
 from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
 import libnntscclient.logger as logger
 
@@ -35,7 +34,6 @@ STREAM_TABLE_NAME = "streams_amp_traceroute"
 DATA_TABLE_NAME = "data_amp_traceroute"
 
 amp_trace_streams = {}
-partitions = None
 
 def stream_table(db):
     """ Specify the description of a traceroute stream, to create the table """
@@ -108,18 +106,12 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
             "packet_size":size, "datastyle":"traceroute",
             "address": address}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "traceroute", name,
-            timestamp, props)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+            "amp", "traceroute", name, timestamp, props)
 
 
 def insert_data(db, exp, stream, ts, result):
     """ Insert data for a single traceroute test into the database """
-    global partitions
-
-    if partitions == None:
-        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7,
-                ["timestamp", "stream_id", "packet_size"])
-    partitions.update(ts)
 
     # sqlalchemy is again totally useless and makes it impossible to cast
     # types on insert, so lets do it ourselves.
@@ -128,7 +120,8 @@ def insert_data(db, exp, stream, ts, result):
                     "error_code, hop_rtt, path) VALUES ("
                     ":stream_id, :timestamp, :packet_size, :length, "
                     ":error_type, :error_code, CAST(:hop_rtt AS integer[]),"
-                    "CAST(:path AS inet[]))" % DATA_TABLE_NAME)
+                    "CAST(:path AS inet[]))" % \
+                    (DATA_TABLE_NAME + "_" + str(stream)))
 
     return db.insert_data(exp, DATA_TABLE_NAME, "amp_traceroute", stream,
             ts, result, insertfunc)
