@@ -22,7 +22,7 @@
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean
+from sqlalchemy.types import Integer, String, Float, Boolean, SmallInteger
 from sqlalchemy.exc import DataError, IntegrityError, OperationalError, \
         SQLAlchemyError, ProgrammingError
 from sqlalchemy.dialects import postgresql
@@ -101,15 +101,15 @@ def data_table(db):
         Column('stream_id', Integer, ForeignKey("streams.id"),
             nullable=False),
         Column('timestamp', Integer, nullable=False),
-        Column('rtt', Integer, nullable=False),
-        Column('query_len', Integer, nullable=False),
         Column('response_size', Integer, nullable=False),
-        Column('total_answer', Integer, nullable=False),
-        Column('total_authority', Integer, nullable=False),
-        Column('total_additional', Integer, nullable=False),
-        Column('opcode', String, nullable=False),
-        Column('rcode', String, nullable=False),
-        Column('ttl', Integer, nullable=False),
+        Column('rtt', Integer, nullable=False),
+        Column('ttl', SmallInteger, nullable=False),
+        Column('query_len', SmallInteger, nullable=False),
+        Column('total_answer', SmallInteger, nullable=False),
+        Column('total_authority', SmallInteger, nullable=False),
+        Column('total_additional', SmallInteger, nullable=False),
+        Column('opcode', SmallInteger, nullable=False),
+        Column('rcode', SmallInteger, nullable=False),
         Column('flag_rd', Boolean, nullable=False),
         Column('flag_tc', Boolean, nullable=False),
         Column('flag_aa', Boolean, nullable=False),

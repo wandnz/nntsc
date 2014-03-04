@@ -21,7 +21,7 @@
 
 from sqlalchemy import Table, Column, Integer, \
         String, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String
+from sqlalchemy.types import Integer, String, SmallInteger
 from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError,\
         ProgrammingError
 from sqlalchemy.dialects import postgresql
@@ -66,12 +66,12 @@ def data_table(db):
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
-        Column('packet_size', Integer, nullable=False),
         Column('rtt', Integer, nullable=True),
-        Column('ttl', Integer, nullable=True),
-        Column('loss', Integer, nullable=False),
-        Column('error_type', Integer, nullable=False),
-        Column('error_code', Integer, nullable=False),
+        Column('packet_size', SmallInteger, nullable=False),
+        Column('ttl', SmallInteger, nullable=True),
+        Column('loss', SmallInteger, nullable=False),
+        Column('error_type', SmallInteger, nullable=False),
+        Column('error_code', SmallInteger, nullable=False),
         useexisting=True,
     )
 
