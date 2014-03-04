@@ -68,8 +68,8 @@ class AmpModule:
                 key = amp_traceroute.create_existing_stream(i)
             elif testtype == "dns":
                 key = amp_dns.create_existing_stream(i)
-            elif testtype == "http":
-                key = amp_http.create_existing_stream(i)
+            #elif testtype == "http":
+            #    key = amp_http.create_existing_stream(i)
 
 
         self.initSource(nntsc_config)
@@ -133,8 +133,10 @@ class AmpModule:
                         code = amp_dns.process_data(self.db, self.exporter,
                                 properties.timestamp, data, source)
                     elif test == "http":
-                        code = amp_http.process_data(self.db, self.exporter,
-                                properties.timestamp, data, source)
+                        channel.basic_ack(delivery_tag=method.delivery_tag)
+                        break
+                    #    code = amp_http.process_data(self.db, self.exporter,
+                    #            properties.timestamp, data, source)
                     else:
                         code = DB_DATA_ERROR
                 else:
@@ -199,7 +201,7 @@ def tables(db):
     amp_icmp.register(db)
     amp_traceroute.register(db)
     amp_dns.register(db)
-    amp_http.register(db)
+    #amp_http.register(db)
     #amp_udpstream.register(db)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
