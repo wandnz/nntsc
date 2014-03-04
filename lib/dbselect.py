@@ -424,10 +424,6 @@ class DBSelector:
         if type(binsize) is not int:
             return
 
-        # Make sure we have a usable cursor
-        self._reset_cursor()
-        if self.datacursor == None:
-            return
 
         # Set default time boundaries
         if stop_time == None:
@@ -479,50 +475,62 @@ class DBSelector:
 
         # Constructing the innermost SELECT query, which lists the label for
         # each measurement
-        sql_agg = " SELECT label, timestamp "
+        innselclause = " SELECT label, timestamp "
 
         uniquecols = list(set(aggcols))
         for col in uniquecols:
-            sql_agg += ", " + col
+            innselclause += ", " + col
 
-        from_sql, from_params, uniqueids = self._generate_from(table, labels)
-        sql_agg += " FROM %s " % from_sql
-        sql_agg += self._generate_where()
-
+        whereclause = self._generate_where()
+        
         # Constructing the outer SELECT query, which will aggregate across
         # each label to find the aggregate values
-        sql = "SELECT label"
+        outselclause = "SELECT label"
         for col in labeled_groupcols:
-            sql += "," + col
+            outselclause += "," + col
         for col in labeled_aggcols:
-            sql += "," + col
+            outselclause += "," + col
 
-        sql += " FROM ( %s ) AS aggregates" % (sql_agg)
-        sql += " GROUP BY label"
+        outgroup = " GROUP BY label"
         for col in groupcols:
-            sql += ", " + col
+            outgroup += ", " + col
 
-        sql += " ORDER BY label, timestamp"
+        outgroup += " ORDER BY label, timestamp"
 
-        # Execute our query!
-        # XXX Getting these parameters in the right order is a pain!
-        params = tuple(binparam + from_params + [start_time, stop_time] +
-                uniqueids + uniqueids + [start_time, stop_time])
+        for label, streams in labels.iteritems():
+            labdict = {label: streams}
+            sql, from_params, uniqueids = self._generate_from(table, labdict)
 
-        try:
-            self.datacursor.execute(sql, params)
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_CANCEL)
-        except psycopg2.OperationalError:
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_RETRY) 
-        
+            inner = innselclause + " FROM %s " % sql
+            inner += whereclause
 
-        fetched = self._query_data_generator()
-        for row, cancelled in fetched:
-            yield (row, tscol, binsize, cancelled)
+            query = outselclause + " FROM ( %s ) AS aggregates" % (inner)
+            query += outgroup
+
+            # Execute our query!
+            # XXX Getting these parameters in the right order is a pain!
+            params = tuple(binparam + from_params + [start_time, stop_time] +
+                    uniqueids + uniqueids + [start_time, stop_time])
+
+            # Make sure we have a usable cursor
+            self._reset_cursor()
+            if self.datacursor == None:
+                return
+            
+            try:
+                self.datacursor.execute(query, params)
+            except psycopg2.extensions.QueryCanceledError:
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
+            except psycopg2.OperationalError:
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_RETRY) 
+            
+
+            fetched = self._query_data_generator()
+            for row, cancelled in fetched:
+                yield (row, tscol, binsize, cancelled)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -599,35 +607,38 @@ class DBSelector:
             if i != len(selectcols) - 1:
                 selclause += ", "
 
-        from_sql, from_params, uniqueids =  self._generate_from(table, labels)
-        fromclause = " FROM %s " % from_sql
         whereclause = self._generate_where()
 
         # Order the results both chronologically and by stream id
         orderclause = " ORDER BY label, timestamp " 
 
-        params = [start_time, stop_time] + uniqueids + uniqueids + [start_time, stop_time]
-        sql = selclause + fromclause + whereclause + orderclause
-        params = tuple(from_params + params)
-        
-        # Make sure our datacursor is usable
-        self._reset_cursor()
-        if self.datacursor == None:
-            return
+        for label, streams in labels.iteritems():
+            labdict = {label: streams}
+            sql, from_params, uniqueids =  self._generate_from(table, labdict)
+            fromclause = " FROM %s " %sql
 
-        try:
-            self.datacursor.execute(sql, params)
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_CANCEL)
-        except psycopg2.OperationalError:
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_RETRY) 
+            params = [start_time, stop_time] + uniqueids + uniqueids + [start_time, stop_time]
+            sql = selclause + fromclause + whereclause + orderclause
+            params = tuple(from_params + params)
         
-        fetched = self._query_data_generator()
-        for row, cancelled in fetched:
-            yield (row, "timestamp", 0, cancelled)
+            # Make sure our datacursor is usable
+            self._reset_cursor()
+            if self.datacursor == None:
+                return
+
+            try:
+                self.datacursor.execute(sql, params)
+            except psycopg2.extensions.QueryCanceledError:
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
+            except psycopg2.OperationalError:
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_RETRY) 
+            
+            fetched = self._query_data_generator()
+            for row, cancelled in fetched:
+                yield (row, "timestamp", 0, cancelled)
 
 
     def _generate_label_case(self, labels):
@@ -636,7 +647,10 @@ class DBSelector:
         """
         case = "CASE"
         caseparams = []
+
         for label, stream_ids in labels.iteritems():
+
+            stream_ids = list(set(stream_ids))
         
             if len(stream_ids) > 0:
                 case += " WHEN id in (%s)" % (
@@ -971,11 +985,6 @@ class DBSelector:
         if type(binsize) is not int:
             return
 
-        # Make sure we have a usable cursor
-        self._reset_cursor()
-        if self.datacursor == None:
-            return
-
         # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())
@@ -1010,24 +1019,22 @@ class DBSelector:
         # Constructing the innermost SELECT query, which lists the ntile for
         # each measurement
 
-        sql_ntile = "SELECT label, timestamp, "
-        sql_ntile += "timestamp - (timestamp %% %s) AS binstart, "
+        innersel =  "SELECT label, timestamp, "
+        innersel += "timestamp - (timestamp %% %s) AS binstart, "
 
         initcols = ntilecols + othercols
         for i in range(0, len(initcols)):
-            sql_ntile += initcols[i]
-            sql_ntile += ", "
+            innersel += initcols[i]
+            innersel += ", "
 
         # XXX rename ntile to something unique if we support multiple
         # percentile columns
-        sql_ntile += "ntile(20) OVER ( PARTITION BY "
-        sql_ntile += "timestamp - (timestamp %%%% %d), label" % (binsize)
-        sql_ntile += " ORDER BY %s )" % (ntilecols[0])
+        innersel += "ntile(20) OVER ( PARTITION BY "
+        innersel += "timestamp - (timestamp %%%% %d), label" % (binsize)
+        innersel += " ORDER BY %s )" % (ntilecols[0])
 
-        from_sql, from_params, uniqueids = self._generate_from(table, labels)
-        sql_ntile += " FROM %s " % from_sql
-        sql_ntile += self._generate_where()
-        sql_ntile += " ORDER BY binstart "
+        whereclause = self._generate_where()
+        whereclause += " ORDER BY binstart "
 
         # Constructing the middle SELECT query, which will aggregate across
         # each ntile to find the average value within each ntile
@@ -1038,23 +1045,24 @@ class DBSelector:
         for l in labeledothercols:
             sql_agg += l + ", "
 
-        sql_agg += "binstart FROM ( %s ) AS ntiles" % (sql_ntile)
-        sql_agg += " GROUP BY label, binstart, ntile ORDER BY binstart, "
+        sql_agg += "binstart "
+#FROM ( %s ) AS ntiles" % (sql_ntile)
+        agggroup = " GROUP BY label, binstart, ntile ORDER BY binstart, "
 
         # Extracting the labels for the ntile columns for the ORDER BY clause
         for i in range(0, len(labeledntilecols)):
             labelsplit = labeledntilecols[i].split("AS")
             assert(len(labelsplit) == 2)
 
-            sql_agg += labelsplit[1].strip()
+            agggroup += labelsplit[1].strip()
             if i != len(labeledntilecols) - 1:
-                sql_agg += ", "
+                agggroup += ", "
 
         # Finally, construct the outermost SELECT which will collapse the
         # ntiles into an array so we get one row per bin with all of the
         # ntiles in a single "values" column
         qcols = ["timestamp", "binstart", "label"]
-        sql = "SELECT label, max(recent) AS timestamp, "
+        outersel = "SELECT label, max(recent) AS timestamp, "
 
         # Again, horrible label splitting so that we use the right column
         # names
@@ -1068,40 +1076,59 @@ class DBSelector:
             # we have no data.
 
             # XXX Need unique names if we ever support mulitple ntiles
-            sql += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ',' ORDER BY rtt), ','), ARRAY[]::text[]) AS values, " % (labelsplit[1].strip())
+            outersel += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ',' ORDER BY rtt), ','), ARRAY[]::text[]) AS values, " % (labelsplit[1].strip())
             qcols.append("values")
 
         for i in range(0, len(labeledothercols)):
             labelsplit = labeledothercols[i].split("AS")
 
             assert(len(labelsplit) == 2)
-            sql += "%s(%s) AS %s, " % (otheraggfuncs[i], \
+            outersel += "%s(%s) AS %s, " % (otheraggfuncs[i], \
                     labelsplit[1].strip(), othercols[i])
             qcols.append(othercols[i])
 
+        outersel += "binstart "
+
         # make sure the outer query is sorted by stream_id then binsize, so
         # that we get all the time sorted data for each stream_id in turn
-        sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
+        outergroup = "GROUP BY binstart, label ORDER BY label, binstart"
 
+        for label, streams in labels.iteritems():
+            labdict = {label: streams}
+            sql, from_params, uniqueids = self._generate_from(table, labdict)
 
-        # Execute our query!
-        params = tuple([binsize] + from_params + [start_time, stop_time] +
-                uniqueids + uniqueids + [start_time, stop_time])
+            innerquery = innersel + " FROM ( %s ) " % (sql)
+            innerquery += whereclause
+            
+            aggquery = sql_agg + " FROM ( %s ) AS ntiles " % (innerquery)
+            aggquery += agggroup
+
+            query = outersel + " FROM ( %s ) AS agg " % (aggquery)
+            query += outergroup
+
+            # Execute our query!
+            params = tuple([binsize] + from_params + [start_time, stop_time] +
+                    uniqueids + uniqueids + [start_time, stop_time])
         
-        
-        try:
-            self.datacursor.execute(sql, params)
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_CANCEL)
-        except psycopg2.OperationalError:
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_RETRY) 
+            # Make sure we have a usable cursor
+            self._reset_cursor()
+            if self.datacursor == None:
+                return
 
-        fetched = self._query_data_generator()
-        for row, cancelled in fetched:
-            yield (row, "binstart", binsize, cancelled)
+        
+            try:
+                self.datacursor.execute(query, params)
+            except psycopg2.extensions.QueryCanceledError:
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
+            except psycopg2.OperationalError:
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_RETRY) 
+
+            fetched = self._query_data_generator()
+            for row, cancelled in fetched:
+                yield (row, "binstart", binsize, cancelled)
 
 
     # This generator is called by a generator function one level up, but
