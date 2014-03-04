@@ -437,9 +437,6 @@ class DBSelector:
 
         assert(type(labels) is dict)
 
-        # TODO cast to a set to make unique entries?
-        all_streams = reduce(lambda x, y: x+y, labels.values())
-
         # Find the data table and make sure we are only querying for
         # valid columns
         try:
@@ -488,7 +485,7 @@ class DBSelector:
         for col in uniquecols:
             sql_agg += ", " + col
 
-        from_sql, from_params = self._generate_from(table, labels)
+        from_sql, from_params, uniqueids = self._generate_from(table, labels)
         sql_agg += " FROM %s " % from_sql
         sql_agg += self._generate_where()
 
@@ -510,7 +507,7 @@ class DBSelector:
         # Execute our query!
         # XXX Getting these parameters in the right order is a pain!
         params = tuple(binparam + from_params + [start_time, stop_time] +
-                all_streams + [start_time, stop_time])
+                uniqueids + uniqueids + [start_time, stop_time])
 
         try:
             self.datacursor.execute(sql, params)
@@ -586,70 +583,51 @@ class DBSelector:
         # stream ids into the label dictionary format that we want
         assert(type(labels) is dict)
 
-        # TODO cast to a set to make unique entries?
-        all_streams = reduce(lambda x, y: x+y, labels.values())
-
         # These columns are important so include them regardless
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
+        if 'stream_id' not in selectcols:
+            selectcols.append('stream_id')
         if 'label' not in selectcols:
             selectcols.append('label')
 
-        params = [start_time, stop_time] + all_streams + [start_time, stop_time]
 
-        for resultrow in self._generic_select(table, labels, params,
-                selectcols, None, 'timestamp', 0):
-            yield resultrow
+        selclause = "SELECT "
+        for i in range(0, len(selectcols)):
+            selclause += selectcols[i]
 
+            if i != len(selectcols) - 1:
+                selclause += ", "
 
-    def _generic_select(self, table, labels, params, selcols, groupcols,
-            tscol, binsize):
-        """ Generator function that constructs and executes the SQL query
-            required for both select_data and select_aggregated_data.
-        """
+        from_sql, from_params, uniqueids =  self._generate_from(table, labels)
+        fromclause = " FROM %s " % from_sql
+        whereclause = self._generate_where()
 
+        # Order the results both chronologically and by stream id
+        orderclause = " ORDER BY label, timestamp " 
+
+        params = [start_time, stop_time] + uniqueids + uniqueids + [start_time, stop_time]
+        sql = selclause + fromclause + whereclause + orderclause
+        params = tuple(from_params + params)
+        
         # Make sure our datacursor is usable
         self._reset_cursor()
         if self.datacursor == None:
             return
 
-        selclause = "SELECT "
-        for i in range(0, len(selcols)):
-            selclause += selcols[i]
-            # rename stream_id to label so it matches the results if we are
-            # querying and aggregating across many stream ids
-            if selcols[i] == "stream_id":
-                selclause += " AS label"
-
-            if i != len(selcols) - 1:
-                selclause += ", "
-
-        from_sql, from_params =  self._generate_from(table, labels)
-        fromclause = " FROM %s " % from_sql
-        whereclause = self._generate_where()
-
-        # Form the "GROUP BY" section of our query (if asking
-        # for aggregated data)
-        if groupcols == None or len(groupcols) == 0:
-            groupclause = ""
-        else:
-            groupclause = " GROUP BY "
-            for i in range(0, len(groupcols)):
-                groupclause += groupcols[i]
-                if i != len(groupcols) - 1:
-                    groupclause += ", "
-
-        # Order the results both chronologically and by stream id
-        orderclause = " ORDER BY label, %s " % (tscol)
-
-        sql = selclause + fromclause + whereclause + groupclause \
-                + orderclause
-        params = tuple(from_params + params)
-        self.datacursor.execute(sql, params)
-
+        try:
+            self.datacursor.execute(sql, params)
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            self.datacursor = None
+            yield (None, None, None, DB_QUERY_CANCEL)
+        except psycopg2.OperationalError:
+            self.datacursor = None
+            yield (None, None, None, DB_QUERY_RETRY) 
+        
         fetched = self._query_data_generator()
         for row, cancelled in fetched:
-            yield (row, tscol, binsize, cancelled)
+            yield (row, "timestamp", 0, cancelled)
 
 
     def _generate_label_case(self, labels):
@@ -659,17 +637,32 @@ class DBSelector:
         case = "CASE"
         caseparams = []
         for label, stream_ids in labels.iteritems():
-            #case += " WHEN stream_id in (%s) THEN '%s'" % (
-                #",".join(str(x) for x in stream_ids), label)
-            case += " WHEN id in (%s)" % (
-                ",".join(["%s"] * len(stream_ids)))
-            case += " THEN %s"
+        
+            if len(stream_ids) > 0:
+                case += " WHEN id in (%s)" % (
+                    ",".join(["%s"] * len(stream_ids)))
+                case += " THEN %s"
 
-            caseparams += stream_ids
-            caseparams.append(label)
+                caseparams += stream_ids
+                caseparams.append(label)
         case += " END"
         return case, caseparams
 
+
+    def _generate_union(self, basetable, streamcount):
+
+        sql = "("
+
+        for i in range(0, streamcount):
+            sql += "SELECT * FROM %s_" % (basetable)
+            sql += "%s"     # stream id will go here
+
+            if i != streamcount - 1:
+                sql += " UNION ALL "
+
+        sql += ")"
+
+        return sql
 
     # It looks like restricting the number of stream ids that are checked for
     # in the data table helps significantly with performance, so if we can
@@ -682,13 +675,23 @@ class DBSelector:
         """ Forms a FROM clause for an SQL query that encompasses all
             streams in the provided list that fit within a given time period.
         """
+        uniquestreams = {}
+
+        for lab, streams in labels.iteritems():
+            for s in streams:
+                if s not in uniquestreams:
+                    uniquestreams[s] = 0
+
+        
         # build the case statement that will label our stream ids
         case, caseparams = self._generate_label_case(labels)
-        count = reduce(lambda x, y: x+len(y), labels.values(), 0)
+        count = len(uniquestreams)
 
         # get all stream ids that are active in the period
         sql = "(SELECT id, %s as label FROM streams " % case
         sql += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
+
+        union = self._generate_union(table, count)
 
         assert(count > 0)
         sql += " AND id IN ("
@@ -697,9 +700,9 @@ class DBSelector:
             if i != count - 1:
                 sql += ", "
         # join the active streams with the appropriate data table
-        sql += ")) AS activestreams INNER JOIN %s ON " % table
-        sql += "%s.stream_id = activestreams.id" % table
-        return sql, caseparams
+        sql += ")) AS activestreams INNER JOIN %s AS dataunion ON " % union
+        sql += "dataunion.stream_id = activestreams.id"
+        return sql, caseparams, uniquestreams.keys()
 
     def _generate_where(self):
         """ Forms a WHERE clause for an SQL query based on a time period """
@@ -985,9 +988,6 @@ class DBSelector:
 
         assert(type(labels) is dict)
 
-        # TODO cast to a set to make unique entries?
-        all_streams = reduce(lambda x, y: x+y, labels.values())
-
         # Find the data table and make sure we are only querying for
         # valid columns
         try:
@@ -1024,7 +1024,7 @@ class DBSelector:
         sql_ntile += "timestamp - (timestamp %%%% %d), label" % (binsize)
         sql_ntile += " ORDER BY %s )" % (ntilecols[0])
 
-        from_sql, from_params = self._generate_from(table, labels)
+        from_sql, from_params, uniqueids = self._generate_from(table, labels)
         sql_ntile += " FROM %s " % from_sql
         sql_ntile += self._generate_where()
         sql_ntile += " ORDER BY binstart "
@@ -1068,7 +1068,7 @@ class DBSelector:
             # we have no data.
 
             # XXX Need unique names if we ever support mulitple ntiles
-            sql += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ','), ','), ARRAY[]::text[]) AS values, " % (labelsplit[1].strip())
+            sql += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ',' ORDER BY rtt), ','), ARRAY[]::text[]) AS values, " % (labelsplit[1].strip())
             qcols.append("values")
 
         for i in range(0, len(labeledothercols)):
@@ -1086,8 +1086,18 @@ class DBSelector:
 
         # Execute our query!
         params = tuple([binsize] + from_params + [start_time, stop_time] +
-                all_streams + [start_time, stop_time])
-        self.datacursor.execute(sql, params)
+                uniqueids + uniqueids + [start_time, stop_time])
+        
+        
+        try:
+            self.datacursor.execute(sql, params)
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            self.datacursor = None
+            yield (None, None, None, DB_QUERY_CANCEL)
+        except psycopg2.OperationalError:
+            self.datacursor = None
+            yield (None, None, None, DB_QUERY_RETRY) 
 
         fetched = self._query_data_generator()
         for row, cancelled in fetched:
