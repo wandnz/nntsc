@@ -72,7 +72,7 @@ def data_table(db):
         Column('flows', BigInteger),
         useexisting=True
     )
-
+    Index('index_lpi_flows_timestamp', dt.c.timestamp)
     return DATA_TABLE_NAME
 
 

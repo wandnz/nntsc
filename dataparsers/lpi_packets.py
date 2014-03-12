@@ -70,6 +70,7 @@ def data_table(db):
         useexisting=True
     )
 
+    Index('index_lpi_packets_timestamp', dt.c.timestamp)
     return DATA_TABLE_NAME
 
 

@@ -295,7 +295,7 @@ class Database:
         # Create a new data table for this stream, using the "base" data
         # table as a template
         while 1:
-            query = "CREATE TABLE %s AS SELECT * FROM %s WHERE stream_id=0" % \
+            query = "CREATE TABLE %s (LIKE %s INCLUDING INDEXES)" % \
                     (datatablename, basedata)
             try:
                 result = self.conn.execute(query)

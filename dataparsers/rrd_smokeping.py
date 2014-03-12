@@ -90,6 +90,8 @@ def data_table(db):
         useexisting=True
     )
 
+    Index('index_rrd_smokeping_timestamp', dt.c.timestamp)
+
     return DATA_TABLE_NAME
 
 def insert_stream(db, exp, name, fname, source, host, minres, rows):

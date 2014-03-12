@@ -73,6 +73,8 @@ def data_table(db):
         Column('bytes', BigInteger, nullable=True),
     )
 
+    Index('index_rrd_muninbytes_timestamp', dt.c.timestamp)
+
     return DATA_TABLE_NAME
 
 def insert_stream(db, exp, name, filename, switch, interface, dir, minres,

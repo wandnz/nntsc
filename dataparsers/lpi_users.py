@@ -69,6 +69,7 @@ def data_table(db):
         useexisting=True
     )
 
+    Index('index_lpi_users_timestamp', dt.c.timestamp)
     return DATA_TABLE_NAME
 
 

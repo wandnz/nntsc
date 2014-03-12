@@ -119,6 +119,9 @@ def data_table(db):
         Column('flag_ra', Boolean, nullable=False),
     )
 
+    Index('index_amp_dns_timestamp', dt.c.timestamp)
+    Index('index_amp_dns_rtt', dt.c.rtt)
+
     return DATA_TABLE_NAME
 
 

@@ -75,6 +75,9 @@ def data_table(db):
         useexisting=True,
     )
 
+    Index('index_amp_icmp_timestamp', dt.c.timestamp)
+    Index('index_amp_icmp_rtt', dt.c.rtt)
+
     return DATA_TABLE_NAME
 
 def create_existing_stream(stream_data):
