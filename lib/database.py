@@ -295,7 +295,9 @@ class Database:
         # Create a new data table for this stream, using the "base" data
         # table as a template
         while 1:
-            query = "CREATE TABLE %s (LIKE %s INCLUDING INDEXES)" % \
+            # LIKE can't copy foreign keys so we have to explicitly add the
+            # one we really want
+            query = "CREATE TABLE %s (LIKE %s INCLUDING INDEXES INCLUDING CONSTRAINTS, FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE)" % \
                     (datatablename, basedata)
             try:
                 result = self.conn.execute(query)
