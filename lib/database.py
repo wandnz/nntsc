@@ -327,6 +327,36 @@ class Database:
         
         return col_id, newid[0]
 
+    def add_foreign_key(self, tablename, column, foreigntable, foreigncolumn):
+        # XXX Only supports one column foreign keys for now
+
+        while 1:
+            # TODO, validate these table names and columns to make sure they
+            # exist
+            query = "ALTER TABLE %s ADD FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE" % (tablename, column, foreigntable, foreigncolumn)
+
+            try:
+                result = self.conn.execute(query)
+            except OperationalError as e:
+                log("Database became unavailable while adding foreign key")
+                self.reconnect()
+                continue
+            except (DataError, ProgrammingError, IntegrityError) as e:
+                log(e)
+                log("Failed to add foreign key to table %s" % \
+                        (tablename))
+                return DB_DATA_ERROR
+            except SQLAlchemyError as e:
+                log(e)
+                log("Failed to add foreign key to table %s" % \
+                        (tablename))
+                return DB_GENERIC_ERROR
+            break
+
+        self.commit_transaction()
+            
+        return DB_NO_ERROR
+
     def __delete_everything(self, engine):
         #self.meta.drop_all(bind=engine)
 
@@ -578,6 +608,32 @@ class Database:
                     streamid, streamprops)
 
         return streamid
+
+    def custom_insert(self, customsql, values):
+        while 1:
+            try:
+                result = self.conn.execute(customsql, values)
+            except (DataError, IntegrityError, ProgrammingError) as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_DATA_ERROR, None
+            except OperationalError as e:
+                # Don't rollback as the database has probably gone away
+                log("Operational Error while inserting data")
+                self.reconnect()
+                continue
+            except SQLAlchemyError as e:
+                self.rollback_transaction()
+                log(e)
+                return DB_GENERIC_ERROR, None
+            except KeyboardInterrupt as e:
+                self.rollback_transaction()
+                return DB_INTERRUPTED, None
+
+            break
+
+        return DB_NO_ERROR, result
+
 
     def insert_data(self, liveexp, tablename, collection, stream, ts, result,
             insertfunc=None):
