@@ -101,7 +101,7 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
             "minres":minres, "highrows":rows}
 
     return db.insert_stream(exp, STREAM_TABLE_NAME, "rrd", "smokeping", name,
-            timestamp, props)
+            0, props)
 
 
 def insert_data(db, exp, stream, ts, line):

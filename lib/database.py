@@ -316,15 +316,19 @@ class Database:
 
         for v in inspector.get_view_names():
             self.conn.execute(DropView(v))
+            self.commit_transaction()
 
         for fkc in all_fks:
             self.conn.execute(DropConstraint(fkc))
+            self.commit_transaction()
 
         for table in partitions:
             self.conn.execute(DropTable(table))
+            self.commit_transaction()
 
         for table in tbs:
             self.conn.execute(DropTable(table))
+            self.commit_transaction()
 
         self.commit_transaction()
 
