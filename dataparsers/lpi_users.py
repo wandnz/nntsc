@@ -65,7 +65,7 @@ def data_table(db):
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
-        Column('users', BigInteger),
+        Column('users', Integer),
         useexisting=True
     )
 

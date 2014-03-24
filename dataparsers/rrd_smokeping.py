@@ -21,7 +21,7 @@
 
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float
+from sqlalchemy.types import Integer, String, Float, SmallInteger
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
         SQLAlchemyError, DataError
 import libnntscclient.logger as logger
@@ -64,8 +64,8 @@ def data_table(db):
         Column('stream_id', Integer, ForeignKey("streams.id"),
                 nullable = False),
         Column('timestamp', Integer, nullable=False),
+        Column('loss', SmallInteger, nullable=True),
         Column('uptime', Float, nullable=True),
-        Column('loss', Integer, nullable=True),
         Column('median', Float, nullable=True),
         Column('ping1', Float, nullable=True),
         Column('ping2', Float, nullable=True),
