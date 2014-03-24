@@ -146,6 +146,10 @@ def receive_lpicp_message(s, to_read):
         except error, msg:
             logger.log("Error receiving body: %s\n" % (msg[1]))
             return ""
+       
+        if foo is None or len(foo) == 0:
+            return ""
+        
         msg_buf += foo
         received = len(msg_buf)
 
@@ -164,7 +168,7 @@ def read_lpicp(s):
         return -1, {}
 
     msg_buf = receive_lpicp_message(s, to_read)
-    if msg_buf == []:
+    if msg_buf == "":
         return -1, {}
 
     name_len = int(lpicp_hdr[3])
