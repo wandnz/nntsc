@@ -257,6 +257,8 @@ def insert_rrd_streams(db, conf):
         logger.log("WARNING: %s does not exist - no RRD streams will be added" % (conf))
         return
 
+    logger.log("Reading RRD list from %s" % (conf))
+
     index = 1
     subtype = None
     parameters = {}

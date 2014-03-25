@@ -79,29 +79,30 @@ class AmpModule:
     def initSource(self, nntsc_config):
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
-        if username == "NNTSCConfigError":
-            logger.log("Invalid username option for AMP")
-            sys.exit(1)
+        if username == "NNTSCConfigMissing":
+            username = "amp"
         password = get_nntsc_config(nntsc_config, "amp", "password")
-        if password == "NNTSCConfigError":
-            logger.log("Invalid password option for AMP")
-            sys.exit(1)
+        if password == "NNTSCConfigMissing":
+            logger.log("Password not set for AMP RabbitMQ source, using empty string as default")
+            password = ""
         host = get_nntsc_config(nntsc_config, "amp", "host")
-        if host == "NNTSCConfigError":
-            logger.log("Invalid host option for AMP")
-            sys.exit(1)
+        if host == "NNTSCConfigMissing":
+            host = "localhost"
         port = get_nntsc_config(nntsc_config, "amp", "port")
-        if port == "NNTSCConfigError":
-            logger.log("Invalid port option for AMP")
-            sys.exit(1)
+        if port == "NNTSCConfigMissing":
+            port = "5672"
         ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
-        if ssl == "NNTSCConfigError":
-            logger.log("Invalid ssl option for AMP")
-            sys.exit(1)
+        if ssl == "NNTSCConfigMissing":
+            ssl = False
         queue = get_nntsc_config(nntsc_config, "amp", "queue")
-        if queue == "NNTSCConfigError":
-            logger.log("Invalid queue option for AMP")
+        if queue == "NNTSCConfigMissing":
+            queue = "amp-nntsc"
+
+        if "NNTSCConfigError" in [username, password, host, port, ssl, queue]:
+            logger.log("Failed to configure AMP source")
             sys.exit(1)
+
+        logger.log("Connecting to RabbitMQ queue %s on host %s:%s (ssl=%s), username %s" % (queue, host, port, ssl, username))
 
         self.source = PikaConsumer('', queue, host, port, 
                 ssl, username, password)

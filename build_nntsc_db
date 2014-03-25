@@ -81,8 +81,8 @@ db.build_databases(modules, new=clean_db)
 if 'rrd' in enabled_modules:
 
     rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
-    if rrd_conf == "NNTSCConfigError":
-        sys.exit(1)
+    if rrd_conf == "NNTSCConfigError" or rrd_conf == "NNTSCConfigMissing":
+        sys.exit(0)
     res = insert_rrd_streams(db, rrd_conf) 
     if res == DB_DATA_ERROR:
         logger.log("Failed to create RRD streams -- check RRD List for invalid content")

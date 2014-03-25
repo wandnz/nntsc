@@ -130,17 +130,20 @@ class PikaConsumer(PikaBasic):
 
 def parseExportOptions(conf):
     username = get_nntsc_config(conf, "liveexport", "username")
-    if username == "NNTSCConfigError":
+    if username == "NNTSCConfigError" or username == "NNTSCConfigMissing":
         logger.log("Invalid username option for live exporter")
         return None, None, None
     password = get_nntsc_config(conf, "liveexport", "password")
-    if password == "NNTSCConfigError":
+    if password == "NNTSCConfigError" or username == "NNTSCConfigMissing":
         logger.log("Invalid password option for live exporter")
         return None, None, None
     port = get_nntsc_config(conf, "liveexport", "port")
+    if port == "NNTSCConfigMissing":
+        port = 5672
     if port == "NNTSCConfigError":
         logger.log("Invalid port option for live exporter")
         return None, None, None
+
 
     return username, password, port 
 

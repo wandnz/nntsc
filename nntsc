@@ -84,14 +84,16 @@ class DataCollector():
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
+        logger.log("Connecting to NNTSC database %s on host %s with user %s" % (dbconf["name"], dbconf["host"], dbconf["user"]))
         self.db.connect_db();
         self.processes = []
         
         if not self.exportonly:
             queueid = get_nntsc_config(nntsc_conf, "liveexport", "queueid")
             if queueid == "NNTSCConfigError":
-                logger.log("Invalid queueid identifier for NNTSC exporter")
                 sys.exit(1)
+            if queueid == "NNTSCConfigMissing":
+                queueid = "nntsclivequeue"
         
             self.queueid = queueid
         else:

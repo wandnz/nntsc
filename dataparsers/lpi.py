@@ -45,7 +45,7 @@ class LPIModule:
             return
 
         self.lpiserver = get_nntsc_config(nntsc_conf, 'lpi', 'server')
-        if self.lpiserver == "NNTSCConfigError":
+        if self.lpiserver == "NNTSCConfigError" or self.lpiserver == "NNTSCConfigMissing":
             self.enabled = False
             return
 
@@ -55,7 +55,7 @@ class LPIModule:
             return
 
         self.lpiport = get_nntsc_config(nntsc_conf, 'lpi', 'port')
-        if self.lpiport == "NNTSCConfigError":
+        if self.lpiport == "NNTSCConfigError" or self.lpiport == "NNTSCConfigMissing":
             self.enabled = False
             return
         if self.lpiport == "":
@@ -150,7 +150,7 @@ class LPIModule:
 
     def run(self):
         while self.enabled:
-            logger.log("Attempting to connect to LPI Server")
+            logger.log("Attempting to connect to LPI Server %s:%s" % (self.lpiserver, self.lpiport))
             self.server_fd = lpi_common.connect_lpi_server(self.lpiserver,
                     int(self.lpiport))
             if self.server_fd == -1:

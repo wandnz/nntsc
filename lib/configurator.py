@@ -49,11 +49,11 @@ def get_nntsc_config_bool(nntsc_config, section, option):
     try:
         result = nntsc_config.getboolean(section, option)
     except ConfigParser.NoSectionError:
-        logger.log("The section '%s' does not exist in the config file" % (section))
-        return "NNTSCConfigError"
+        #logger.log("The section '%s' does not exist in the config file" % (section))
+        return "NNTSCConfigMissing"
     except ConfigParser.NoOptionError:
-        logger.log("The option '%s' does not exist in section '%s' from the config file" % (option, section))
-        return "NNTSCConfigError"
+        #logger.log("The option '%s' does not exist in section '%s' from the config file" % (option, section))
+        return "NNTSCConfigMissing"
     except ValueError:
         logger.log("The option '%s' in section '%s' does not have a boolean value" % (option, section))
         logger.log("Suitable values are 'true', '1', 'on', 'yes', 'false', 0, 'off', or 'no'")
@@ -70,27 +70,30 @@ def get_nntsc_config(nntsc_config, section, option):
     try:
         result = nntsc_config.get(section, option)
     except ConfigParser.NoSectionError:
-        logger.log("The section '%s' does not exist in the config file" % (section))
-        return "NNTSCConfigError"
+        #logger.log("The section '%s' does not exist in the config file" % (section))
+        return "NNTSCConfigMissing"
     except ConfigParser.NoOptionError:
-        logger.log("The option '%s' does not exist in section '%s' from the config file" % (option, section))
-        return "NNTSCConfigError"
+        #logger.log("The option '%s' does not exist in section '%s' from the config file" % (option, section))
+        return "NNTSCConfigMissing"
 
     return result
 
 def get_nntsc_db_config(nntsc_config):
 
     dbhost = get_nntsc_config(nntsc_config, 'database', 'host')
-    if dbhost == "NNTSCConfigError":
-        return {}
+    if dbhost == "NNTSCConfigMissing":
+        dbhost = None
     dbname = get_nntsc_config(nntsc_config, 'database', 'database')
-    if dbname == "NNTSCConfigError":
-        return {}
+    if dbname == "NNTSCConfigMissing":
+        dbname = "nntsc"
     dbuser = get_nntsc_config(nntsc_config, 'database', 'username')
-    if dbuser == "NNTSCConfigError":
-        return {}
+    if dbuser == "NNTSCConfigMissing":
+        dbuser = None
     dbpass = get_nntsc_config(nntsc_config, 'database', 'password')
-    if dbpass == "NNTSCConfigError":
+    if dbpass == "NNTSCConfigMissing":
+        dbpass = None
+
+    if "NNTSCConfigError" in [dbhost, dbname, dbuser, dbpass]:
         return {}
 
     return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass}
