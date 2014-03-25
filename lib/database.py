@@ -290,31 +290,43 @@ class Database:
         newid = result.inserted_primary_key
         result.close()
 
-        datatablename = basedata + "_" + str(newid[0])
-
         # Create a new data table for this stream, using the "base" data
         # table as a template
+        fkey = "FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE"
+        ret = self.clone_table(basedata, newid[0], fkey)
+        if ret != DB_NO_ERROR:
+            return ret, -1
+
+        return col_id, newid[0]
+
+    def clone_table(self, original, streamid, foreignkey=None):
+        tablename = original + "_" + str(streamid)
+
         while 1:
             # LIKE can't copy foreign keys so we have to explicitly add the
             # one we really want
-            query = "CREATE TABLE %s (LIKE %s INCLUDING INDEXES INCLUDING CONSTRAINTS, FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE)" % \
-                    (datatablename, basedata)
+            query = "CREATE TABLE %s (LIKE %s INCLUDING DEFAULTS INCLUDING INDEXES INCLUDING CONSTRAINTS" % (tablename, original)
+            if foreignkey is not None:
+                query += ", %s)" % (foreignkey)
+            else:
+                query += ")"
+
             try:
                 result = self.conn.execute(query)
             except OperationalError as e:
-                log("Database became unavailable while creating new data table")
+                log("Database became unavailable while cloning table")
                 self.reconnect()
                 continue
             except (DataError, ProgrammingError, IntegrityError) as e:
                 log(e)
-                log("Failed to create data table for new stream %s-%s:%s" % \
-                        (str(newid[0]), mod, subtype))
-                return DB_DATA_ERROR, -1
+                log("Failed to clone table %s for new stream %s" % \
+                        (original, str(streamid)))
+                return DB_DATA_ERROR
             except SQLAlchemyError as e:
                 log(e)
-                log("Failed to create data table for new stream %s-%s:%s" % \
-                        (str(newid[0]), mod, subtype))
-                return DB_GENERIC_ERROR, -1
+                log("Failed to clone table %s for new stream %s" % \
+                        (original, str(streamid)))
+                return DB_GENERIC_ERROR
             break
 
         self.commit_transaction()
@@ -325,7 +337,7 @@ class Database:
             log("Database became unavailable while binding new data table")
             self.reconnect()
         
-        return col_id, newid[0]
+        return DB_NO_ERROR
 
     def add_foreign_key(self, tablename, column, foreigntable, foreigncolumn):
         # XXX Only supports one column foreign keys for now

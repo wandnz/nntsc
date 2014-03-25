@@ -121,10 +121,14 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     if streamid <= 0:
         return streamid
 
+    ret = db.clone_table("data_amp_traceroute_paths", streamid)
+    if ret != DB_NO_ERROR:
+        return ret
+
     # Ensure our custom foreign key gets perpetuated
     newtable = "%s_%d" % (DATA_TABLE_NAME, streamid)
-    err = db.add_foreign_key(newtable, "path_id", "data_amp_traceroute_paths",
-                "path_id")
+    pathtable = "data_amp_traceroute_paths_%d" % (streamid)
+    err = db.add_foreign_key(newtable, "path_id", pathtable, "path_id")
 
     if err == DB_NO_ERROR:
         return streamid
@@ -136,16 +140,18 @@ def insert_data(db, exp, stream, ts, result):
     # sqlalchemy is again totally useless and makes it impossible to cast
     # types on insert, so lets do it ourselves.
 
+    pathtable = "data_amp_traceroute_paths_%d" % (stream)
+
     pathinsert = text("WITH s AS (SELECT path_id, CAST(:path AS inet[]) "
-            "as path FROM data_amp_traceroute_paths "
+            "as path FROM %s "
             "WHERE path = CAST(:path AS inet[])), "
-            "i AS (INSERT INTO data_amp_traceroute_paths (path) "
+            "i AS (INSERT INTO %s (path) "
             "SELECT CAST(:path AS inet[]) WHERE "
-            "NOT EXISTS (SELECT path FROM data_amp_traceroute_paths "
+            "NOT EXISTS (SELECT path FROM %s "
             "WHERE path = CAST(:path AS inet[])) "
             "RETURNING path_id, path) "
             "SELECT path_id, path FROM i UNION ALL "
-            "SELECT path_id, path FROM s")
+            "SELECT path_id, path FROM s" % (pathtable, pathtable, pathtable))
         
    
     err, queryret = db.custom_insert(pathinsert, result)
@@ -228,8 +234,16 @@ def generate_union(qb, table, streams):
         if i != len(streams) - 1:
             sql += " UNION ALL "
 
-    sql += ") AS allstreams JOIN data_amp_traceroute_paths ON (allstreams.path_id = data_amp_traceroute_paths.path_id)) AS dataunion"
-    qb.add_clause("union", sql, unionparams)
+    sql += ") AS allstreams JOIN ("
+    
+    for i in range(0, len(streams)):
+        sql += "SELECT * from data_amp_traceroute_paths_"
+        sql += "%s"
+        if i != len(streams) - 1:
+            sql += " UNION ALL "
+
+    sql += ") AS paths ON (allstreams.path_id = paths.path_id)) AS dataunion"
+    qb.add_clause("union", sql, unionparams + unionparams)
 
 
 def sanitise_columns(columns):
