@@ -70,8 +70,8 @@ def data_table(db):
         Column('packet_size', SmallInteger, nullable=False),
         Column('ttl', SmallInteger, nullable=True),
         Column('loss', SmallInteger, nullable=False),
-        Column('error_type', SmallInteger, nullable=False),
-        Column('error_code', SmallInteger, nullable=False),
+        Column('error_type', SmallInteger, nullable=True),
+        Column('error_code', SmallInteger, nullable=True),
         useexisting=True,
     )
 

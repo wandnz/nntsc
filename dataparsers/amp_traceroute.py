@@ -70,8 +70,8 @@ def data_table(db):
         Column('path_id', Integer, nullable=False),
         Column('packet_size', SmallInteger, nullable=False),
         Column('length', SmallInteger, nullable=False),
-        Column('error_type', SmallInteger, nullable=False),
-        Column('error_code', SmallInteger, nullable=False),
+        Column('error_type', SmallInteger, nullable=True),
+        Column('error_code', SmallInteger, nullable=True),
         Column('hop_rtt', postgresql.ARRAY(Integer), nullable=False),
         useexisting=True,
     )
