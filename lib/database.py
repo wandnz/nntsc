@@ -408,7 +408,7 @@ class Database:
             self.commit_transaction()
 
         for table in tbs:
-            self.conn.execute(DropTable(table))
+            self.conn.execute("DROP TABLE %s CASCADE" % (table))
             self.commit_transaction()
 
         self.commit_transaction()
