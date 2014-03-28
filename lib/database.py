@@ -23,7 +23,8 @@
 from sqlalchemy import create_engine, Table, Column, Integer, \
         String, MetaData, ForeignKey, UniqueConstraint, event, DDL, Index
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError,\
-        ProgrammingError, DataError, InvalidRequestError, InterfaceError
+        ProgrammingError, DataError, InvalidRequestError, InterfaceError, \
+        InternalError
 from sqlalchemy.sql import and_, or_, not_, text
 from sqlalchemy.sql.expression import select, outerjoin, func, label
 from sqlalchemy.engine.url import URL
@@ -290,6 +291,7 @@ class Database:
         newid = result.inserted_primary_key
         result.close()
 
+        self.commit_transaction()
         # Create a new data table for this stream, using the "base" data
         # table as a template
         fkey = "FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE"
@@ -323,6 +325,9 @@ class Database:
                         (original, str(streamid)))
                 return DB_DATA_ERROR
             except SQLAlchemyError as e:
+                #if "TransactionRollbackError" in str(e):
+                #    log("Retrying clone table")
+                #    continue
                 log(e)
                 log("Failed to clone table %s for new stream %s" % \
                         (original, str(streamid)))
