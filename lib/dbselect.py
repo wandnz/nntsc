@@ -35,7 +35,9 @@ class DBSelector:
         self.qb = QueryBuilder()
         self.dbselid = uniqueid
         self.timeout = timeout
-        connstr = "dbname=%s user=%s" % (dbname, dbuser)
+        connstr = "dbname=%s" % (dbname) 
+        if dbuser != "" and dbuser != None:
+            connstr += " user=%s" % (dbuser)
         if dbpass != "" and dbpass != None:
             connstr += " password=%s" % (dbpass)
         if dbhost != "" and dbhost != None:
