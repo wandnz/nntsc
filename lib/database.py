@@ -154,6 +154,83 @@ class Database:
 
         return t
 
+    def create_aggregators(self):
+        # Create a useful function to select a mode from any data
+        # http://scottrbailey.wordpress.com/2009/05/22/postgres-adding-custom-aggregates-most/
+        mostfunc = text("""
+            CREATE OR REPLACE FUNCTION _final_most(anyarray)
+                RETURNS anyelement AS
+            $BODY$
+                SELECT a
+                FROM unnest($1) a
+                GROUP BY 1 ORDER BY count(1) DESC
+                LIMIT 1;
+            $BODY$
+                LANGUAGE 'sql' IMMUTABLE;""")
+        self.conn.execute(mostfunc)
+
+        smokefunc = text("""
+            CREATE OR REPLACE FUNCTION _final_smoke(anyarray)
+                RETURNS anyarray AS
+            $BODY$
+                SELECT array_agg(avg) FROM (
+                    SELECT avg(foo), ntile FROM (
+                        SELECT foo, ntile(20) OVER (PARTITION BY one ORDER BY foo) FROM (
+                            SELECT 1 as one, unnest($1) as foo EXCEPT ALL SELECT 1,NULL
+                        ) as a
+                    ) as b GROUP BY ntile ORDER BY ntile
+                ) as c;
+            $BODY$
+                LANGUAGE 'sql' IMMUTABLE;""")
+        self.conn.execute(smokefunc)
+        
+        # we can't check IF EXISTS or use CREATE OR REPLACE, so just query it
+        mostcount = self.conn.execute(
+                """SELECT * from pg_proc WHERE proname='most';""")
+        assert(mostcount.rowcount <= 1)
+
+        # if it doesn't exist, create the aggregate function that applies
+        # _final_most to multiple rows of data
+        if mostcount.rowcount == 0:
+            aggfunc = text("""
+                CREATE AGGREGATE most(anyelement) (
+                    SFUNC=array_append,
+                    STYPE=anyarray,
+                    FINALFUNC=_final_most,
+                    INITCOND='{}'
+                );""")
+            self.conn.execute(aggfunc)
+
+        mostcount.close()
+        smokearraycount = self.conn.execute(
+                """SELECT * from pg_proc WHERE proname='smokearray';""")
+
+        if smokearraycount.rowcount == 0:
+            aggfunc = text("""
+                CREATE AGGREGATE smokearray(anyarray) (
+                SFUNC=array_cat,
+                STYPE=anyarray,
+                FINALFUNC=_final_smoke,
+                INITCOND='{}'
+            );""")
+            self.conn.execute(aggfunc)
+
+        smokearraycount.close()
+        smokecount = self.conn.execute(
+                """SELECT * from pg_proc WHERE proname='smoke';""")
+
+        if smokecount.rowcount == 0:
+            aggfunc = text("""
+                CREATE AGGREGATE smoke(numeric) (
+                SFUNC=array_append,
+                STYPE=numeric[],
+                FINALFUNC=_final_smoke,
+                INITCOND='{}'
+            );""")
+            self.conn.execute(aggfunc)
+        
+        smokecount.close()
+        self.commit_transaction()
 
     def build_databases(self, modules, new=False):
         if new:
@@ -187,36 +264,7 @@ class Database:
             Index('index_streams_first', streams.c.firsttimestamp)
             Index('index_streams_last', streams.c.lasttimestamp)
 
-        # Create a useful function to select a mode from any data
-        # http://scottrbailey.wordpress.com/2009/05/22/postgres-adding-custom-aggregates-most/
-        mostfunc = text("""
-            CREATE OR REPLACE FUNCTION _final_most(anyarray)
-                RETURNS anyelement AS
-            $BODY$
-                SELECT a
-                FROM unnest($1) a
-                GROUP BY 1 ORDER BY count(1) DESC
-                LIMIT 1;
-            $BODY$
-                LANGUAGE 'sql' IMMUTABLE;""")
-        self.conn.execute(mostfunc)
-
-        # we can't check IF EXISTS or use CREATE OR REPLACE, so just query it
-        mostcount = self.conn.execute(
-                """SELECT * from pg_proc WHERE proname='most';""")
-        assert(mostcount.rowcount <= 1)
-
-        # if it doesn't exist, create the aggregate function that applies
-        # _final_most to multiple rows of data
-        if mostcount.rowcount == 0:
-            aggfunc = text("""
-                CREATE AGGREGATE most(anyelement) (
-                    SFUNC=array_append,
-                    STYPE=anyarray,
-                    FINALFUNC=_final_most,
-                    INITCOND='{}'
-                );""")
-            self.conn.execute(aggfunc)
+        self.create_aggregators()
 
         for base, mod in modules.items():
             mod.tables(self)
