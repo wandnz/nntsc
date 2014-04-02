@@ -67,8 +67,7 @@ def data_table(db):
         return DATA_TABLE_NAME
 
     dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                nullable = False),
+        Column('stream_id', Integer, nullable=False),
         Column('timestamp', Integer, nullable=False),
         Column('bytes', BigInteger, nullable=True),
     )

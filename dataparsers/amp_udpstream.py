@@ -63,9 +63,7 @@ def data_tables(db):
 
     testtable = Table('internal_amp_udpstream_test', db.metadata,
         Column('test_id', Integer, primary_key=True),
-        Column('stream_id', Integer,
-            ForeignKey('streams.id', ondelete="CASCADE"),
-            nullable=False),
+        Column('stream_id', Integer, nullable=False),
         Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
         UniqueConstraint('stream_id', 'test_starttime'),
         extend_existing=True,

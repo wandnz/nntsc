@@ -82,9 +82,7 @@ def data_tables(db):
 
     testtable = Table(TEST_TABLE_NAME, db.metadata,
         Column('test_id', Integer, primary_key=True),
-        Column('stream_id', Integer,
-            ForeignKey('streams.id', ondelete="CASCADE"),
-            nullable=False),
+        Column('stream_id', Integer, nullable=False),
         Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
         Column('test_servercount', Integer, nullable=False),
         Column('test_objectcount', Integer, nullable=False),

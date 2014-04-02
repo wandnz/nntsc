@@ -65,8 +65,7 @@ def data_table(db):
 
     dt = Table(DATA_TABLE_NAME, db.metadata,
         Column('timestamp', Integer, nullable=False),
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                nullable = False),
+        Column('stream_id', Integer, nullable=False),
         Column('path_id', Integer, nullable=False),
         Column('packet_size', SmallInteger, nullable=False),
         Column('length', SmallInteger, nullable=False),
