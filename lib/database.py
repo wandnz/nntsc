@@ -339,14 +339,6 @@ class Database:
         newid = result.inserted_primary_key
         result.close()
 
-        self.commit_transaction()
-        # Create a new data table for this stream, using the "base" data
-        # table as a template
-        fkey = "FOREIGN KEY (stream_id) REFERENCES streams(id) ON DELETE CASCADE"
-        ret = self.clone_table(basedata, newid[0], fkey)
-        if ret != DB_NO_ERROR:
-            return ret, -1
-
         return col_id, newid[0]
 
     def clone_table(self, original, streamid, foreignkey=None):
@@ -636,6 +628,34 @@ class Database:
         result.close()
         return DB_NO_ERROR
 
+    def find_existing_stream(self, st, props):
+        # We know a stream already exists that matches the given properties
+        # so we just need to find it
+
+        wherecl = "WHERE "
+        keys = props.keys()
+        for i in range(0, len(keys)):
+            if i != 0:
+                wherecl += " AND "
+            # XXX NOT PARAMETERISED
+            wherecl += "%s = '%s'" % (keys[i], props[keys[i]])
+
+        query = "SELECT stream_id FROM %s " % (st)
+        query += wherecl
+
+        print query
+        result = self.conn.execute(query) 
+
+        if result.rowcount != 1:
+            log("Unexpected number of matches when searching for existing stream: %d" % (result.rowcount))
+            return DB_DATA_ERROR
+
+        row = result.fetchone()
+        print row[0]
+        result.close()
+        return row[0]
+
+
     def insert_stream(self, liveexp, tablename, datatable, basecol, submodule, 
             name, timestamp, streamprops):
 
@@ -653,6 +673,14 @@ class Database:
             try:
                 result = self.conn.execute(st.insert(), stream_id=streamid,
                     **streamprops)
+            except IntegrityError as e:
+                if "duplicate key value violates" in str(e):
+                    # Stream already exists, so why not find the stream id
+                    # and return that instead of throwing an error
+                    print streamid
+                    self.rollback_transaction()
+                    return self.find_existing_stream(tablename, streamprops)
+
             except (IntegrityError, DataError, ProgrammingError) as e:
                 self.rollback_transaction()
                 log(e)
@@ -670,6 +698,14 @@ class Database:
                 self.rollback_transaction()
                 return DB_INTERRUPTED
             break
+        
+        self.commit_transaction()
+        
+        # Create a new data table for this stream, using the "base" data
+        # table as a template
+        ret = self.clone_table(datatable, streamid)
+        if ret != DB_NO_ERROR:
+            return ret
 
         if liveexp != None and streamid > 0:
             streamprops["name"] = name
