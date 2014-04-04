@@ -19,63 +19,62 @@
 #
 # $Id$
 
-from sqlalchemy import Table, Column, Integer, \
-        String, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, SmallInteger
-from sqlalchemy.exc import IntegrityError, DataError, SQLAlchemyError,\
-        ProgrammingError
-from sqlalchemy.dialects import postgresql
-from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
+from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 STREAM_TABLE_NAME = "streams_amp_icmp"
 DATA_TABLE_NAME = "data_amp_icmp"
 
 amp_icmp_streams = {}
+    
+streamcols = [ \
+    {"name":"source", "type":"varchar", "null":False},
+    {"name":"destination", "type":"varchar", "null":False},
+    {"name":"address", "type":"inet", "null":False},
+    {"name":"packet_size", "type":"varchar", "null":False},
+    {"name":"datastyle", "type":"varchar", "null":False}
+]
+
+datacols = [ \
+    {"name":"rtt", "type":"integer", "null":True},
+    {"name":"packet_size", "type":"smallint", "null":False},
+    {"name":"ttl", "type":"smallint", "null":True},
+    {"name":"loss", "type":"smallint", "null":False},
+    {"name":"error_type", "type":"smallint", "null":True},
+    {"name":"error_code", "type":"smallint", "null":True},
+]
 
 def stream_table(db):
     """ Specify the description of an icmp stream, used to create the table """
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+    uniqcols = ['source', 'destination', 'packet_size', 'address']
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        Column('source', String, nullable=False),
-        Column('destination', String, nullable=False),
-        Column('address', postgresql.INET, nullable=False),
-        Column('packet_size', String, nullable=False),
-        Column('datastyle', String, nullable=False),
-        UniqueConstraint('destination', 'source', 'packet_size', 'address'),
-        useexisting=True,
-    )
-
-    Index('index_amp_icmp_source', st.c.source)
-    Index('index_amp_icmp_destination', st.c.destination)
-
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create streams table for amp-icmp")
+        return None
+   
+    err = db.create_index("", STREAM_TABLE_NAME, ['source'])
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create source index on %s" % (STREAM_TABLE_NAME))
+        return None
+    
+    err = db.create_index("", STREAM_TABLE_NAME, ['destination'])
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create dest index on %s" % (STREAM_TABLE_NAME))
+        return None
+    
     return STREAM_TABLE_NAME
 
 def data_table(db):
     """ Specify the description of icmp data, used to create the table """
 
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
 
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, nullable=False),
-        Column('timestamp', Integer, nullable=False),
-        Column('rtt', Integer, nullable=True),
-        Column('packet_size', SmallInteger, nullable=False),
-        Column('ttl', SmallInteger, nullable=True),
-        Column('loss', SmallInteger, nullable=False),
-        Column('error_type', SmallInteger, nullable=True),
-        Column('error_code', SmallInteger, nullable=True),
-        useexisting=True,
-    )
+    indexes = [{"columns":['rtt']}]
 
-    Index('index_amp_icmp_timestamp', dt.c.timestamp)
-    Index('index_amp_icmp_rtt', dt.c.rtt)
+    err = db.create_data_table(DATA_TABLE_NAME, datacols, indexes)
+    if err != DB_NO_ERROR:
+        return None
 
     return DATA_TABLE_NAME
 
@@ -107,7 +106,14 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
 def insert_data(db, exp, stream, ts, result):
     """ Insert a new measurement into the database and export to listeners """
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "amp_icmp", stream, ts, result)
+    filtered = {}
+    for col in datacols:
+        if col["name"] in result:
+            filtered[col["name"]] = result[col["name"]]
+        else:
+            filtered[col["name"]] = None
+
+    return db.insert_data(exp, DATA_TABLE_NAME, "amp_icmp", stream, ts, filtered)
 
 def process_data(db, exp, timestamp, data, source):
     """ Process a data object, which can contain 1 or more sets of results """
@@ -151,6 +157,10 @@ def register(db):
     st_name = stream_table(db)
     dt_name = data_table(db)
 
-    db.register_collection("amp", "icmp", st_name, dt_name)
+    if st_name == None or dt_name == None:
+        logger.log("Error creating AMP ICMP base tables")
+        return DB_CODING_ERROR
+
+    return db.register_collection("amp", "icmp", st_name, dt_name)
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

@@ -20,61 +20,44 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-	String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, BigInteger
-from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError,\
-        ProgrammingError, DataError
 import libnntscclient.logger as logger
-from libnntsc.database import DB_NO_ERROR, DB_GENERIC_ERROR, DB_DATA_ERROR
+from libnntsc.dberrorcodes import *
 
 STREAM_TABLE_NAME = "streams_rrd_muninbytes"
 DATA_TABLE_NAME = "data_rrd_muninbytes"
 
 def stream_table(db):
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+    streamcols = [ \
+        {"name":"filename", "type":"varchar", "null":False},
+        {"name":"switch", "type":"varchar", "null":False},
+        {"name":"interface", "type":"varchar", "null":False},
+        {"name":"interfacelabel", "type":"varchar"},
+        {"name":"direction", "type":"varchar", "null":False},
+        {"name":"minres", "type":"integer", "null":False, "default":"300"},
+        {"name":"highrows", "type":"integer", "null":False, "default":"1008"}
+    ]
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        # rrd filename
-        Column('filename', String, nullable=False),
-        # switch name
-        Column('switch', String, nullable=False),
-        # name identifying the interface on the switch, usually a port number
-        Column('interface', String, nullable=False),
-        # textual description of the purpose of the interface, e.g. the host
-        # or device connected to the port
-        Column('interfacelabel', String, nullable=True),
-        # direction, e.g. sent or received
-        Column('direction', String, nullable=False),
-        # seconds between measurements at highest resolution
-        Column('minres', Integer, nullable=False, default=300),
-        # number of measurements stored at highest resolution
-        Column('highrows', Integer, nullable=False, default=1008),
+    uniqcols = ['filename', 'interface', 'switch', 'direction']
 
-        UniqueConstraint('filename', 'interface', 'switch', 'direction'),
-        extend_existing=True,
-    )
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
 
+    if err != DB_NO_ERROR:
+        return None
     return STREAM_TABLE_NAME
+
 
 def data_table(db):
 
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
+    datacols = [ \
+        {"name":"bytes", "type":"bigint"}
+    ]
 
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, nullable=False),
-        Column('timestamp', Integer, nullable=False),
-        Column('bytes', BigInteger, nullable=True),
-    )
-
-    Index('index_rrd_muninbytes_timestamp', dt.c.timestamp)
-
+    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
+    if err != DB_NO_ERROR:
+        return None
     return DATA_TABLE_NAME
+
 
 def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
         rows, label):
