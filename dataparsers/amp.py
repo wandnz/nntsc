@@ -27,7 +27,7 @@ from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 import pika
 from ampsave.importer import import_data_functions
-from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns, amp_http
+from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns
 from libnntsc.dberrorcodes import *
 import time
 import logging
