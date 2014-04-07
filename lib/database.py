@@ -513,7 +513,7 @@ class Database:
         colstr = "(stream_id"
         values = [streamid]
         for k,v in streamprops.iteritems():
-            colstr += ", %s" % (k)
+            colstr += ', "%s"' % (k)
             values.append(v)    
         colstr += ") "
         
@@ -562,7 +562,7 @@ class Database:
         values = [stream, ts]
         
         for k,v in result.iteritems():
-            colstr += ", %s" % (k)
+            colstr += ', "%s"' % (k)
             values.append(v)    
 
             if k in casts:
@@ -598,7 +598,7 @@ class Database:
                 log("Column %s has no type when creating streams table %s -- skipping" % (c["name"], name))
                 continue
 
-            basesql += ", %s %s " % (c["name"], c["type"])
+            basesql += ', "%s" %s ' % (c["name"], c["type"])
 
             if "null" in c and c["null"] == False:
                 basesql += "NOT NULL "
@@ -691,7 +691,7 @@ class Database:
             for i in range(0, len(uniquecols)):
                 if i != 0:
                     basesql += ", "
-                basesql += "%s" % (uniquecols[i])
+                basesql += '"%s"' % (uniquecols[i])
 
             basesql += ")"
         basesql += ")"
