@@ -20,14 +20,8 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
-from sqlalchemy.exc import IntegrityError, OperationalError, DataError, \
-        ProgrammingError, SQLAlchemyError
-from sqlalchemy.dialects import postgresql
 import libnntscclient.logger as logger
-from libnntsc.database import DB_NO_ERROR, DB_DATA_ERROR, DB_GENERIC_ERROR
+from libnntsc.dberrorcodes import *
 
 import sys, string
 
@@ -38,42 +32,33 @@ lpi_flows_streams = {}
 
 def stream_table(db):
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+    streamcols = [ \
+        {"name":"source", "type":"varchar", "null":False},
+        {"name":"user", "type":"varchar", "null":False},
+        {"name":"dir", "type":"varchar", "null":False},
+        {"name":"freq", "type":"integer", "null":False},
+        {"name":"protocol", "type":"varchar", "null":False},
+        {"name":"metric", "type":"varchar", "null":False},
+    ]
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        Column('source', String, nullable=False),
-        Column('user', String, nullable=False),
-        Column('dir', String, nullable=False),
-        Column('freq', Integer, nullable=False),
-        Column('protocol', String, nullable=False),
-        Column('metric', String, nullable=False),
-        UniqueConstraint('source', 'user', 'dir', 'freq', 'protocol', 'metric'),
-        useexisting=True
-    )
+    uniqcols = ['source', 'user', 'dir', 'freq', 'protocol', 'metric']
 
-    Index('index_lpi_flows_source', st.c.source)
-    Index('index_lpi_flows_user', st.c.user)
-    Index('index_lpi_flows_dir', st.c.dir)
-    Index('index_lpi_flows_protocol', st.c.protocol)
-    Index('index_lpi_flows_metric', st.c.metric)
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
 
+    if err != DB_NO_ERROR:
+        return None
     return STREAM_TABLE_NAME
 
-def data_table(db):
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, nullable=False),
-        Column('timestamp', Integer, nullable=False),
-        Column('flows', BigInteger),
-        useexisting=True
-    )
-    Index('index_lpi_flows_timestamp', dt.c.timestamp)
-    return DATA_TABLE_NAME
 
+def data_table(db):
+    datacols = [ \
+        {"name":"flows", "type":"bigint"}
+    ]
+
+    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
+    if err != DB_NO_ERROR:
+        return None
+    return DATA_TABLE_NAME
 
 def create_existing_stream(stream_data):
 
