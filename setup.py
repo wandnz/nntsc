@@ -10,7 +10,7 @@ except ImportError:
         from distutils.core import setup
 
 requires = [ \
-        'sqlalchemy>=0.8', 'python-rrdtool', 'psycopg2', 'pika>=0.9.12', 'python-daemon', \
+        'python-rrdtool', 'psycopg2', 'pika>=0.9.12', 'python-daemon', \
 	'libnntsc-client', 'pywandevent' \
 ]
 

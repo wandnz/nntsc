@@ -20,15 +20,9 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
-from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
-        DataError, SQLAlchemyError
-from sqlalchemy.dialects import postgresql
 import libnntscclient.logger as logger
-from libnntsc.database import DB_NO_ERROR, DB_DATA_ERROR, DB_GENERIC_ERROR
 import sys, string
+from libnntsc.dberrorcodes import *
 
 STREAM_TABLE_NAME = "streams_lpi_packets"
 DATA_TABLE_NAME = "data_lpi_packets"
@@ -36,40 +30,31 @@ DATA_TABLE_NAME = "data_lpi_packets"
 lpi_packets_streams = {}
 
 def stream_table(db):
+    streamcols = [ \
+        {"name":"source", "type":"varchar", "null":False},
+        {"name":"user", "type":"varchar", "null":False},
+        {"name":"dir", "type":"varchar", "null":False},
+        {"name":"freq", "type":"integer", "null":False},
+        {"name":"protocol", "type":"varchar", "null":False},
+    ]
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+    uniqcols = ['source', 'user', 'dir', 'freq', 'protocol']
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        Column('source', String, nullable=False),
-        Column('user', String, nullable=False),
-        Column('dir', String, nullable=False),
-        Column('freq', Integer, nullable=False),
-        Column('protocol', String, nullable=False),
-        UniqueConstraint('source', 'user', 'dir', 'freq', 'protocol'),
-        useexisting=True
-    )
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
 
-    Index('index_lpi_packets_source', st.c.source)
-    Index('index_lpi_packets_user', st.c.user)
-    Index('index_lpi_packets_dir', st.c.dir)
-    Index('index_lpi_packets_protocol', st.c.protocol)
-
+    if err != DB_NO_ERROR:
+        return None
     return STREAM_TABLE_NAME
 
 def data_table(db):
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, nullable=False),
-        Column('timestamp', Integer, nullable=False),
-        Column('packets', BigInteger),
-        useexisting=True
-    )
 
-    Index('index_lpi_packets_timestamp', dt.c.timestamp)
+    datacols = [ \
+        {"name":"packets", "type":"bigint"}
+    ]
+
+    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
+    if err != DB_NO_ERROR:
+        return None
     return DATA_TABLE_NAME
 
 

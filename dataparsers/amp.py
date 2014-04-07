@@ -22,13 +22,13 @@
 
 import sys
 
-from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
+from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 import pika
 from ampsave.importer import import_data_functions
-from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns, amp_http
+from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns
+from libnntsc.dberrorcodes import *
 import time
 import logging
 
@@ -45,7 +45,7 @@ class AmpModule:
         self.db = Database(self.dbconf["name"], self.dbconf["user"], 
                 self.dbconf["pass"], self.dbconf["host"])
 
-        self.db.connect_db()
+        self.db.connect_db(15)
 
         # the amp modules understand how to extract the test data from the blob
         self.amp_modules = import_data_functions()
@@ -114,7 +114,7 @@ class AmpModule:
         """
 
         # We need this loop so that we can try processing the message again
-        # if a DB_GENERIC_ERROR requires us to reconnect to the database. If
+        # if an insert fails due to a query timeout. If
         # we exit this function without acknowledging the message then we
         # will stop getting messages (including the unacked one!)
         while 1:
@@ -171,7 +171,18 @@ class AmpModule:
                     logger.log("Database error while processing AMP data")
                     channel.close()
                     return
-
+                elif code == DB_QUERY_TIMEOUT:
+                    logger.log("Database timeout while processing AMP data")
+                    continue
+                elif code == DB_CODING_ERROR:
+                    logger.log("Bad database code encountered while processing AMP data")
+                    channel.close()
+                    return
+                elif code == DB_DUPLICATE_KEY:
+                    logger.log("Duplicate key error while processing AMP data")
+                    channel.close()
+                    return    
+            
                 else:
                     logger.log("Unknown error code returned by database: %d" % (code))
                     logger.log("Shutting down AMP module")
@@ -199,10 +210,16 @@ def run_module(tests, config, key, exchange):
 
 def tables(db):
 
-    amp_icmp.register(db)
-    amp_traceroute.register(db)
-    amp_dns.register(db)
-    #amp_http.register(db)
-    #amp_udpstream.register(db)
+    code = amp_icmp.register(db)
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register AMP ICMP collection")
+
+    code = amp_traceroute.register(db)
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register AMP Traceroute collection")
+    
+    code = amp_dns.register(db)
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register AMP DNS collection")
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

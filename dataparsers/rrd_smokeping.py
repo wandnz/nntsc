@@ -19,60 +19,41 @@
 #
 # $Id$
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, SmallInteger
-from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
-        SQLAlchemyError, DataError
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql import text
 import libnntscclient.logger as logger
-from libnntsc.database import DB_NO_ERROR, DB_GENERIC_ERROR, DB_DATA_ERROR
+from libnntsc.dberrorcodes import *
 
 STREAM_TABLE_NAME="streams_rrd_smokeping"
 DATA_TABLE_NAME="data_rrd_smokeping"
 
 def stream_table(db):
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+    streamcols = [ \
+        {"name":"filename", "type":"varchar", "null":False}, 
+        {"name":"source", "type":"varchar", "null":False}, 
+        {"name":"host", "type":"varchar", "null":False}, 
+        {"name":"minres", "type":"integer", "null":False, "default":"300"}, 
+        {"name":"highrows", "type":"integer", "null":False, "default":"1008"}
+    ]
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        # rrd filename
-        Column('filename', String, nullable=False),
-        # machine that is running smokeping
-        Column('source', String, nullable=False),
-        # host (fqdn or ip address)
-        Column('host', String, nullable=False),
-        # seconds between measurements at highest resolution
-        Column('minres', Integer, nullable=False, default=300),
-        # number of measurements stored at highest resolution
-        Column('highrows', Integer, nullable=False, default=1008),
+    uniqcols = ['filename', 'source', 'host']
 
-        UniqueConstraint('filename', 'source', 'host'),
-        useexisting=True
-    )
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
 
+    if err != DB_NO_ERROR:
+        return None
     return STREAM_TABLE_NAME
 
 def data_table(db):
 
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
+    datacols = [ \
+        {"name":"loss", "type":"smallint"},
+        {"name":"median", "type":"double precision"},
+        {"name":"pings", "type":"double precision[]"}
+    ]
 
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, nullable = False),
-        Column('timestamp', Integer, nullable=False),
-        Column('loss', SmallInteger, nullable=True),
-        Column('median', Float, nullable=True),
-        Column('pings', postgresql.ARRAY(Float), nullable=True),
-        useexisting=True
-    )
-
-    Index('index_rrd_smokeping_timestamp', dt.c.timestamp)
-
+    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
+    if err != DB_NO_ERROR:
+        return None
     return DATA_TABLE_NAME
 
 def insert_stream(db, exp, name, fname, source, host, minres, rows):
@@ -103,15 +84,8 @@ def insert_data(db, exp, stream, ts, line):
 
         kwargs['pings'].append(val)
 
-    
-    insertfunc = text("INSERT INTO %s ("
-            "stream_id, timestamp, loss, median, pings) VALUES ("
-            ":stream_id, :timestamp, :loss, :median, "
-            "CAST(:pings AS double precision[]))" % \
-            (DATA_TABLE_NAME + "_" + str(stream)))
-
     return db.insert_data(exp, DATA_TABLE_NAME, "rrd_smokeping", stream, ts, 
-            kwargs, insertfunc)
+            kwargs)
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

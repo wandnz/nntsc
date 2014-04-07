@@ -20,12 +20,12 @@
 # $Id$
 
 
-from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
+from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
 from libnntsc.pikaqueue import initExportPublisher
+from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 import time
@@ -63,7 +63,7 @@ class LPIModule:
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
-        self.db.connect_db()
+        self.db.connect_db(15)
 
         for s in existing:
 
@@ -183,6 +183,7 @@ class LPIModule:
                     code = self.process_stats(data)
                    
                     if code == DB_INTERRUPTED:
+                        logger.log("Interrupt while processing LPI data")
                         break
                         
                     if code == DB_GENERIC_ERROR:
@@ -192,6 +193,18 @@ class LPIModule:
                     if code == DB_DATA_ERROR:
                         # Bad data -- reconnect to server  
                         logger.log("LPIModule: Invalid Statistics Data")
+                        break
+
+                    if code == DB_CODING_ERROR:
+                        logger.log("Bad database code encountered while processing LPI data -- skipping data")
+                        continue
+
+                    if code == DB_DUPLICATE_KEY:
+                        logger.log("Duplicate key error while processing LPI data")
+                        break
+
+                    if code == DB_QUERY_TIMEOUT:
+                        logger.log("Query timeout while inserting LPI data -- should this really be happening?")
                         break
 
                     assert(code != DB_OPERATIONAL_ERROR)

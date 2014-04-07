@@ -20,13 +20,7 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean, SmallInteger
-from sqlalchemy.exc import DataError, IntegrityError, OperationalError, \
-        SQLAlchemyError, ProgrammingError
-from sqlalchemy.dialects import postgresql
-from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
+from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 STREAM_TABLE_NAME = "streams_amp_dns"
@@ -37,6 +31,25 @@ amp_dns_streams = {}
 streamkeys = ['destination', 'instance', 'address', 'query', 'query_type',
     'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid', 'source']
 flagnames = ['rd', 'tc', 'aa', 'qr', 'cd', 'ad', 'ra']
+
+dns_datacols = [ \
+    {"name":"response_size", "type":"integer", "null":True},
+    {"name":"rtt", "type":"integer", "null":True},
+    {"name":"ttl", "type":"smallint", "null":True},
+    {"name":"query_len", "type":"smallint", "null":True},
+    {"name":"total_answer", "type":"smallint", "null":True},
+    {"name":"total_authority", "type":"smallint", "null":True},
+    {"name":"total_additional", "type":"smallint", "null":True},
+    {"name":"opcode", "type":"smallint", "null":True},
+    {"name":"rcode", "type":"smallint", "null":True},
+    {"name":"flag_rd", "type":"boolean", "null":True},
+    {"name":"flag_tc", "type":"boolean", "null":True},
+    {"name":"flag_aa", "type":"boolean", "null":True},
+    {"name":"flag_qr", "type":"boolean", "null":True},
+    {"name":"flag_cd", "type":"boolean", "null":True},
+    {"name":"flag_ad", "type":"boolean", "null":True},
+    {"name":"flag_ra", "type":"boolean", "null":True},
+]
 
 def result_to_key(res):
     key = (str(res['source']), str(res['destination']), str(res['instance']),
@@ -64,68 +77,69 @@ def insert_stream(db, exp, data, timestamp):
             "amp", "dns", name, timestamp, props)
 
 def stream_table(db):
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+    
+    streamcols = [ \
+        {"name":"source", "type":"varchar", "null":False},
+        {"name":"destination", "type":"varchar", "null":False},
+        {"name":"instance", "type":"varchar", "null":False},
+        {"name":"address", "type":"inet", "null":False},
+        {"name":"query", "type":"varchar", "null":False},
+        {"name":"query_type", "type":"varchar", "null":False},
+        {"name":"query_class", "type":"varchar", "null":False},
+        {"name":"udp_payload_size", "type":"integer", "null":False},
+        {"name":"recurse", "type":"boolean", "null":False},
+        {"name":"dnssec", "type":"boolean", "null":False},
+        {"name":"nsid", "type":"boolean", "null":False}
+    ]
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-            primary_key=True),
-        Column('source', String, nullable=False),
-        Column('destination', String, nullable=False),
-        Column('instance', String, nullable=False),
-        Column('address', postgresql.INET, nullable=False),
-        Column('query', String, nullable=False),
-        Column('query_type', String, nullable=False),
-        Column('query_class', String, nullable=False),
-        Column('udp_payload_size', Integer, nullable=False),
-        Column('recurse', Boolean, nullable=False),
-        Column('dnssec', Boolean, nullable=False),
-        Column('nsid', Boolean, nullable=False),
-        UniqueConstraint('source', 'destination', 'address', 'query', 'query_type',
-                'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid',
-                'instance'),
-        useexisting=True,
-    )
+    uniqcols = ['source', 'destination', 'query', 'address', 'query_type',
+            'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid',
+            'instance']
 
-    Index('index_amp_dns_source', st.c.source)
-    Index('index_amp_dns_destination', st.c.destination)
-    Index('index_amp_dns_query', st.c.query)
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create streams table for amp-icmp")
+        return None
+
+    err = db.create_index("", STREAM_TABLE_NAME, ['source'])
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create source index on %s" % (STREAM_TABLE_NAME))
+        return None
+
+    err = db.create_index("", STREAM_TABLE_NAME, ['destination'])
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create dest index on %s" % (STREAM_TABLE_NAME))
+        return None
+
+    err = db.create_index("", STREAM_TABLE_NAME, ['query'])
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create query index on %s" % (STREAM_TABLE_NAME))
+        return None
 
     return STREAM_TABLE_NAME
 
 def data_table(db):
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
 
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, nullable=False),
-        Column('timestamp', Integer, nullable=False),
-        Column('response_size', Integer, nullable=True),
-        Column('rtt', Integer, nullable=True),
-        Column('ttl', SmallInteger, nullable=True),
-        Column('query_len', SmallInteger, nullable=False),
-        Column('total_answer', SmallInteger, nullable=True),
-        Column('total_authority', SmallInteger, nullable=True),
-        Column('total_additional', SmallInteger, nullable=True),
-        Column('opcode', SmallInteger, nullable=True),
-        Column('rcode', SmallInteger, nullable=True),
-        Column('flag_rd', Boolean, nullable=True),
-        Column('flag_tc', Boolean, nullable=True),
-        Column('flag_aa', Boolean, nullable=True),
-        Column('flag_qr', Boolean, nullable=True),
-        Column('flag_cd', Boolean, nullable=True),
-        Column('flag_ad', Boolean, nullable=True),
-        Column('flag_ra', Boolean, nullable=True),
-    )
+    indexes = [{"columns":['rtt']}]
 
-    Index('index_amp_dns_timestamp', dt.c.timestamp)
-    Index('index_amp_dns_rtt', dt.c.rtt)
+    err = db.create_data_table(DATA_TABLE_NAME, dns_datacols, indexes)
+    if err != DB_NO_ERROR:
+        return None
+
 
     return DATA_TABLE_NAME
 
 
 def insert_data(db, exp, stream, ts, result):
-    return db.insert_data(exp, DATA_TABLE_NAME, "amp_dns", stream, ts, result)
+    filtered = {}
+    for col in dns_datacols:
+        if col["name"] in result:
+            filtered[col["name"]] = result[col["name"]]
+        else:
+            filtered[col["name"]] = None
+ 
+
+    return db.insert_data(exp, DATA_TABLE_NAME, "amp_dns", stream, ts, filtered)
 
 
 def split_result(alldata, result):
@@ -189,7 +203,11 @@ def register(db):
     st_name = stream_table(db)
     dt_name = data_table(db)
 
-    db.register_collection("amp", "dns", st_name, dt_name)
+    if st_name == None or dt_name == None:
+        logger.log("Error creating AMP DNS base tables")
+        return DB_CODING_ERROR
+
+    return db.register_collection("amp", "dns", st_name, dt_name)
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
