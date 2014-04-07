@@ -32,7 +32,7 @@ streamkeys = ['destination', 'instance', 'address', 'query', 'query_type',
     'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid', 'source']
 flagnames = ['rd', 'tc', 'aa', 'qr', 'cd', 'ad', 'ra']
 
-datacols = [ \
+dns_datacols = [ \
     {"name":"response_size", "type":"integer", "null":True},
     {"name":"rtt", "type":"integer", "null":True},
     {"name":"ttl", "type":"smallint", "null":True},
@@ -122,7 +122,7 @@ def data_table(db):
 
     indexes = [{"columns":['rtt']}]
 
-    err = db.create_data_table(DATA_TABLE_NAME, datacols, indexes)
+    err = db.create_data_table(DATA_TABLE_NAME, dns_datacols, indexes)
     if err != DB_NO_ERROR:
         return None
 
@@ -132,7 +132,7 @@ def data_table(db):
 
 def insert_data(db, exp, stream, ts, result):
     filtered = {}
-    for col in datacols:
+    for col in dns_datacols:
         if col["name"] in result:
             filtered[col["name"]] = result[col["name"]]
         else:

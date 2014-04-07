@@ -27,7 +27,7 @@ DATA_TABLE_NAME = "data_amp_icmp"
 
 amp_icmp_streams = {}
     
-streamcols = [ \
+icmp_streamcols = [ \
     {"name":"source", "type":"varchar", "null":False},
     {"name":"destination", "type":"varchar", "null":False},
     {"name":"address", "type":"inet", "null":False},
@@ -35,7 +35,7 @@ streamcols = [ \
     {"name":"datastyle", "type":"varchar", "null":False}
 ]
 
-datacols = [ \
+icmp_datacols = [ \
     {"name":"rtt", "type":"integer", "null":True},
     {"name":"packet_size", "type":"smallint", "null":False},
     {"name":"ttl", "type":"smallint", "null":True},
@@ -49,7 +49,7 @@ def stream_table(db):
 
     uniqcols = ['source', 'destination', 'packet_size', 'address']
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    err = db.create_streams_table(STREAM_TABLE_NAME, icmp_streamcols, uniqcols)
     if err != DB_NO_ERROR:
         logger.log("Failed to create streams table for amp-icmp")
         return None
@@ -72,7 +72,7 @@ def data_table(db):
 
     indexes = [{"columns":['rtt']}]
 
-    err = db.create_data_table(DATA_TABLE_NAME, datacols, indexes)
+    err = db.create_data_table(DATA_TABLE_NAME, icmp_datacols, indexes)
     if err != DB_NO_ERROR:
         return None
 
@@ -107,7 +107,7 @@ def insert_data(db, exp, stream, ts, result):
     """ Insert a new measurement into the database and export to listeners """
 
     filtered = {}
-    for col in datacols:
+    for col in icmp_datacols:
         if col["name"] in result:
             filtered[col["name"]] = result[col["name"]]
         else:

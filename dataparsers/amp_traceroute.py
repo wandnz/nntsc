@@ -28,7 +28,7 @@ DATA_TABLE_NAME = "data_amp_traceroute"
 
 amp_trace_streams = {}
 
-datacols = [ \
+traceroute_datacols = [ \
     {"name":"path_id", "type":"integer", "null":False},
     {"name":"packet_size", "type":"smallint", "null":False},
     {"name":"length", "type":"smallint", "null":False},
@@ -71,7 +71,7 @@ def stream_table(db):
 def data_table(db):
     """ Specify the description of traceroute data, used to create the table """
 
-    err = db.create_data_table(DATA_TABLE_NAME, datacols)
+    err = db.create_data_table(DATA_TABLE_NAME, traceroute_datacols)
     if err != DB_NO_ERROR:
         return None
 
@@ -116,8 +116,7 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     name = "traceroute %s:%s:%s:%s" % (source, dest, address, size)
 
     props = {"source":source, "destination":dest,
-            "packet_size":size, "datastyle":"traceroute",
-            "address": address}
+            "packet_size":size, "address": address}
 
     streamid = db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
             "amp", "traceroute", name, timestamp, props)
@@ -146,19 +145,17 @@ def insert_data(db, exp, stream, ts, result):
 
     pathtable = "data_amp_traceroute_paths_%d" % (stream)
 
-    pathinsert = text("WITH s AS (SELECT path_id, CAST(:path AS inet[]) "
-            "as path FROM %s "
-            "WHERE path = CAST(:path AS inet[])), "
-            "i AS (INSERT INTO %s (path) "
-            "SELECT CAST(:path AS inet[]) WHERE "
-            "NOT EXISTS (SELECT path FROM %s "
-            "WHERE path = CAST(:path AS inet[])) "
-            "RETURNING path_id, path) "
-            "SELECT path_id, path FROM i UNION ALL "
-            "SELECT path_id, path FROM s" % (pathtable, pathtable, pathtable))
-        
-   
-    err, queryret = db.custom_insert(pathinsert, result)
+    pathinsert = "WITH s AS (SELECT path_id, path FROM %s " % (pathtable)
+    pathinsert += "WHERE path = CAST (%s as inet[])), "
+    pathinsert += "i AS (INSERT INTO %s (path) " % (pathtable)
+    pathinsert += "SELECT CAST(%s as inet[]) WHERE NOT EXISTS "
+    pathinsert += "(SELECT path FROM %s " % (pathtable)
+    pathinsert += "WHERE path = CAST(%s as inet[])) RETURNING path_id, path) "
+    pathinsert += "SELECT path_id, path FROM i UNION ALL "
+    pathinsert += "SELECT path_id, path FROM s"
+
+    params = (result['path'], result['path'], result["path"])
+    err, queryret = db.custom_insert(pathinsert, params)
      
     if err != DB_NO_ERROR:
         return err
@@ -166,18 +163,17 @@ def insert_data(db, exp, stream, ts, result):
     if queryret == None:
         return DB_DATA_ERROR
             
-    result['path_id'] = queryret.fetchone()[0]
-    queryret.close()
+    result['path_id'] = queryret[0]
    
     filtered = {}
-    for col in datacols:
+    for col in traceroute_datacols:
         if col["name"] in result:
             filtered[col["name"]] = result[col["name"]]
         else:
             filtered[col["name"]] = None
 
     return db.insert_data(exp, DATA_TABLE_NAME, "amp_traceroute", stream,
-            ts, filtered)
+            ts, filtered, {'hop_rtt':'integer[]'})
 
 
 

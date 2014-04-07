@@ -408,7 +408,7 @@ class Database:
                     (original, str(streamid)))
             return err
 
-        self.conn.commit()
+        #self.conn.commit()
         return DB_NO_ERROR
 
     def add_foreign_key(self, tablename, column, foreigntable, foreigncolumn):
@@ -425,7 +425,7 @@ class Database:
                     (tablename))
             return err
 
-        self.conn.commit()
+        #self.conn.commit()
         return DB_NO_ERROR
 
     def __delete_everything(self):
@@ -457,7 +457,7 @@ class Database:
         if err != DB_NO_ERROR:
             return err        
 
-        self.conn.commit()
+        #self.conn.commit()
         return DB_NO_ERROR
 
     def set_firsttimestamp(self, stream_id, ts):
@@ -528,8 +528,6 @@ class Database:
             return self.find_existing_stream(tablename, streamprops)
         elif err != DB_NO_ERROR:
             return err
-        
-        self.conn.commit()
  
         # Create a new data table for this stream, using the "base" data
         # table as a template
@@ -543,10 +541,11 @@ class Database:
             liveexp.publishStream(colid, basecol + "_" + submodule,
                     streamid, streamprops)
 
+        #self.conn.commit()
         return streamid
 
     def custom_insert(self, customsql, values):
-        err = self._basicquery(customsql, params)
+        err = self._basicquery(customsql, values)
         if err != DB_NO_ERROR:
             return err, None
 
@@ -555,19 +554,27 @@ class Database:
 
 
 
-    def insert_data(self, liveexp, tablename, collection, stream, ts, result):
+    def insert_data(self, liveexp, tablename, collection, stream, ts, result,
+            casts = {}):
    
         colstr = "(stream_id, timestamp"
+        valstr = "%s, %s"
         values = [stream, ts]
+        
         for k,v in result.iteritems():
             colstr += ", %s" % (k)
             values.append(v)    
+
+            if k in casts:
+                valstr += ", CAST(%s AS " + casts[k] + ")"
+            else:
+                valstr += ", %s"
         colstr += ") "
         
         params = tuple(values)
         insert = "INSERT INTO %s_%s " % (tablename, stream)
         insert += colstr
-        insert += "VALUES (%s)" % (",".join(["%s"] * len(values)))
+        insert += "VALUES (%s)" % (valstr)
 
         err = self._basicquery(insert, params)
         if err != DB_NO_ERROR:
