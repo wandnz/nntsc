@@ -328,6 +328,7 @@ class DBWorker(threading.Thread):
         for row, tscol, binsize, exception in rowgen:
 
             if exception is not None:
+                log(exception)
                 if exception.code == DB_QUERY_TIMEOUT:
                     return self._cancel_history(name, labels, start, end, more)
                 elif exception.code == DB_OPERATIONAL_ERROR:

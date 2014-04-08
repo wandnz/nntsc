@@ -350,7 +350,7 @@ class DBSelector(DatabaseCore):
             fetched = self._query_data_generator()
             for row, errcode in fetched:
                 if errcode != DB_NO_ERROR:
-                    yield(None, None, None, DBQueryException(err))
+                    yield(None, None, None, DBQueryException(errcode))
                 else:
                     yield (row, tscol, binsize, None)
 
@@ -452,7 +452,7 @@ class DBSelector(DatabaseCore):
             fetched = self._query_data_generator()
             for row, errcode in fetched:
                 if errcode != DB_NO_ERROR:
-                    yield(None, None, None, DBQueryException(err))
+                    yield(None, None, None, DBQueryException(errcode))
                 else:
                     yield (row, "timestamp", 0, None)
 
