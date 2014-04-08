@@ -46,6 +46,7 @@ class DBSelector(DatabaseCore):
     def disconnect(self):
         if self.datacursor is not None:
             self.datacursor.close()
+            self.datacursor = None
 
         super(DBSelector, self).disconnect()
 
@@ -79,6 +80,8 @@ class DBSelector(DatabaseCore):
             if err == DB_OPERATIONAL_ERROR:
                 # Retry the query, as we just reconnected
                 continue
+            if err != DB_NO_ERROR:
+                self.datacursor = None
             break
 
         return err           

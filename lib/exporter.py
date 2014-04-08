@@ -33,6 +33,7 @@ from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
 from libnntsc.pikaqueue import initExportConsumer
+from libnntsc.dberrorcodes import *
 
 # There are 4 classes defined in this file that form a hierarchy for
 # exporting live and/or historical data to clients.
@@ -101,6 +102,7 @@ class DBWorker(threading.Thread):
         self.queue = queue
         self.threadid = threadid
         self.timeout = timeout
+        self.db = None
 
     def process_job(self, job):
         jobtype = job[0]
@@ -647,7 +649,6 @@ class DBWorker(threading.Thread):
             self._connect_database()
             err = self.process_job(job)
             if err == DBWORKER_HALT:
-                log("Halting DBWorker thread due to client disconnect")
                 break
             if err != DBWORKER_SUCCESS:
                 log("Failed to process job, error code %d -- dropping client" % (err))
