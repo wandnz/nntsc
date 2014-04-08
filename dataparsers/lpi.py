@@ -20,7 +20,7 @@
 # $Id$
 
 
-from libnntsc.database import Database
+from libnntsc.database import DBInsert
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
@@ -61,7 +61,7 @@ class LPIModule:
         if self.lpiport == "":
             self.lpiport = 3678
 
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
+        self.db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
         self.db.connect_db(15)
 

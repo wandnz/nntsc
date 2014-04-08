@@ -20,7 +20,7 @@
 # $Id$
 
 
-from libnntsc.database import Database
+from libnntsc.database import DBInsert
 from libnntsc.dberrorcodes import *
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
@@ -35,7 +35,7 @@ class RRDModule:
         if dbconf == {}:
             sys.exit(1)
 
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
+        self.db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
         self.db.connect_db(15)
 

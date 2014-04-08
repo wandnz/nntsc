@@ -22,7 +22,7 @@
 
 import sys
 
-from libnntsc.database import Database
+from libnntsc.database import DBInsert
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 import pika
@@ -42,7 +42,7 @@ class AmpModule:
         if self.dbconf == {}:
             sys.exit(1)
         
-        self.db = Database(self.dbconf["name"], self.dbconf["user"], 
+        self.db = DBInsert(self.dbconf["name"], self.dbconf["user"], 
                 self.dbconf["pass"], self.dbconf["host"])
 
         self.db.connect_db(15)
@@ -51,7 +51,11 @@ class AmpModule:
         self.amp_modules = import_data_functions()
 
         self.collections = {}
-        cols = self.db.list_collections()
+        try:
+            cols = self.db.list_collections()
+        except DBQueryException as e:
+            log(e)
+            cols = []
 
         for c in cols:
             if c['module'] == "amp":

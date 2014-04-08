@@ -28,8 +28,7 @@ from multiprocessing import Pipe, Queue
 import Queue as StdQueue
 import threading, select
 
-from libnntsc.dbselect import DBSelector, NNTSCDatabaseTimeout, \
-    NNTSCDatabaseDisconnect, DB_QUERY_OK, DB_QUERY_CANCEL, DB_QUERY_RETRY
+from libnntsc.dbselect import DBSelector
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
@@ -87,6 +86,13 @@ MAX_WORKERS = 2
 
 DB_WORKER_MAX_RETRIES = 3
 
+DBWORKER_SUCCESS = 1
+DBWORKER_RETRY = 0
+DBWORKER_ERROR = -1
+DBWORKER_BADJOB = -2
+DBWORKER_FULLQUEUE = -3
+DBWORKER_HALT = -4
+
 class DBWorker(threading.Thread):
     def __init__(self, parent, queue, dbconf, threadid, timeout):
         threading.Thread.__init__(self)
@@ -101,7 +107,7 @@ class DBWorker(threading.Thread):
         jobdata = job[1]
 
         if jobtype == -1:
-            return -1
+            return DBWORKER_HALT
    
         self.retries = 0
     
@@ -112,12 +118,15 @@ class DBWorker(threading.Thread):
             return self.aggregate(jobdata)
 
         if jobtype == NNTSC_PERCENTILE:
-            return self.percentile(jobdata)
+            # XXX can we inform the client they asked for something we
+            # don't support?
+            log("Client requested percentile data, but we don't support that anymore")
+            return DBWORKER_BADJOB
 
         if jobtype == NNTSC_SUBSCRIBE:
             return self.subscribe(jobdata)
 
-        return -1
+        return DBWORKER_BADJOB
 
     def _merge_aggregators(self, columns, func):
         # Combine the aggcols and aggfunc variables into a nice single
@@ -150,9 +159,10 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], False, 0, now) == -1:
-                    return -1 
-            return 0
+                err = self._enqueue_history(name, lab, [], False, 0, now)
+                if err != DBWORKER_SUCCESS:
+                    return err 
+            return DBWORKER_SUCCESS
 
         if end == None:
             stoppoint = int(time.time())
@@ -175,18 +185,17 @@ class DBWorker(threading.Thread):
                 if queryend % binsize < binsize - 1:
                     queryend = (int(queryend / binsize) * binsize) - 1
 
-            
-
             generator = self.db.select_aggregated_data(name, labels, aggs,
                     start, queryend, groupcols, binsize)
 
             error = self._query_history(generator, name, labels, more, start,
                     queryend)
 
-            if error == DB_QUERY_CANCEL:
-                return error
-            if error == DB_QUERY_RETRY:
+            if error == DBWORKER_RETRY:
                 continue
+            if error != DBWORKER_SUCCESS:
+                return error
+
             start = queryend + 1
 
             # If we were asked for data up until "now", make sure we account
@@ -196,68 +205,7 @@ class DBWorker(threading.Thread):
             if end == None:
                 stoppoint = int(time.time())
 
-        return 0
-
-    def percentile(self, pcntmsg):
-        tup = pickle.loads(pcntmsg)
-        name, start, end, labels, binsize, ntilecols, othercols, \
-                ntileagg, otheragg = tup
-        now = int(time.time())
-
-        if end == 0:
-            end = None
-
-        if start == None or start >= now:
-            # No historical data, send empty history for all streams
-            for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], False, 0, now) == -1:
-                    return -1 
-
-            return 0
-
-        if end == None:
-            stoppoint = int(time.time())
-        else:
-            stoppoint = end
-        
-        ntileaggs = self._merge_aggregators(ntilecols, ntileagg)
-        otheraggs = self._merge_aggregators(othercols, otheragg)
-
-        while start < stoppoint:
-            queryend = start + MAX_HISTORY_QUERY
-
-            if queryend >= stoppoint:
-                queryend = stoppoint
-                more = False
-            else:
-                more = True
-                # Make sure our queries align nicely with the binsize,
-                # otherwise we'll end up with duplicate results for the
-                # bins that span the query boundary
-                if queryend % binsize < binsize - 1:
-                    queryend = (int(queryend / binsize) * binsize) - 1
-
-            generator = self.db.select_percentile_data(name, labels, ntileaggs,
-                    otheraggs, start, queryend, binsize)
-
-            error = self._query_history(generator, name, labels, more, start,
-                    queryend)
-
-            if error == DB_QUERY_CANCEL:
-                return error
-            if error == DB_QUERY_RETRY:
-                continue
-            start = queryend + 1
-
-            # If we were asked for data up until "now", make sure we account
-            # for the time taken to make earlier queries otherwise we'll
-            # miss any new data inserted while we were querying previous
-            # weeks of data
-            if end == None:
-                stoppoint = int(time.time())
-
-        return 0
-
+        return DBWORKER_SUCCESS
 
     def subscribe(self, submsg):
         name, start, end, cols, labels, aggs = pickle.loads(submsg)
@@ -272,11 +220,13 @@ class DBWorker(threading.Thread):
         if start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                if self._enqueue_history(name, lab, [], False, 0, start) == -1:
-                    return -1 
+                err = self._enqueue_history(name, lab, [], False, 0, start)
+                if err != DBWORKER_SUCCESS:
+                    return err
 
-                if self._subscribe_streams(streams, start, end, cols, name, lab) == -1:
-                    return -1
+                err = self._subscribe_streams(streams, start, end, cols, name, lab)
+                if err != DBWORKER_SUCCESS:
+                    return err
 
             return 0
         
@@ -293,8 +243,9 @@ class DBWorker(threading.Thread):
         # the client can stockpile any live data that arrives while we're
         # busy querying the db.
         for lab, streams in labels.items():
-            if self._subscribe_streams(streams, start, end, cols, name, lab) == -1:
-                return -1
+            err = self._subscribe_streams(streams, start, end, cols, name, lab)
+            if err != DBWORKER_SUCCESS:
+                return err
 
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY
@@ -335,23 +286,24 @@ class DBWorker(threading.Thread):
             error = self._query_history(generator, name, labels, more, start,
                     queryend)
 
-            if error == DB_QUERY_CANCEL:
-                return error
-            if error == DB_QUERY_RETRY:
+            if error == DBWORKER_RETRY:
                 continue
+            if error != DBWORKER_SUCCESS:
+                return error
 
             start = queryend + 1
 
 
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
-        return 0
+        return DBWORKER_SUCCESS
 
     def _cancel_history(self, name, labels, start, end, more):
         # If the query was cancelled, let the client know that
         # the absence of data for this time range is due to a 
         # database query timeout rather than a lack of data
-        if self._enqueue_cancel(NNTSC_HISTORY, (name, labels, start, end, more)) == -1:
-            return -1
+        err = self._enqueue_cancel(NNTSC_HISTORY, (name, labels, start, end, more))
+        if err != DBWORKER_SUCCESS:
+            return err
 
         if not more:
             for lab in labels:
@@ -359,9 +311,9 @@ class DBWorker(threading.Thread):
                     self.queue.put((NNTSC_HISTORY_DONE, lab, 0), False)
                 except StdQueue.Full:
                     log("Unable to push history onto full worker queue")
-                    return -1
+                    return DBWORKER_FULLQUEUE
 
-        return 0
+        return DBWORKER_SUCCESS
 
     def _query_history(self, rowgen, name, labels, more, start, end):
 
@@ -371,20 +323,17 @@ class DBWorker(threading.Thread):
         observed = set([])
 
         # Get any historical data that we've been asked for
-        for row, tscol, binsize, errorcode in rowgen:
+        for row, tscol, binsize, exception in rowgen:
 
-            # -1 means that the query was cancelled due to a timeout -- let
-            # the querier know that they got cancelled
-            if errorcode == DB_QUERY_CANCEL:
-                return self._cancel_history(name, labels, start, end, more)
-
-            # -2 means that the database disappeared on us -- reconnect and
-            # try to resume from where we got up to before
-            if errorcode == DB_QUERY_RETRY:
-                if self._reconnect_database() == -1:
-                    return -1
-                return errorcode
-                
+            if exception is not None:
+                if exception.code == DB_QUERY_TIMEOUT:
+                    return self._cancel_history(name, labels, start, end, more)
+                elif exception.code == DB_OPERATIONAL_ERROR:
+                    if self._reconnect_database() == -1:
+                        return DBWORKER_ERROR 
+                    return DBWORKER_RETRY
+                else:
+                    return DBWORKER_ERROR
 
             # Limit the amount of history we export at any given time
             # to prevent us from using too much memory during processing
@@ -404,8 +353,9 @@ class DBWorker(threading.Thread):
                     lastts = freqstats['lastts']
 
                     assert(currlabel in labels)
-                    if self._enqueue_history(name, currlabel, history, thismore, freq, lastts) == -1:
-                        return -1
+                    err = self._enqueue_history(name, currlabel, history, thismore, freq, lastts)
+                    if err != DBWORKER_SUCCESS:
+                        return err
                     
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
@@ -449,8 +399,10 @@ class DBWorker(threading.Thread):
             # Make sure we write out the last stream
             freq = self._calc_frequency(freqstats, binsize)
             lastts = freqstats['lastts']
-            if self._enqueue_history(name, currlabel, history, more, freq, lastts) == -1:
-                return -1
+            err = self._enqueue_history(name, currlabel, history, more, freq, lastts)
+            if err != DBWORKER_SUCCESS:
+                return err
+
 
         # Also remember to export empty history for any streams that had
         # no data in the request period
@@ -460,10 +412,11 @@ class DBWorker(threading.Thread):
         missing = allstreams - observed
         for m in missing:
             assert (m in labels)
-            if self._enqueue_history(name, m, [], more, 0, 0) == -1:
-                return -1
+            err = self._enqueue_history(name, m, [], more, 0, 0)
+            if err != DBWORKER_SUCCESS:
+                return err
 
-        return 0
+        return DBWORKER_SUCCESS
 
 
     def _subscribe_streams(self, streams, start, subend, cols, name, label):
@@ -471,8 +424,8 @@ class DBWorker(threading.Thread):
             self.queue.put((NNTSC_SUBSCRIBE, (streams, start, subend, cols, name, label)), False)
         except StdQueue.Full:
             log("DBWorker tried to push subscribe but result queue was full!")
-            return -1
-        return 0
+            return DBWORKER_FULLQUEUE
+        return DBWORKER_SUCCESS
 
     def _enqueue_cancel(self, reqtype, data):
         contents = pickle.dumps((reqtype, data))
@@ -482,8 +435,8 @@ class DBWorker(threading.Thread):
             self.queue.put((NNTSC_QUERY_CANCELLED, header + contents), False)
         except error, msg:
             log("Unable to push query cancelled message onto full worker queue")
-            return -1
-        return 0
+            return DBWORKER_FULLQUEUE
+        return DBWORKER_SUCCESS
 
     def _enqueue_history(self, name, label, history, more, freq, lastts):
 
@@ -494,46 +447,42 @@ class DBWorker(threading.Thread):
             self.queue.put((NNTSC_HISTORY, header + contents), False)
         except StdQueue.Full:
             log("Unable to push history onto full worker queue")
-            return -1
+            return DBWORKER_FULLQUEUE
 
         if not more:
             try:
                 self.queue.put((NNTSC_HISTORY_DONE, label, lastts), False)
             except StdQueue.Full:
                 log("Unable to push history onto full worker queue")
-                return -1
+                return DBWORKER_FULLQUEUE
 
-        return 0
+        return DBWORKER_SUCCESS
 
     def _reconnect_database(self):
         if self.retries >= DB_WORKER_MAX_RETRIES:
-            return -1
+            return DBWORKER_ERROR
         self.retries += 1
         log("Worker thread %s reconnecting to NNTSC database: attempt %d" % \
                 (self.threadid, self.retries))
 
         self._connect_database()
-        return 0
+        return DBWORKER_SUCCESS
 
     def _request_collections(self):
         # Requesting the collection list
-        while 1:
-             
-            try:
-                cols = self.db.list_collections()
-            except NNTSCDatabaseTimeout as e:
+         
+        try:
+            cols = self.db.list_collections()
+        except DBQueueException as e:
+            if e.code == DB_QUERY_TIMEOUT:
                 log("Query timed out while fetching collections")
-                if self._enqueue_cancel(NNTSC_COLLECTIONS, None) == -1:
-                    log("Failed to enqueue CANCELLED message")
-                    return -1
-                return 0
-            except NNTSCDatabaseDisconnect as e:
-                log("Database disappeared while fetching collections")
-                if self._reconnect_database() == -1:
-                    return -1
-                continue
-            break
-
+                err = self._enqueue_cancel(NNTSC_COLLECTIONS, None)    
+                if err != DBWORKER_SUCCESS:
+                    return err
+                return DBWORKER_SUCCESS
+            else:
+                log("Exception while fetching collections: %s" % (e))
+                return DBWORKER_ERROR
 
         shrink = []
         for c in cols:
@@ -546,28 +495,26 @@ class DBWorker(threading.Thread):
             self.queue.put((NNTSC_COLLECTIONS, header + col_pickle), False)
         except StdQueue.Full:
             log("Failed to write collections to full DBWorker result queue");
-            return -1
+            return DBWORKER_FULLQUEUE
 
-        return 0
+        return DBWORKER_SUCCESS
 
     def _request_schemas(self, col_id):
 
-        while 1:
-            try:
-                stream_schema, data_schema = self.db.get_collection_schema(col_id)
-            except NNTSCDatabaseTimeout as e:
+        try:
+            stream_schema, data_schema = self.db.get_collection_schema(col_id)
+        except DBQueryException as e:
+            if e.code == DB_QUERY_TIMEOUT:
                 log("Query timed out while fetching schemas for collection %d" % (col_id))
 
-                if self._enqueue_cancel(NNTSC_SCHEMAS, col_id) == -1:
+                err = self._enqueue_cancel(NNTSC_SCHEMAS, col_id)
+                if err != DBWORKER_SUCCESS:
                     log("Failed to enqueue CANCELLED message")
-                    return -1
-                return 0
-            except NNTSCDatabaseDisconnect as e:
-                log("Database disappeared while fetching schemas for collection %d" % (col_id))
-                if self._reconnect_database() == -1:
-                    return -1
-                continue
-            break
+                    return err
+                return DB_WORKER_SUCCESS
+            else:
+                log("Exception while fetching schemas: %s" % (e))
+                return DBWORKER_ERROR
 
         result = pickle.dumps((col_id, stream_schema, data_schema))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_SCHEMAS, len(result))
@@ -576,53 +523,49 @@ class DBWorker(threading.Thread):
             self.queue.put((NNTSC_SCHEMAS, header + result), False)
         except StdQueue.Full:
             log("Failed to write schemas to full DBWorker result queue");
-            return -1
-        return 0
+            return DBWORKER_FULLQUEUE
+        return DBWORKER_SUCCESS
 
     def _request_streams(self, col, bound, request):
         
         if request == NNTSC_STREAMS:
-            while 1:
-                try:
-                    streams = self.db.select_streams_by_collection(col, bound)
-                except NNTSCDatabaseTimeout as e:
+            try:
+                streams = self.db.select_streams_by_collection(col, bound)
+            except DBQueryException as e:
+                if e.code == DB_QUERY_TIMEOUT:
                     log("Query timed out while fetching streams for collection %s" % (col))
-                    if self._enqueue_cancel(NNTSC_STREAMS, (col, bound)):
+                    err = self._enqueue_cancel(NNTSC_STREAMS, (col, bound))
+                    if err != DBWORKER_SUCCESS:
                         log("Failed to enqueue CANCELLED message")
-                        return -1
-                    return 0
-                except NNTSCDatabaseDisconnect as e:
-                    log("Database disappeared while fetching streams for collection %d" % (col))
-                    if self._reconnect_database() == -1:
-                        return -1
-                    continue
-                break
-        
+                        return err
+                    return DBWORKER_SUCCESS
+                else:
+                    log("Exception while fetching streams: %s" % (e))
+                    return DBWORKER_ERROR
+                
         elif request == NNTSC_ACTIVE_STREAMS:
-            while 1:
-                try:
-                    streams = self.db.select_active_streams_by_collection(col, bound)
-                except NNTSCDatabaseTimeout as e:
+            try:
+                streams = self.db.select_active_streams_by_collection(col, bound)
+            except DBQueryException as e:
+                if e.code == DB_QUERY_TIMEOUT:
                     log("Query timed out while fetching active streams for collection %s" % (col))
-                    if self._enqueue_cancel(NNTSC_ACTIVE_STREAMS, (col, bound)):
+                    err = self._enqueue_cancel(NNTSC_ACTIVE_STREAMS, (col, bound))
+                    if err != DBWORKER_SUCCESS:
                         log("Failed to enqueue CANCELLED message")
-                        return -1
-                    return 0
-                except NNTSCDatabaseDisconnect as e:
-                    log("Database disappeared while fetching active streams for collection %d" % (col))
-                    if self._reconnect_database() == -1:
-                        return -1
-                    continue
-                break
+                        return err
+                    return DBWORKER_SUCCESS
+                else:
+                    log("Exception while fetching active streams: %s" % (e))
+                    return DBWORKER_ERROR
         else:
             log("Got into request streams with bad request: %d" % request)
-            return -1
+            return DBWORKER_BADJOB
        
         try:
             self.queue.put((NNTSC_REGISTER_COLLECTION, col), False)
         except StdQueue.Full:
             log("Failed to register collection %d due to full DBWorker result queue" % (col));
-            return -1
+            return DBWORKER_FULLQUEUE
         
         if len(streams) == 0:
             return self._enqueue_streams(request, col, False, [])
@@ -637,12 +580,13 @@ class DBWorker(threading.Thread):
                 end = i + 1000
                 more = True
 
-            if self._enqueue_streams(request, col, more, streams[start:end]) == -1:
+            err = self._enqueue_streams(request, col, more, streams[start:end])
+            if err != DBWORKER_SUCCESS:
                 log("Failed on streams %d:%d (out of %d))" % (start, end, len(streams)))
-                return -1
+                return err
 
             i = end
-        return 0
+        return DBWORKER_SUCCESS
 
     def _enqueue_streams(self, req, col, more, streams):
         stream_data = pickle.dumps((col, more, streams))
@@ -652,8 +596,8 @@ class DBWorker(threading.Thread):
             self.queue.put((req, header + stream_data), False)
         except StdQueue.Full:
             log("Failed to write streams to full DBWorker result queue");
-            return -1
-        return 0
+            return DBWORKER_FULLQUEUE
+        return DBWORKER_SUCCESS
        
 
     # Processes the job for a basic NNTSC request, i.e. asking for the
@@ -682,6 +626,7 @@ class DBWorker(threading.Thread):
         self.db = DBSelector(self.threadid, self.dbconf["name"], 
                 self.dbconf["user"],
                 self.dbconf["pass"], self.dbconf["host"], self.timeout)
+        self.db.connect_db(30)
 
     def run(self):
         running = 1
@@ -700,14 +645,19 @@ class DBWorker(threading.Thread):
             # risk of inactive threads preventing us from contacting
             # the database
             self._connect_database()
-            if self.process_job(job) == -1:
+            err = self.process_job(job)
+            if err == DBWORKER_HALT:
+                log("Halting DBWorker thread due to client disconnect")
                 break
-            self.db.close()
+            if err != DBWORKER_SUCCESS:
+                log("Failed to process job, error code %d -- dropping client" % (err))
+                break
+            self.db.disconnect()
             self.db = None
 
         # Thread is over, tidy up
         if self.db is not None:
-            self.db.close()
+            self.db.disconnect()
         self.parent.disconnect()
 
     def _calc_frequency(self, freqdata, binsize):

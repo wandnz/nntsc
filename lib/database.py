@@ -26,9 +26,10 @@ import psycopg2.extras
 from libnntscclient.logger import *
 from libnntsc.dberrorcodes import *
 
-class Database:
+
+class DatabaseCore(object):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False):
+            new=False, debug=False, timeout=0):
 
         #no host means use the unix socket
         if dbhost == "":
@@ -47,6 +48,9 @@ class Database:
             connstr += " password=%s" % (dbpass)
         if dbhost != "" and dbhost != None:
             connstr += " host=%s" % (dbhost)
+
+        if timeout != 0:
+            connstr += " options='-c statement_timeout=%d'" % (timeout * 1000.0)
 
         self.conn = None
         self.connstr = connstr
@@ -99,6 +103,43 @@ class Database:
             self.conn.commit()
         self.disconnect()
 
+    def _executequery(self, cursor, query, params):
+        try:
+            if params is not None:
+                cursor.execute(query, params)
+            else:
+                cursor.execute(query)
+
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return DB_QUERY_TIMEOUT        
+        except psycopg2.OperationalError:
+            log("Database appears to have disappeared -- reconnecting")
+            self.reconnect()
+            return DB_OPERATIONAL_ERROR
+        except psycopg2.ProgrammingError as e:
+            log(e)
+            self.conn.rollback()
+            return DB_CODING_ERROR
+        except psycopg2.IntegrityError as e:
+            self.conn.rollback()
+            log(e)
+            if " duplicate " in str(e):
+                return DB_DUPLICATE_KEY
+            return DB_DATA_ERROR
+        except psycopg2.DataError as e:
+            self.conn.rollback()
+            log(e)
+            return DB_DATA_ERROR
+        except KeyboardInterrupt:
+            return DB_INTERRUPTED
+        except psycopg2.Error as e:
+            self.conn.rollback()
+            log(e)
+            return DB_GENERIC_ERROR
+    
+        return DB_NO_ERROR
+
     def _basicquery(self, query, params=None):
         while 1:
             if self.basiccursor is None:
@@ -106,46 +147,107 @@ class Database:
                 log("%s" % (query))
                 return DB_NO_CURSOR
      
-            try:
-                if params is not None:
-                    self.basiccursor.execute(query, params)
-                else:
-                    self.basiccursor.execute(query)
-
-            except psycopg2.extensions.QueryCanceledError:
-                self.conn.rollback()
-                return DB_QUERY_TIMEOUT        
-            except psycopg2.OperationalError:
-                log("Database appears to have disappeared -- reconnecting")
-                self.reconnect()
+            err = self._executequery(self.basiccursor, query, params)
+            if err == DB_OPERATIONAL_ERROR:
+                # Retry the query, as we just reconnected
                 continue
-            except psycopg2.ProgrammingError as e:
-                log(e)
-                self.conn.rollback()
-                return DB_CODING_ERROR
-            except psycopg2.IntegrityError as e:
-                self.conn.rollback()
-                log(e)
-                if " duplicate " in str(e):
-                    return DB_DUPLICATE_KEY
-                return DB_DATA_ERROR
-            except psycopg2.DataError as e:
-                self.conn.rollback()
-                log(e)
-                return DB_DATA_ERROR
-            except KeyboardInterrupt:
-                return DB_INTERRUPTED
-            except psycopg2.Error as e:
-                self.conn.rollback()
-                log(e)
-                return DB_GENERIC_ERROR
-            
+
             break
 
-        return DB_NO_ERROR
+        return err
 
     def commit_transaction(self):
         self.conn.commit()
+
+    def list_collections(self):
+        collections = []
+
+        err = self._basicquery("SELECT * from collections")
+        if err == DB_NO_CURSOR:
+            return []
+
+        if err != DB_NO_ERROR:
+            log("Failed to query for all collections")
+            raise DBQueryException(err)
+
+        while True:
+            row = self.basiccursor.fetchone()
+
+            if row == None:
+                break
+            col = {}
+            for k, v in row.items():
+                col[k] = v
+            collections.append(col)
+        return collections
+
+    def select_streams_by_module(self, mod):
+        """ Fetches all streams that belong to collections that have a common
+            parent module, e.g. amp, lpi or rrd.
+
+            For example, passing "amp" into this function would give you
+            all amp-icmp and amp-traceroute streams.
+
+            Note that if you want the streams for a single collection, you
+            should use select_streams_by_collection.
+
+            Returns a list of streams, where each stream is a dictionary
+            describing all of the stream parameters.
+        """
+
+        # Find all streams for a given parent collection, e.g. amp, lpi
+        #
+        # For each stream:
+        #   Form a dictionary containing all the relevant information about
+        #   that stream (this will require info from both the combined streams
+        #   table and the module/subtype specific table
+        # Put all the dictionaries into a list
+
+        # Find the collections matching this module
+
+        err = self._basicquery("SELECT * from collections where module=%s", 
+                    (mod,))
+        if err != DB_NO_ERROR:
+            log("Failed to query collections that belong to parent module %s" \
+                    % (mod))
+            raise DBQueryException(err)
+
+        streamtables = {}
+
+        cols = self.basiccursor.fetchall()
+        for c in cols:
+            streamtables[c["id"]] = (c["streamtable"], c["modsubtype"])
+
+        streams = []
+        for cid, (tname, sub) in streamtables.items():
+            sql = """ SELECT * FROM streams, %s WHERE streams.collection=%s
+                      AND streams.id = %s.stream_id """ % (tname, "%s", tname)
+            
+            err = self._basicquery(sql, (cid,))
+            if err != DB_NO_ERROR:
+                log("Failed to query streams that belong to module %s-%s" \
+                        % (mod, sub))
+                raise DBQueryException(err)
+
+            while True:
+                row = self.basiccursor.fetchone()
+                if row == None:
+                    break
+                row_dict = {"modsubtype":sub}
+                for k, v in row.items():
+                    if k == "id":
+                        continue
+                    row_dict[k] = v
+                streams.append(row_dict)
+        return streams
+    
+
+class DBInsert(DatabaseCore):
+    def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
+            new=False, debug=False):
+
+        super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost, \
+                new, debug)
 
     def create_aggregators(self):
         # Create a useful function to select a mode from any data
@@ -703,83 +805,6 @@ class Database:
 
         self.commit_transaction()
         return DB_NO_ERROR
-    
-    def list_collections(self):
-        collections = []
-
-        err = self._basicquery("SELECT * from collections")
-        if err == DB_NO_CURSOR:
-            return []
-
-        if err != DB_NO_ERROR:
-            return err
-
-        while True:
-            row = self.basiccursor.fetchone()
-
-            if row == None:
-                break
-            col = {}
-            for k, v in row.items():
-                col[k] = v
-            collections.append(col)
-        return collections
-
-    def select_streams_by_module(self, mod):
-        """ Fetches all streams that belong to collections that have a common
-            parent module, e.g. amp, lpi or rrd.
-
-            For example, passing "amp" into this function would give you
-            all amp-icmp and amp-traceroute streams.
-
-            Note that if you want the streams for a single collection, you
-            should use select_streams_by_collection.
-
-            Returns a list of streams, where each stream is a dictionary
-            describing all of the stream parameters.
-        """
-
-        # Find all streams for a given parent collection, e.g. amp, lpi
-        #
-        # For each stream:
-        #   Form a dictionary containing all the relevant information about
-        #   that stream (this will require info from both the combined streams
-        #   table and the module/subtype specific table
-        # Put all the dictionaries into a list
-
-        # Find the collections matching this module
-
-        err = self._basicquery("SELECT * from collections where module=%s", 
-                    (mod,))
-        if err != DB_NO_ERROR:
-            return err, []
-
-        streamtables = {}
-
-        cols = self.basiccursor.fetchall()
-        for c in cols:
-            streamtables[c["id"]] = (c["streamtable"], c["modsubtype"])
-
-        streams = []
-        for cid, (tname, sub) in streamtables.items():
-            sql = """ SELECT * FROM streams, %s WHERE streams.collection=%s
-                      AND streams.id = %s.stream_id """ % (tname, "%s", tname)
-            
-            err = self._basicquery(sql, (cid,))
-            if err != DB_NO_ERROR:
-                return err, []
-
-            while True:
-                row = self.basiccursor.fetchone()
-                if row == None:
-                    break
-                row_dict = {"modsubtype":sub}
-                for k, v in row.items():
-                    if k == "id":
-                        continue
-                    row_dict[k] = v
-                streams.append(row_dict)
-        return DB_NO_ERROR, streams
     
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
