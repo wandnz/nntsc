@@ -69,10 +69,16 @@ def insert_data(db, exp, stream, ts, line):
     kwargs = {}
 
     if len(line) >= 1:
-        kwargs['loss'] = int(float(line[1]))
+        if line[1] == None:
+            kwargs['loss'] = None
+        else:
+            kwargs['loss'] = int(float(line[1]))
 
     if len(line) >= 2:
-        kwargs['median'] = round(float(line[2]) * 1000.0, 6)
+        if line[2] == None:
+            kwargs['median'] = None
+        else:
+            kwargs['median'] = round(float(line[2]) * 1000.0, 6)
         
     kwargs['pings'] = []
 
