@@ -20,16 +20,6 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean
-from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
-        DataError, SQLAlchemyError
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql.expression import select, join, outerjoin, func, label, and_
-from sqlalchemy.sql import text
-
-from libnntsc.partition import PartitionedTable
 from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
 import libnntscclient.logger as logger
 from itertools import chain

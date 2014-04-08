@@ -20,14 +20,7 @@
 # $Id$
 
 
-from sqlalchemy import Table, Column, Integer, \
-    String, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.sql import text
-from sqlalchemy.types import Integer, String, SmallInteger
-from sqlalchemy.exc import IntegrityError, OperationalError, DataError, \
-        ProgrammingError, SQLAlchemyError
-from sqlalchemy.dialects import postgresql
-from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
+from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 STREAM_TABLE_NAME = "streams_amp_traceroute"
@@ -35,54 +28,62 @@ DATA_TABLE_NAME = "data_amp_traceroute"
 
 amp_trace_streams = {}
 
+traceroute_datacols = [ \
+    {"name":"path_id", "type":"integer", "null":False},
+    {"name":"packet_size", "type":"smallint", "null":False},
+    {"name":"length", "type":"smallint", "null":False},
+    {"name":"error_type", "type":"smallint", "null":True},
+    {"name":"error_code", "type":"smallint", "null":True},
+    {"name":"hop_rtt", "type":"integer[]", "null":False},
+]
+
 def stream_table(db):
     """ Specify the description of a traceroute stream, to create the table """
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        Column('source', String, nullable=False),
-        Column('destination', String, nullable=False),
-        Column('packet_size', String, nullable=False),
-        Column('address', postgresql.INET, nullable=False),
-        UniqueConstraint('source', 'destination', 'packet_size', 'address'),
-        useexisting=True,
-    )
+    streamcols = [ \
+        {"name":"source", "type":"varchar", "null":False},
+        {"name":"destination", "type":"varchar", "null":False},
+        {"name":"address", "type":"inet", "null":False},
+        {"name":"packet_size", "type":"varchar", "null":False},
+    ]
 
-    Index('index_amp_traceroute_source', st.c.source)
-    Index('index_amp_traceroute_destination', st.c.destination)
+    uniqcols = ['source', 'destination', 'packet_size', 'address']
+
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create streams table for amp-icmp")
+        return None
+
+    err = db.create_index("", STREAM_TABLE_NAME, ['source'])
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create source index on %s" % (STREAM_TABLE_NAME))
+        return None
+
+    err = db.create_index("", STREAM_TABLE_NAME, ['destination'])
+    if err != DB_NO_ERROR:
+        logger.log("Failed to create dest index on %s" % (STREAM_TABLE_NAME))
+        return None
+
 
     return STREAM_TABLE_NAME
 
 def data_table(db):
     """ Specify the description of traceroute data, used to create the table """
 
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
+    err = db.create_data_table(DATA_TABLE_NAME, traceroute_datacols)
+    if err != DB_NO_ERROR:
+        return None
 
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('timestamp', Integer, nullable=False),
-        Column('stream_id', Integer, nullable=False),
-        Column('path_id', Integer, nullable=False),
-        Column('packet_size', SmallInteger, nullable=False),
-        Column('length', SmallInteger, nullable=False),
-        Column('error_type', SmallInteger, nullable=True),
-        Column('error_code', SmallInteger, nullable=True),
-        Column('hop_rtt', postgresql.ARRAY(Integer), nullable=False),
-        useexisting=True,
-    )
+    pathcols = [ \
+        {"name":"path_id", "type":"serial primary key"},
+        {"name":"path", "type":"inet[]", "null":False, "unique":True}
+    ]
 
-    paths = Table("data_amp_traceroute_paths", db.metadata,
-        Column('path_id', Integer, primary_key=True),
-        Column('path', postgresql.ARRAY(postgresql.INET), nullable=False, 
-                unique=True),
-        useexisting=True,
-    )
-
-    Index('index_amp_traceroute_timestamp', dt.c.timestamp)
+    err = db.create_misc_table("data_amp_traceroute_paths", pathcols)
+    if err != DB_NO_ERROR:
+        return None
+        
 
     return DATA_TABLE_NAME
 
@@ -91,7 +92,11 @@ def register(db):
     st_name = stream_table(db)
     dt_name = data_table(db)
 
-    db.register_collection("amp", "traceroute", st_name, dt_name)
+    if st_name is None or dt_name is None:
+        logger.log("Failed to create AMP traceroute base tables")
+        return DB_CODING_ERROR
+
+    return db.register_collection("amp", "traceroute", st_name, dt_name)
 
 
 def create_existing_stream(stream_data):
@@ -111,8 +116,7 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     name = "traceroute %s:%s:%s:%s" % (source, dest, address, size)
 
     props = {"source":source, "destination":dest,
-            "packet_size":size, "datastyle":"traceroute",
-            "address": address}
+            "packet_size":size, "address": address}
 
     streamid = db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
             "amp", "traceroute", name, timestamp, props)
@@ -141,19 +145,17 @@ def insert_data(db, exp, stream, ts, result):
 
     pathtable = "data_amp_traceroute_paths_%d" % (stream)
 
-    pathinsert = text("WITH s AS (SELECT path_id, CAST(:path AS inet[]) "
-            "as path FROM %s "
-            "WHERE path = CAST(:path AS inet[])), "
-            "i AS (INSERT INTO %s (path) "
-            "SELECT CAST(:path AS inet[]) WHERE "
-            "NOT EXISTS (SELECT path FROM %s "
-            "WHERE path = CAST(:path AS inet[])) "
-            "RETURNING path_id, path) "
-            "SELECT path_id, path FROM i UNION ALL "
-            "SELECT path_id, path FROM s" % (pathtable, pathtable, pathtable))
-        
-   
-    err, queryret = db.custom_insert(pathinsert, result)
+    pathinsert = "WITH s AS (SELECT path_id, path FROM %s " % (pathtable)
+    pathinsert += "WHERE path = CAST (%s as inet[])), "
+    pathinsert += "i AS (INSERT INTO %s (path) " % (pathtable)
+    pathinsert += "SELECT CAST(%s as inet[]) WHERE NOT EXISTS "
+    pathinsert += "(SELECT path FROM %s " % (pathtable)
+    pathinsert += "WHERE path = CAST(%s as inet[])) RETURNING path_id, path) "
+    pathinsert += "SELECT path_id, path FROM i UNION ALL "
+    pathinsert += "SELECT path_id, path FROM s"
+
+    params = (result['path'], result['path'], result["path"])
+    err, queryret = db.custom_insert(pathinsert, params)
      
     if err != DB_NO_ERROR:
         return err
@@ -161,19 +163,17 @@ def insert_data(db, exp, stream, ts, result):
     if queryret == None:
         return DB_DATA_ERROR
             
-    result['path_id'] = queryret.fetchone()[0]
-    queryret.close()
-    
-    insertfunc = text("INSERT INTO %s ("
-                    "stream_id, timestamp, path_id, packet_size, length, "
-                    "error_type, error_code, hop_rtt) VALUES ("
-                    ":stream_id, :timestamp, :path_id, "
-                    ":packet_size, :length, "
-                    ":error_type, :error_code, CAST(:hop_rtt AS integer[]))" % \
-                    (DATA_TABLE_NAME + "_" + str(stream)))
+    result['path_id'] = queryret[0]
+   
+    filtered = {}
+    for col in traceroute_datacols:
+        if col["name"] in result:
+            filtered[col["name"]] = result[col["name"]]
+        else:
+            filtered[col["name"]] = None
 
     return db.insert_data(exp, DATA_TABLE_NAME, "amp_traceroute", stream,
-            ts, result, insertfunc)
+            ts, filtered, {'hop_rtt':'integer[]'})
 
 
 
