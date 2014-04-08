@@ -172,8 +172,8 @@ class Database:
                 SELECT array_agg(avg) FROM (
                     SELECT avg(foo), ntile FROM (
                         SELECT foo, ntile(20) OVER (PARTITION BY one ORDER BY foo) FROM (
-                            SELECT 1 as one, unnest($1) as foo EXCEPT ALL SELECT 1,NULL
-                        ) as a
+                            SELECT 1 as one, unnest($1) as foo
+                        ) as a WHERE foo IS NOT NULL
                     ) as b GROUP BY ntile ORDER BY ntile
                 ) as c;
             $BODY$
