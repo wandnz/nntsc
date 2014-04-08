@@ -91,7 +91,7 @@ def insert_data(db, exp, stream, ts, line):
         kwargs['pings'].append(val)
 
     return db.insert_data(exp, DATA_TABLE_NAME, "rrd_smokeping", stream, ts, 
-            kwargs)
+            kwargs, {"pings":"double precision[]"})
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
