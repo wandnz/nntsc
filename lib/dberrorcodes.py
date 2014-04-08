@@ -33,23 +33,23 @@ class DBQueryException(Exception):
     def __init__(self, code):
         self.code = code
     def __str__(self):
-        if code == DB_DATA_ERROR:
+        if self.code == DB_DATA_ERROR:
             return "Data error detected during NNTSC query"
-        if code == DB_GENERIC_ERROR:
+        if self.code == DB_GENERIC_ERROR:
             return "Generic database error detected during NNTSC query"
-        if code == DB_INTERRUPTED:
+        if self.code == DB_INTERRUPTED:
             return "Keyboard interrupt detected during NNTSC query"
-        if code == DB_CODING_ERROR:
+        if self.code == DB_CODING_ERROR:
             return "Bad database code encountered during NNTSC query"
-        if code == DB_DUPLICATE_KEY:
+        if self.code == DB_DUPLICATE_KEY:
             return "Duplicate key error while performing NNTSC query"
-        if code == DB_QUERY_TIMEOUT:
+        if self.code == DB_QUERY_TIMEOUT:
             return "NNTSC database query timed out"
-        if code == DB_OPERATIONAL_ERROR:
+        if self.code == DB_OPERATIONAL_ERROR:
             return "Connection to NNTSC database was lost"
-        if code == DB_NO_CURSOR:
+        if self.code == DB_NO_CURSOR:
             return "Could not execute query as had no valid cursor"
-        if code == DB_NO_ERROR:
+        if self.code == DB_NO_ERROR:
             return "No error occurred, why are we getting this exception?"
         return "Unknown error code for DBQueryException: %d" % (code)
 
