@@ -386,7 +386,6 @@ class Database:
 
         # Return the new stream id
         newid = self.basiccursor.fetchone()[0]
-        self.conn.commit()
 
         return col_id, newid
 
@@ -541,7 +540,7 @@ class Database:
             liveexp.publishStream(colid, basecol + "_" + submodule,
                     streamid, streamprops)
 
-        #self.conn.commit()
+        self.conn.commit()
         return streamid
 
     def custom_insert(self, customsql, values):
