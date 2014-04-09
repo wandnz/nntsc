@@ -823,7 +823,7 @@ class NNTSCClient(threading.Thread):
                             len(pushdata))
                     
                     try:
-                        self.releasedlive.put((header, pushdata))
+                        self.releasedlive.put((header, pushdata), True, 10)
                     except StdQueue.Full:
                         log("Could not release stored live data, queue full")
                         log("Dropping client")
@@ -835,7 +835,7 @@ class NNTSCClient(threading.Thread):
                     continue
 
                 try:
-                    self.releasedlive.put(d)
+                    self.releasedlive.put(d, True, 10)
                 except StdQueue.Full:
                     log("Could not release stored live data, queue full")
                     log("Dropping client")
@@ -846,7 +846,7 @@ class NNTSCClient(threading.Thread):
             header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, 
                     len(pushdata))
             try:
-                self.releasedlive.put((header, pushdata))
+                self.releasedlive.put((header, pushdata), True, 10)
             except StdQueue.Full:
                 log("Could not release stored live data, queue full")
                 log("Dropping client")
@@ -1081,7 +1081,7 @@ class NNTSCClient(threading.Thread):
 
         # Add "halt" jobs to the job queue for each worker
         for w in self.workers:
-            self.jobs.put((-1, None), True)
+            self.jobs.put((-1, None), True, 60)
 
 class NNTSCExporter:
     def __init__(self, port):
@@ -1179,7 +1179,7 @@ class NNTSCExporter:
                 continue
             
             try:
-                self.clients[sock]['queue'].put((header, pushdata))
+                self.clients[sock]['queue'].put((header, pushdata), True, 10)
             except StdQueue.Full:
                 # This may not actually stop the client thread,
                 # but apparently killing threads is bad so let's
@@ -1230,7 +1230,7 @@ class NNTSCExporter:
             if sock not in self.clients.keys():
                 continue
             try:
-                self.clients[sock]['queue'].put((header, ns_data))
+                self.clients[sock]['queue'].put((header, ns_data), True, 10)
             except StdQueue.Full:
                 # This may not actually stop the client thread,
                 # but apparently killing threads is bad so let's
@@ -1281,7 +1281,7 @@ class NNTSCExporter:
 
                 if sock in self.clients.keys():
                     try:
-                        self.clients[sock]['queue'].put((header, contents, timestamp))
+                        self.clients[sock]['queue'].put((header, contents, timestamp), True, 10)
                     except StdQueue.Full:
                         # This may not actually stop the client thread,
                         # but apparently killing threads is bad so let's
