@@ -54,15 +54,21 @@ class Database:
         self.basiccursor = None
 
     def connect_db(self, retrywait):
+        logmessage = False
 
         while self.conn == None:
             try:
                 self.conn = psycopg2.connect(self.connstr)
             except psycopg2.DatabaseError as e:
-                log("DBSelector: Error connecting to database: %s" % e)
-                log("Retrying in %d seconds" % retrywait);
+                if not logmessage:
+                    log("Error connecting to database: %s" % e)
+                    log("Retrying every %d seconds" % retrywait);
+                    logmessage = True
                 self.conn = None
                 time.sleep(retrywait)
+
+        if logmessage:
+            log("Successfully connected to NNTSC database")
 
         # The basiccursor is used for all "short" queries that are
         # unlikely to produce a large result. The full result will be
