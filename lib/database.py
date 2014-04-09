@@ -233,13 +233,13 @@ class Database:
             return err
         
         if self.basiccursor.rowcount == 0:
-            aggfunc = text("""
+            aggfunc = """
                 CREATE AGGREGATE smoke(numeric) (
                 SFUNC=array_append,
                 STYPE=numeric[],
                 FINALFUNC=_final_smoke,
                 INITCOND='{}'
-            );""")
+            );"""
             err = self._basicquery(aggfunc)
             if err != DB_NO_ERROR:
                 return err
