@@ -531,6 +531,14 @@ class DBSelector:
             except psycopg2.OperationalError:
                 self.datacursor = None
                 yield (None, None, None, DB_QUERY_RETRY) 
+            except psycopg2.ProgrammingError as e:
+                # XXX Band-aid solution until new DBSelector is deployed
+                # Will at least keep NNTSC going when an old ampy talks to
+                # a NNTSC that has a completely different stream mapping.
+                log(e)
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
             
 
             fetched = self._query_data_generator()
