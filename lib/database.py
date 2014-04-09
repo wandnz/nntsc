@@ -535,12 +535,12 @@ class Database:
         if err != DB_NO_ERROR:
             return err       
  
+        self.conn.commit()
         if liveexp != None and streamid > 0:
             streamprops["name"] = name
             liveexp.publishStream(colid, basecol + "_" + submodule,
                     streamid, streamprops)
 
-        self.conn.commit()
         return streamid
 
     def custom_insert(self, customsql, values):
