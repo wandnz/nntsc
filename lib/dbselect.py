@@ -38,50 +38,30 @@ class DBSelector(DatabaseCore):
         # from the database but in most use cases, the database and the
         # DBSelector are located on the same host so this should not be
         # a major issue.
-        self.datacursor = None
         self.cursorname = "cursor_" + uniqueid
 
-        #log("DBSelector: Successfully created DBSelector %s" % self.dbselid)
+        self.data = NNTSCCursor(self.connstr, True, self.cursorname)
+
+    def connect_db(self, retrywait):
+        if self.data.connect(retrywait) == -1:
+            return -1
+        return super(DBSelector, self).connect_db(retrywait)
 
     def disconnect(self):
-        if self.datacursor is not None:
-            self.datacursor.close()
-            self.datacursor = None
+        self.data.destroy()
 
         super(DBSelector, self).disconnect()
 
-    def _reset_cursor(self):
-        if self.conn == None:
-            return
-
-        # Re-create the datacursor as it seems you can't just re-use a
-        # a named cursor for multiple queries.
-        if self.datacursor is not None:
-            self.datacursor.close()
-
-        try:
-            self.datacursor = self.conn.cursor(self.cursorname,
-                    cursor_factory=psycopg2.extras.DictCursor)
-        except psycopg2.DatabaseError as e:
-            log("DBSelector: Failed to create data cursor: %s" % e)
-            self.datacursor = None
-            return
-
     def _dataquery(self, query, params=None):
         while 1:
-            self._reset_cursor()
+            self.data.reset()
 
-            if self.datacursor is None:
-                log("Cannot execute query with a None data cursor")
-                log("%s" % (query))
-                return DB_NO_CURSOR
-
-            err = self._executequery(self.datacursor, query, params)
+            err = self.data.executequery(query, params)
             if err == DB_OPERATIONAL_ERROR:
                 # Retry the query, as we just reconnected
                 continue
             if err != DB_NO_ERROR:
-                self.datacursor = None
+                self.data.cursor = None
             break
 
         return err           
@@ -102,7 +82,7 @@ class DBSelector(DatabaseCore):
             log("Error selecting table names from collections")
             raise DBQueryException(err)
 
-        tables = self.basiccursor.fetchone()
+        tables = self.basic.cursor.fetchone()
 
         # Parameterised queries don't work on the FROM clause -- our table
         # names *shouldn't* be an SQL injection risk, right?? XXX
@@ -112,7 +92,7 @@ class DBSelector(DatabaseCore):
             log("Error selecting single row from stream table")
             raise DBQueryException(err)
 
-        streamcolnames = [cn[0] for cn in self.basiccursor.description]
+        streamcolnames = [cn[0] for cn in self.basic.cursor.description]
 
         err = self._basicquery(
                     "SELECT * from %s LIMIT 1" % (tables['datatable']))
@@ -120,7 +100,7 @@ class DBSelector(DatabaseCore):
             log("Error selecting single row from data table")
             raise DBQueryException(err)
 
-        datacolnames = [cn[0] for cn in self.basiccursor.description]
+        datacolnames = [cn[0] for cn in self.basic.cursor.description]
         return streamcolnames, datacolnames
 
     def select_streams_by_collection(self, coll, minid):
@@ -143,9 +123,9 @@ class DBSelector(DatabaseCore):
             log("Failed to query database for collection id %d" % (coll))
             raise DBQueryException(err)
        
-        assert(self.basiccursor.rowcount == 1)
+        assert(self.basic.cursor.rowcount == 1)
 
-        coldata = self.basiccursor.fetchone()
+        coldata = self.basic.cursor.fetchone()
 
         tname = coldata['streamtable']
         sql = """SELECT * FROM streams, %s WHERE streams.id = %s.stream_id
@@ -158,7 +138,7 @@ class DBSelector(DatabaseCore):
               
         selected = []
         while True:
-            row = self.basiccursor.fetchone()
+            row = self.basic.cursor.fetchone()
             if row == None:
                 break
             stream_dict = {}
@@ -189,7 +169,7 @@ class DBSelector(DatabaseCore):
         
         active = []
         while True:
-            row = self.basiccursor.fetchone()
+            row = self.basic.cursor.fetchone()
             if row == None:
                 break
             for stream_id in row.values():
@@ -571,9 +551,9 @@ class DBSelector(DatabaseCore):
             log("Failed to query for collection id %d" % (col))
             raise DBQueryException(err)
 
-        assert(self.basiccursor.rowcount == 1)
+        assert(self.basic.cursor.rowcount == 1)
 
-        coldata = self.basiccursor.fetchone()
+        coldata = self.basic.cursor.fetchone()
         tname = coldata['datatable']
         module = coldata['module']
         subtype = coldata['modsubtype']
@@ -593,7 +573,7 @@ class DBSelector(DatabaseCore):
 
         columns = []
         while True:
-            row = self.basiccursor.fetchone()
+            row = self.basic.cursor.fetchone()
             if row == None:
                 break
 
@@ -675,39 +655,34 @@ class DBSelector(DatabaseCore):
     def _query_data_generator(self):
         while True:
             try:
-                fetched = self.datacursor.fetchmany(100)
+                fetched = self.data.cursor.fetchmany(100)
             except psycopg2.extensions.QueryCanceledError:
                 # The named datacursor is invalidated as soon as the
                 # transaction ends/fails, we don't need to close it (and it
                 # won't allow us to close it). We do have to rollback though
                 # so that the basic cursor will continue to work.
-                self.datacursor = None
-                self.conn.rollback()
+                self.data.wipe()
                 yield None, DB_QUERY_TIMEOUT 
             except psycopg2.OperationalError:
                 yield None, DB_OPERATIONAL_ERROR
             except psycopg2.ProgrammingError as e:
                 log(e)
-                self.conn.rollback()
-                self.datacursor = None
+                self.data.wipe()
                 yield None, DB_CODING_ERROR
             except psycopg2.IntegrityError as e:
                 # XXX Duplicate key shouldn't be an issue here
                 log(e)
-                self.conn.rollback()
-                self.datacursor = None
+                self.data.wipe()
                 yield None, DB_DATA_ERROR
             except psycopg2.DataError as e:
                 log(e)
-                self.conn.rollback()
-                self.datacursor = None
+                self.data.wipe()
                 yield None, DB_DATA_ERROR
             except KeyboardInterrupt:
                 yield None, DB_INTERRUPTED
             except psycopg2.Error as e:
                 log(e)
-                self.conn.rollback()
-                self.datacursor = None
+                self.data.wipe()
 
             if fetched == []:
                 break
