@@ -171,7 +171,7 @@ class LPIModule:
 
                 if rec_type == 3:
                     if self.insert_zeroes() == DB_NO_ERROR:
-                        self.db.commit_transaction()
+                        self.db.commit_data()
                     self.reset_seen()
 
                 if rec_type == 4:

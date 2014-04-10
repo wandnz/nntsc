@@ -26,7 +26,7 @@ import sys, string
 
 STREAM_TABLE_NAME = "streams_lpi_users"
 DATA_TABLE_NAME = "data_lpi_users"
-
+COLNAME = "lpi_users"
 lpi_users_streams = {}
 
 def stream_table(db):
@@ -85,14 +85,31 @@ def add_new_stream(db, exp, mon, freq, proto, metric, ts):
 
     props = {'source':mon, 'freq':freq, 'protocol':proto, 'metric':metric}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
             "lpi", "users", namestr, ts, props)
+    if colid < 0:
+        return colid
+    if streamid < 0:
+        return streamid
+    db.commit_streams()
+
+    if exp == None:
+        return streamid
+    props['name'] = namestr
+    exp.publishStream(colid, COLNAME, streamid, props)
+    return streamid
 
 
 def insert_data(db, exp, stream_id, ts, value):
     result = {"users":value}
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "lpi_users", stream_id, ts, result)
+    err = db.insert_data(DATA_TABLE_NAME, COLNAME, stream_id, ts, result)
+    if err != DB_NO_ERROR:
+        return err
+    if exp != None:
+        exp.publishLiveData(COLNAME, stream_id, ts, result)
+    return DB_NO_ERROR
+
 
 
 def process_data(db, exp, protomap, data):
