@@ -106,11 +106,11 @@ class PikaConsumer(PikaBasic):
                 self._channel.close()
                 self.connect()
                 continue
-            except:
+            except Exception as e:
                 self._channel.stop_consuming()
                 break
 
-        self._connection.close()
+        #self._connection.close()
     
     def bind_queue(self, key): 
         if self._queue == None:
