@@ -24,6 +24,7 @@ from libnntsc.dberrorcodes import *
 
 STREAM_TABLE_NAME="streams_rrd_smokeping"
 DATA_TABLE_NAME="data_rrd_smokeping"
+COLNAME = "rrd_smokeping"
 
 def stream_table(db):
 
@@ -61,8 +62,19 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
     props = {"filename":fname, "source":source, "host":host,
             "minres":minres, "highrows":rows}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, "rrd", 
-            "smokeping", name, 0, props)
+    colid, streamid =  db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+            "rrd", "smokeping", name, 0, props)
+    if colid < 0:
+        return colid
+    if streamid < 0:
+        return streamid
+
+    db.commit_streams()
+    if exp == None:
+        return streamid
+    props['name'] = name
+    exp.publishStream(colid, COLNAME, streamid, props)
+    return streamid
 
 
 def insert_data(db, exp, stream, ts, line):
@@ -90,8 +102,13 @@ def insert_data(db, exp, stream, ts, line):
 
         kwargs['pings'].append(val)
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "rrd_smokeping", stream, ts, 
+    err = db.insert_data(DATA_TABLE_NAME, COLNAME, stream, ts, 
             kwargs, {"pings":"double precision[]"})
+    if err != DB_NO_ERROR:
+        return err
+    if exp != None:
+        exp.publishLiveData(COLNAME, stream, ts, kwargs)
+    return DB_NO_ERROR
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

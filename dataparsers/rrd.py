@@ -185,7 +185,7 @@ class RRDModule:
                         logger.log("Duplicate key error in update timestamp for  RRD %s data, shouldn't get this!" % (r['modsubtype']))
                         return
 
-            self.db.commit_transaction()
+            self.db.commit_data()
 
             time.sleep(30)
 
@@ -262,9 +262,9 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
 
 def insert_rrd_streams(db, conf):
 
-    code, rrds = db.select_streams_by_module("rrd")
-
-    if code != DB_NO_ERROR:
+    try:
+        rrds = db.select_streams_by_module("rrd")
+    except DBQueryException as e:
         logger.log("Error while fetching existing RRD streams from database")
         return
 
@@ -353,7 +353,6 @@ def insert_rrd_streams(db, conf):
             logger.log("Timeout while inserting RRD stream")
             return code
 
-    db.commit_transaction()
     f.close()
     return DB_NO_ERROR
 

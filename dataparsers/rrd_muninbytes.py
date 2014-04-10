@@ -25,6 +25,7 @@ from libnntsc.dberrorcodes import *
 
 STREAM_TABLE_NAME = "streams_rrd_muninbytes"
 DATA_TABLE_NAME = "data_rrd_muninbytes"
+COLNAME = "rrd_muninbytes"
 
 def stream_table(db):
 
@@ -66,14 +67,25 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, "rrd", 
-            "muninbytes", name, 0, props)
+    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+            "rrd", "muninbytes", name, 0, props)
+    if colid < 0:
+        return colid
+    if streamid < 0:
+        return streamid
+    db.commit_streams()
+
+    if exp == None:
+        return streamid
+    props["name"] = name
+    exp.publishStream(colid, COLNAME, streamid, props)
+    return streamid
+
 
 
 def insert_data(db, exp, stream, ts, line):
     assert(len(line) == 1)
 
-    kwargs = {}
     exportdict = {}
 
     line_map = {0:"bytes"}
@@ -84,12 +96,15 @@ def insert_data(db, exp, stream, ts, line):
         else:
             val = int(line[i])
 
-        if val != None:
-            kwargs[line_map[i]] = val
         exportdict[line_map[i]] = val
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "rrd_muninbytes", stream, ts,
+    err = db.insert_data(DATA_TABLE_NAME, "rrd_muninbytes", stream, ts,
             exportdict)
+    if err != DB_NO_ERROR:
+        return err
+    if exp != None:
+        exp.publishLiveData(COLNAME, stream, ts, exportdict)
+    return DB_NO_ERROR
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
