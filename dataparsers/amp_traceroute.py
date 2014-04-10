@@ -118,8 +118,11 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     props = {"source":source, "destination":dest,
             "packet_size":size, "address": address}
 
-    streamid = db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
             "amp", "traceroute", name, timestamp, props)
+
+    if colid < 0:
+        return colid
 
     if streamid <= 0:
         return streamid
@@ -133,9 +136,17 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     pathtable = "data_amp_traceroute_paths_%d" % (streamid)
     err = db.add_foreign_key(newtable, "path_id", pathtable, "path_id")
 
-    if err == DB_NO_ERROR:
+    if err != DB_NO_ERROR:
+        return err
+    
+    db.commit_streams()
+    if exp == None:
         return streamid
-    return err
+
+    props['name'] = name
+    exp.publishStream(colid, "amp_traceroute", streamid, props)
+    
+    return streamid
 
 def insert_data(db, exp, stream, ts, result):
     """ Insert data for a single traceroute test into the database """
@@ -172,9 +183,17 @@ def insert_data(db, exp, stream, ts, result):
         else:
             filtered[col["name"]] = None
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "amp_traceroute", stream,
+    err = db.insert_data(DATA_TABLE_NAME, "amp_traceroute", stream,
             ts, filtered, {'hop_rtt':'integer[]'})
 
+    if err != DB_NO_ERROR:
+        return err
+
+    filtered['path'] = result['path']
+    if exp != None:
+        exp.publishLiveData("amp_traceroute", stream, ts, filtered)
+
+    return DB_NO_ERROR
 
 
 def process_data(db, exp, timestamp, data, source):

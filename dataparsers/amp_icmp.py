@@ -100,8 +100,23 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     props = {"source":source, "destination":dest,
             "packet_size":size, "datastyle":"rtt_ms", "address":address}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME,
+    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME,
             "amp", "icmp", name, timestamp, props)
+
+    if colid < 0:
+        return colid
+
+    if streamid < 0:
+        return streamid
+
+    db.commit_streams()
+
+    if exp == None:
+        return streamid
+
+    props['name'] = name
+    exp.publishStream(colid, "amp_icmp", streamid, props)
+    return streamid
 
 def insert_data(db, exp, stream, ts, result):
     """ Insert a new measurement into the database and export to listeners """
@@ -113,7 +128,14 @@ def insert_data(db, exp, stream, ts, result):
         else:
             filtered[col["name"]] = None
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "amp_icmp", stream, ts, filtered)
+    err = db.insert_data(DATA_TABLE_NAME, "amp_icmp", stream, ts, filtered)
+    if err != DB_NO_ERROR:
+        return err
+
+    if exp != None:
+        exp.publishLiveData("amp_icmp", stream, ts, filtered)
+
+    return DB_NO_ERROR
 
 def process_data(db, exp, timestamp, data, source):
     """ Process a data object, which can contain 1 or more sets of results """

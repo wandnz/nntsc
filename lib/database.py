@@ -26,38 +26,25 @@ import psycopg2.extras
 from libnntscclient.logger import *
 from libnntsc.dberrorcodes import *
 
-
-class DatabaseCore(object):
-    def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False, timeout=0):
-
-        #no host means use the unix socket
-        if dbhost == "":
-            dbhost = None
-
-        if dbpass == "":
-            dbpass = None
-
-        if dbuser == "":
-            dbuser = None
-
-        connstr = "dbname=%s" % (dbname)
-        if dbuser != "" and dbuser != None:
-            connstr += " user=%s" % (dbuser)
-        if dbpass != "" and dbpass != None:
-            connstr += " password=%s" % (dbpass)
-        if dbhost != "" and dbhost != None:
-            connstr += " host=%s" % (dbhost)
-
-        if timeout != 0:
-            connstr += " options='-c statement_timeout=%d'" % (timeout * 1000.0)
+class NNTSCCursor(object):
+    def __init__(self, connstr, autocommit=False, name=None):
+        self.cursorname = name
+        self.connstr = connstr
+        self.autocommit = autocommit
 
         self.conn = None
-        self.connstr = connstr
+        self.cursor = None
 
-        self.basiccursor = None
+    def destroy(self):
+        if self.cursor is not None:
+            self.cursor.close()
+            self.cursor = None
 
-    def connect_db(self, retrywait):
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+
+    def connect(self, retrywait):
         logmessage = False
 
         while self.conn == None:
@@ -71,50 +58,53 @@ class DatabaseCore(object):
                 self.conn = None
                 time.sleep(retrywait)
 
+        self.conn.autocommit = self.autocommit
+
         if logmessage:
             log("Successfully connected to NNTSC database")
 
-        # The basiccursor is used for all "short" queries that are
-        # unlikely to produce a large result. The full result will be
-        # sent to us and held in memory.
-        #
-        # The main advantage of using a client-side cursor is that
-        # we can re-use it without having to recreate it after each
-        # query.
         try:
-            self.basiccursor = self.conn.cursor(
+            self.cursor = self.conn.cursor(self.cursorname,
                     cursor_factory=psycopg2.extras.DictCursor)
         except psycopg2.DatabaseError as e:
-            log("DBSelector: Failed to create basic cursor: %s" % e)
-            self.basiccursor = None
-            return
+            log("Failed to create cursor: %s" % e)
+            self.cursor = None
+            return -1
 
-    def disconnect(self):
-        if self.basiccursor is not None:
-            self.basiccursor.close()
-            self.basiccursor = None
-        
-        if self.conn is not None:
-            self.conn.close()
-            self.conn = None
+        return 0
 
     def reconnect(self):
         time.sleep(5)
-        self.disconnect()
-        self.connect_db(5)
+        self.destroy()
+        self.connect(5)
 
-    def __del__(self):
+    def reset(self):
+        if self.conn == None:
+            return
+        if self.cursor is not None:
+            self.cursor.close()
 
-        if self.conn is not None:
-            self.conn.commit()
-        self.disconnect()
+        try:
+            self.cursor = self.conn.cursor(self.cursorname,
+                    cursor_factory=psycopg2.extras.DictCursor)
+        except psycopg2.DatabaseError as e:
+            log("Failed to create cursor: %s" % e)
+            self.cursor = None
+            return -1
 
-    def _executequery(self, cursor, query, params):
+        return 0
+
+    def executequery(self, query, params):
+        if self.cursor is None:
+            log("Attempted to execute query with None cursor")
+            log(query)
+            return DB_NO_CURSOR
+
         try:
             if params is not None:
-                cursor.execute(query, params)
+                self.cursor.execute(query, params)
             else:
-                cursor.execute(query)
+                self.cursor.execute(query)
 
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
@@ -146,24 +136,65 @@ class DatabaseCore(object):
     
         return DB_NO_ERROR
 
+    def commit(self):
+        if self.conn is not None:
+            self.conn.commit()
+
+    def wipe(self):
+        self.cursor = None
+        self.conn.rollback()
+
+class DatabaseCore(object):
+    def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
+            new=False, debug=False, timeout=0):
+
+        #no host means use the unix socket
+        if dbhost == "":
+            dbhost = None
+
+        if dbpass == "":
+            dbpass = None
+
+        if dbuser == "":
+            dbuser = None
+
+        connstr = "dbname=%s" % (dbname)
+        if dbuser != "" and dbuser != None:
+            connstr += " user=%s" % (dbuser)
+        if dbpass != "" and dbpass != None:
+            connstr += " password=%s" % (dbpass)
+        if dbhost != "" and dbhost != None:
+            connstr += " host=%s" % (dbhost)
+
+        if timeout != 0:
+            connstr += " options='-c statement_timeout=%d'" % (timeout * 1000.0)
+
+        self.conn = None
+        self.connstr = connstr
+
+        self.basic = NNTSCCursor(self.connstr, False, None)
+
+    def connect_db(self, retrywait):
+        return self.basic.connect(retrywait)
+
+    def disconnect(self):
+        self.basic.destroy()
+        
+    def __del__(self):
+        self.basic.commit()
+        self.basic.destroy()
+
     def _basicquery(self, query, params=None):
         while 1:
-            if self.basiccursor is None:
-                log("Cannot execute query with a None cursor!")
-                log("%s" % (query))
-                return DB_NO_CURSOR
-     
-            err = self._executequery(self.basiccursor, query, params)
+            err = self.basic.executequery(query, params)
             if err == DB_OPERATIONAL_ERROR:
                 # Retry the query, as we just reconnected
                 continue
 
             break
+        self.basic.commit()
 
         return err
-
-    def commit_transaction(self):
-        self.conn.commit()
 
     def list_collections(self):
         collections = []
@@ -177,7 +208,7 @@ class DatabaseCore(object):
             raise DBQueryException(err)
 
         while True:
-            row = self.basiccursor.fetchone()
+            row = self.basic.cursor.fetchone()
 
             if row == None:
                 break
@@ -220,7 +251,7 @@ class DatabaseCore(object):
 
         streamtables = {}
 
-        cols = self.basiccursor.fetchall()
+        cols = self.basic.cursor.fetchall()
         for c in cols:
             streamtables[c["id"]] = (c["streamtable"], c["modsubtype"])
 
@@ -236,7 +267,7 @@ class DatabaseCore(object):
                 raise DBQueryException(err)
 
             while True:
-                row = self.basiccursor.fetchone()
+                row = self.basic.cursor.fetchone()
                 if row == None:
                     break
                 row_dict = {"modsubtype":sub}
@@ -247,6 +278,8 @@ class DatabaseCore(object):
                 streams.append(row_dict)
         return streams
     
+    
+
 
 class DBInsert(DatabaseCore):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
@@ -254,6 +287,49 @@ class DBInsert(DatabaseCore):
 
         super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost, \
                 new, debug)
+
+        self.streams = NNTSCCursor(self.connstr, False, None)
+        self.data = NNTSCCursor(self.connstr, False, None)
+
+    def connect_db(self, retrywait):
+        if self.streams.connect(retrywait) == -1:
+            return -1
+        if self.data.connect(retrywait) == -1:
+            return -1
+        return super(DBInsert, self).connect_db(retrywait)
+
+    def disconnect(self):
+        self.streams.destroy()
+        self.data.destroy()
+        super(DBInsert, self).disconnect()
+
+    def _streamsquery(self, query, params=None):
+        while 1:
+            err = self.streams.executequery(query, params)
+            if err == DB_OPERATIONAL_ERROR:
+                # Retry the query, as we just reconnected
+                continue
+
+            break
+
+        return err
+    
+    def _dataquery(self, query, params=None):
+        while 1:
+            err = self.data.executequery(query, params)
+            if err == DB_OPERATIONAL_ERROR:
+                # Retry the query, as we just reconnected
+                continue
+
+            break
+
+        return err
+
+    def commit_streams(self):
+        self.streams.commit()
+
+    def commit_data(self):
+        self.data.commit()
 
     def create_aggregators(self):
         # Create a useful function to select a mode from any data
@@ -296,11 +372,11 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
 
-        assert(self.basiccursor.rowcount <= 1)
+        assert(self.basic.cursor.rowcount <= 1)
 
         # if it doesn't exist, create the aggregate function that applies
         # _final_most to multiple rows of data
-        if self.basiccursor.rowcount == 0:
+        if self.basic.cursor.rowcount == 0:
             aggfunc = """
                 CREATE AGGREGATE most(anyelement) (
                     SFUNC=array_append,
@@ -317,7 +393,7 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
 
-        if self.basiccursor.rowcount == 0:
+        if self.basic.cursor.rowcount == 0:
             aggfunc = """
                 CREATE AGGREGATE smokearray(anyarray) (
                 SFUNC=array_cat,
@@ -334,7 +410,7 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
         
-        if self.basiccursor.rowcount == 0:
+        if self.basic.cursor.rowcount == 0:
             aggfunc = text("""
                 CREATE AGGREGATE smoke(numeric) (
                 SFUNC=array_append,
@@ -346,7 +422,7 @@ class DBInsert(DatabaseCore):
             if err != DB_NO_ERROR:
                 return err
         
-        self.conn.commit()        
+        #self.conn.commit()        
         return DB_NO_ERROR
 
     def create_index(self, name, table, columns):
@@ -370,7 +446,7 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
         
-        if self.basiccursor.rowcount != 0:
+        if self.basic.cursor.rowcount != 0:
             # Already exists, no need to create
             return DB_NO_ERROR
 
@@ -381,7 +457,7 @@ class DBInsert(DatabaseCore):
         params = tuple([name] + [table] + columns)
         
         # Annoying that I can't parameterise this SQL nicely
-        err = self._basicquery(index % params)
+        err = self._streamsquery(index % params)
         return err        
  
 
@@ -432,14 +508,15 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
 
+        self.streams.commit()
         for base,mod in modules.items():
             mod.tables(self)
 
-        self.conn.commit()
+        #self.conn.commit()
         return DB_NO_ERROR
 
     def register_collection(self, mod, subtype, stable, dtable):
-        
+       
         colcheck = """SELECT * FROM collections WHERE module=%s 
                     AND modsubtype=%s"""
        
@@ -447,7 +524,7 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
 
-        if self.basiccursor.rowcount > 0:
+        if self.basic.cursor.rowcount > 0:
             return DB_NO_ERROR
 
         insert = """INSERT INTO collections (module, modsubtype, 
@@ -457,7 +534,6 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
 
-        self.conn.commit()
         return DB_NO_ERROR
 
     def register_new_stream(self, mod, subtype, name, ts, basedata):
@@ -470,21 +546,21 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err, -1
 
-        if self.basiccursor.rowcount == 0:
+        if self.basic.cursor.rowcount == 0:
             log("Database Error: no collection for %s:%s" % (mod, subtype))
             return DB_DATA_ERROR, -1
 
-        if self.basiccursor.rowcount > 1:
+        if self.basic.cursor.rowcount > 1:
             log("Database Error: duplicate collections for %s:%s" % (mod, subtype))
             return DB_DATA_ERROR, -1
 
-        col = self.basiccursor.fetchone()
+        col = self.basic.cursor.fetchone()
         col_id = col['id']
 
         insert = """INSERT INTO streams (collection, name, lasttimestamp,
                     firsttimestamp) VALUES (%s, %s, %s, %s) RETURNING id
                 """
-        err = self._basicquery(insert, (col_id, name, 0, ts))
+        err = self._streamsquery(insert, (col_id, name, 0, ts))
         
         if err == DB_DUPLICATE_KEY:
             log("Attempted to register duplicate stream for %s:%s, name was %s" % (mod, subtype, name))
@@ -493,7 +569,7 @@ class DBInsert(DatabaseCore):
             return err, -1
 
         # Return the new stream id
-        newid = self.basiccursor.fetchone()[0]
+        newid = self.streams.cursor.fetchone()[0]
 
         return col_id, newid
 
@@ -508,14 +584,13 @@ class DBInsert(DatabaseCore):
         else:
             query += ")"
 
-        err = self._basicquery(query)
+        err = self._streamsquery(query)
         
         if err != DB_NO_ERROR:
             log("Failed to clone table %s for new stream %s" % \
                     (original, str(streamid)))
             return err
 
-        #self.conn.commit()
         return DB_NO_ERROR
 
     def add_foreign_key(self, tablename, column, foreigntable, foreigncolumn):
@@ -525,14 +600,13 @@ class DBInsert(DatabaseCore):
         # exist
         query = "ALTER TABLE %s ADD FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE" % (tablename, column, foreigntable, foreigncolumn)
 
-        err = self._basicquery(query)
+        err = self._streamsquery(query)
         
         if err != DB_NO_ERROR:
             log("Failed to add foreign key to table %s" % \
                     (tablename))
             return err
 
-        #self.conn.commit()
         return DB_NO_ERROR
 
     def __delete_everything(self):
@@ -544,13 +618,12 @@ class DBInsert(DatabaseCore):
             return err
        
         # XXX This may use a lot of memory :0
-        rows = self.basiccursor.fetchall()
+        rows = self.basic.cursor.fetchall()
         for r in rows:
             err = self._basicquery("""DROP TABLE IF EXISTS %s CASCADE""" % (r['table_name'],))
             if err != DB_NO_ERROR:
                 return err            
 
-            self.conn.commit()       
         return DB_NO_ERROR
  
     def update_timestamp(self, stream_ids, lasttimestamp):
@@ -559,7 +632,7 @@ class DBInsert(DatabaseCore):
         sql = "UPDATE streams SET lasttimestamp=%s "
         sql += "WHERE id IN (%s)" % (",".join(["%s"] * len(stream_ids)))
 
-        err = self._basicquery(sql, tuple([lasttimestamp] + stream_ids))
+        err = self._dataquery(sql, tuple([lasttimestamp] + stream_ids))
 
         if err != DB_NO_ERROR:
             return err        
@@ -571,11 +644,10 @@ class DBInsert(DatabaseCore):
        
         sql = "UPDATE streams SET firsttimestamp=%s WHERE id = %s"
  
-        err = self._basicquery(sql, (ts, stream_id))
+        err = self._dataquery(sql, (ts, stream_id))
 
         if err != DB_NO_ERROR:
             return err        
-        self.conn.commit()
         return DB_NO_ERROR
 
     def find_existing_stream(self, st, props):
@@ -599,22 +671,22 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
 
-        if self.basiccursor.rowcount != 1:
-            log("Unexpected number of matches when searching for existing stream: %d" % (self.basiccursor.rowcount))
+        if self.basic.cursor.rowcount != 1:
+            log("Unexpected number of matches when searching for existing stream: %d" % (self.basic.cursor.rowcount))
             return DB_CODING_ERROR
 
-        row = self.basiccursor.fetchone()
+        row = self.basic.cursor.fetchone()
         return row[0]
 
 
-    def insert_stream(self, liveexp, tablename, datatable, basecol, submodule, 
+    def insert_stream(self, tablename, datatable, basecol, submodule, 
             name, timestamp, streamprops):
 
         colid, streamid = self.register_new_stream(basecol, submodule, 
                 name, timestamp, datatable)
         
         if colid < 0:
-            return colid
+            return colid, DB_NO_ERROR
 
         # insert stream into our stream table
         colstr = "(stream_id"
@@ -629,39 +701,45 @@ class DBInsert(DatabaseCore):
         insert += colstr
         insert += "VALUES (%s)" % (",".join(["%s"] * len(values)))
 
-        err = self._basicquery(insert, params)
+        err = self._streamsquery(insert, params)
         
         if err == DB_DUPLICATE_KEY:
-            return self.find_existing_stream(tablename, streamprops)
+            return colid, self.find_existing_stream(tablename, streamprops)
         elif err != DB_NO_ERROR:
-            return err
+            return colid, err
  
         # Create a new data table for this stream, using the "base" data
         # table as a template
         
         err = self.clone_table(datatable, streamid)
         if err != DB_NO_ERROR:
-            return err       
+            return colid, err       
  
-        self.conn.commit()
-        if liveexp != None and streamid > 0:
-            streamprops["name"] = name
-            liveexp.publishStream(colid, basecol + "_" + submodule,
-                    streamid, streamprops)
-
-        return streamid
+        # Resist the urge to commit streams or do any live exporting here!
+        #
+        # Some collections have additional steps that they
+        # need to perform before the new tables etc should be committed.
+        # For example, amp traceroute needs to create the corresponding 
+        # path table. If you commit here then get interrupted, there will be
+        # a stream without a matching path table and NNTSC will error on
+        # restart.
+        #
+        # Also, don't live export the stream until all the new stream stuff
+        # has been committed otherwise you will get netevmon asking for
+        # data for a stream that hasn't had its data table committed yet.
+        return colid, streamid
 
     def custom_insert(self, customsql, values):
-        err = self._basicquery(customsql, values)
+        err = self._dataquery(customsql, values)
         if err != DB_NO_ERROR:
             return err, None
 
-        result = self.basiccursor.fetchone()
+        result = self.data.cursor.fetchone()
         return DB_NO_ERROR, result     
 
 
 
-    def insert_data(self, liveexp, tablename, collection, stream, ts, result,
+    def insert_data(self, tablename, collection, stream, ts, result,
             casts = {}):
    
         colstr = "(stream_id, timestamp"
@@ -683,14 +761,8 @@ class DBInsert(DatabaseCore):
         insert += colstr
         insert += "VALUES (%s)" % (valstr)
 
-        err = self._basicquery(insert, params)
-        if err != DB_NO_ERROR:
-            return err
-
-        if liveexp != None:
-            liveexp.publishLiveData(collection, stream, ts, result)
-
-        return DB_NO_ERROR
+        err = self._dataquery(insert, params)
+        return err
     
     def _columns_sql(self, columns):
 
@@ -741,7 +813,6 @@ class DBInsert(DatabaseCore):
             log("Failed to create miscellaneous table %s" % (name))
             return err
 
-        self.commit_transaction()
         return DB_NO_ERROR
 
     def create_data_table(self, name, columns, indexes=[]):
@@ -781,7 +852,6 @@ class DBInsert(DatabaseCore):
                 log("Failed to create index while creating data table %s" % ( name))
                 return err
         
-        self.commit_transaction()
         return DB_NO_ERROR
 
     def create_streams_table(self, name, columns, uniquecols=[]):
@@ -808,7 +878,6 @@ class DBInsert(DatabaseCore):
             log("Failed to create stream table %s" % (name))
             return err
 
-        self.commit_transaction()
         return DB_NO_ERROR
     
 

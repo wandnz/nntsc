@@ -73,8 +73,21 @@ def insert_stream(db, exp, data, timestamp):
         if k in streamkeys:
             props[k] = v
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME,
+    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME,
             "amp", "dns", name, timestamp, props)
+
+    if colid < 0:
+        return colid
+    if streamid < 0:
+        return streamid
+
+    db.commit_streams()
+    if exp == None:
+        return streamid
+
+    props['name'] = name
+    exp.publishStream(colid, "amp_dns", streamid, props)
+    return streamid
 
 def stream_table(db):
     
@@ -139,7 +152,13 @@ def insert_data(db, exp, stream, ts, result):
             filtered[col["name"]] = None
  
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "amp_dns", stream, ts, filtered)
+    err = db.insert_data(DATA_TABLE_NAME, "amp_dns", stream, ts, filtered)
+    if err != DB_NO_ERROR:
+        return err
+
+    if exp != None:
+        exp.publishLiveData("amp_dns", stream, ts, filtered)
+    return DB_NO_ERROR
 
 
 def split_result(alldata, result):

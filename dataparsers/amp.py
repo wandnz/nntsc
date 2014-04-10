@@ -150,7 +150,7 @@ class AmpModule:
                     code = DB_DATA_ERROR
 
                 if code == DB_NO_ERROR:
-                    self.db.commit_transaction()
+                    self.db.commit_data()
 
                     if test in self.collections:
                         self.exporter.publishPush(self.collections[test], \
