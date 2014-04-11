@@ -130,20 +130,20 @@ class Database:
                 self.conn.rollback()
                 return DB_CODING_ERROR
             except psycopg2.IntegrityError as e:
-                self.conn.rollback()
                 log(e)
+                self.conn.rollback()
                 if " duplicate " in str(e):
                     return DB_DUPLICATE_KEY
                 return DB_DATA_ERROR
             except psycopg2.DataError as e:
-                self.conn.rollback()
                 log(e)
+                self.conn.rollback()
                 return DB_DATA_ERROR
             except KeyboardInterrupt:
                 return DB_INTERRUPTED
             except psycopg2.Error as e:
-                self.conn.rollback()
                 log(e)
+                self.conn.rollback()
                 return DB_GENERIC_ERROR
             
             break
