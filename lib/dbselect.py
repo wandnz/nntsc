@@ -3,7 +3,7 @@ import psycopg2.extras
 from libnntscclient.logger import *
 from libnntsc.parsers import amp_traceroute
 from libnntsc.querybuilder import QueryBuilder
-from libnntsc.database import DatabaseCore
+from libnntsc.database import DatabaseCore, NNTSCCursor
 from libnntsc.dberrorcodes import *
 import time
 
@@ -40,7 +40,7 @@ class DBSelector(DatabaseCore):
         # a major issue.
         self.cursorname = "cursor_" + uniqueid
 
-        self.data = NNTSCCursor(self.connstr, True, self.cursorname)
+        self.data = NNTSCCursor(self.connstr, False, self.cursorname)
 
     def connect_db(self, retrywait):
         if self.data.connect(retrywait) == -1:
@@ -54,7 +54,9 @@ class DBSelector(DatabaseCore):
 
     def _dataquery(self, query, params=None):
         while 1:
-            self.data.reset()
+            err = self.data.reset()
+            if err == DB_OPERATIONAL_ERROR:
+                continue
 
             err = self.data.executequery(query, params)
             if err == DB_OPERATIONAL_ERROR:
@@ -657,32 +659,24 @@ class DBSelector(DatabaseCore):
             try:
                 fetched = self.data.cursor.fetchmany(100)
             except psycopg2.extensions.QueryCanceledError:
-                # The named datacursor is invalidated as soon as the
-                # transaction ends/fails, we don't need to close it (and it
-                # won't allow us to close it). We do have to rollback though
-                # so that the basic cursor will continue to work.
-                self.data.wipe()
                 yield None, DB_QUERY_TIMEOUT 
             except psycopg2.OperationalError:
                 yield None, DB_OPERATIONAL_ERROR
             except psycopg2.ProgrammingError as e:
                 log(e)
-                self.data.wipe()
                 yield None, DB_CODING_ERROR
             except psycopg2.IntegrityError as e:
                 # XXX Duplicate key shouldn't be an issue here
                 log(e)
-                self.data.wipe()
                 yield None, DB_DATA_ERROR
             except psycopg2.DataError as e:
                 log(e)
-                self.data.wipe()
                 yield None, DB_DATA_ERROR
             except KeyboardInterrupt:
                 yield None, DB_INTERRUPTED
             except psycopg2.Error as e:
                 log(e)
-                self.data.wipe()
+                yield None, DB_CODING_ERROR
 
             if fetched == []:
                 break

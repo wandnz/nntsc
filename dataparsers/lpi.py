@@ -171,7 +171,8 @@ class LPIModule:
 
                 if rec_type == 3:
                     if self.insert_zeroes() == DB_NO_ERROR:
-                        self.db.commit_data()
+                        err = self.db.commit_data()
+
                     self.reset_seen()
 
                 if rec_type == 4:
@@ -181,6 +182,12 @@ class LPIModule:
                 if rec_type == 0:
                     self.update_seen(data)
                     code = self.process_stats(data)
+                    # TODO Store results locally so that we don't lose data 
+                    # when we lose the database
+                    if code == DB_OPERATIONAL_ERROR:
+                        logger.log("DB disappeared while inserting LPI data")
+                        logger.log("LPI data potentially lost")
+                        continue
                    
                     if code == DB_INTERRUPTED:
                         logger.log("Interrupt while processing LPI data")

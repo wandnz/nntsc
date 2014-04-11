@@ -96,13 +96,29 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, metric, ts):
     props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq,
             'protocol':proto, 'metric':metric}
 
-    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+    while 1:
+        errorcode = DB_NO_ERROR
+        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME,
             "lpi", "flows", namestr, ts, props)
-    if colid < 0:
-        return colid
-    if streamid < 0:
-        return streamid
-    db.commit_streams()
+    
+        if colid < 0:
+            errorcode = streamid
+        
+        if streamid < 0:
+            errorcode = streamid
+    
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode 
+    
+        err = db.commit_streams()
+        if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+            continue
+        if err != DB_NO_ERROR:
+            return err
+        break
+
 
     if exp == None:
         return streamid

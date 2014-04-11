@@ -37,7 +37,7 @@ class NNTSCCursor(object):
 
     def destroy(self):
         if self.cursor is not None:
-            self.cursor.close()
+            #self.cursor.close()
             self.cursor = None
 
         if self.conn is not None:
@@ -63,14 +63,7 @@ class NNTSCCursor(object):
         if logmessage:
             log("Successfully connected to NNTSC database")
 
-        try:
-            self.cursor = self.conn.cursor(self.cursorname,
-                    cursor_factory=psycopg2.extras.DictCursor)
-        except psycopg2.DatabaseError as e:
-            log("Failed to create cursor: %s" % e)
-            self.cursor = None
-            return -1
-
+        self.cursor = None
         return 0
 
     def reconnect(self):
@@ -81,24 +74,42 @@ class NNTSCCursor(object):
     def reset(self):
         if self.conn == None:
             return
-        if self.cursor is not None:
-            self.cursor.close()
+        
+        if self.cursor:
+            try:
+                self.cursor.close()
+            except psycopg2.OperationalError as e:
+                log("Database disconnect while resetting cursor")
+                self.cursor = None
+                return DB_OPERATIONAL_ERROR
+            except psycopg2.DatabaseError as e:
+                log("Failed to close cursor: %s" % e)
+                self.cursor = None
+                return DB_CODING_ERROR
 
+            self.cursor = None
+
+    def createcursor(self):
+                
         try:
             self.cursor = self.conn.cursor(self.cursorname,
                     cursor_factory=psycopg2.extras.DictCursor)
+        except psycopg2.OperationalError as e:
+            log("Database disconnect while resetting cursor")
+            self.cursor = None
+            return DB_OPERATIONAL_ERROR
         except psycopg2.DatabaseError as e:
             log("Failed to create cursor: %s" % e)
             self.cursor = None
-            return -1
+            return DB_CODING_ERROR
 
-        return 0
+        return DB_NO_ERROR
 
     def executequery(self, query, params):
         if self.cursor is None:
-            log("Attempted to execute query with None cursor")
-            log(query)
-            return DB_NO_CURSOR
+            err = self.createcursor()
+            if err != DB_NO_ERROR:
+                return err
 
         try:
             if params is not None:
@@ -118,31 +129,54 @@ class NNTSCCursor(object):
             self.conn.rollback()
             return DB_CODING_ERROR
         except psycopg2.IntegrityError as e:
-            self.conn.rollback()
             log(e)
+            self.conn.rollback()
             if " duplicate " in str(e):
                 return DB_DUPLICATE_KEY
             return DB_DATA_ERROR
         except psycopg2.DataError as e:
-            self.conn.rollback()
             log(e)
+            self.conn.rollback()
             return DB_DATA_ERROR
         except KeyboardInterrupt:
             return DB_INTERRUPTED
         except psycopg2.Error as e:
+            log(e.pgerror)
             self.conn.rollback()
-            log(e)
             return DB_GENERIC_ERROR
     
         return DB_NO_ERROR
 
     def commit(self):
-        if self.conn is not None:
-            self.conn.commit()
+        if self.conn is None:
+            return DB_NO_CURSOR
 
-    def wipe(self):
-        self.cursor = None
-        self.conn.rollback()
+        try:
+            self.conn.commit()
+        except psycopg2.extensions.QueryCanceledError:
+            self.conn.rollback()
+            return DB_QUERY_TIMEOUT        
+        except psycopg2.OperationalError:
+            log("Database appears to have disappeared during commit -- reconnecting")
+            self.reconnect()
+            return DB_OPERATIONAL_ERROR
+        except psycopg2.ProgrammingError as e:
+            log(e)
+            return DB_CODING_ERROR
+        except psycopg2.IntegrityError as e:
+            log(e)
+            return DB_DATA_ERROR
+        except psycopg2.DataError as e:
+            log(e)
+            return DB_DATA_ERROR
+        except KeyboardInterrupt:
+            return DB_INTERRUPTED
+        except psycopg2.Error as e:
+            log(e.pgerror)
+            return DB_GENERIC_ERROR
+    
+        return DB_NO_ERROR
+            
 
 class DatabaseCore(object):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
@@ -191,8 +225,8 @@ class DatabaseCore(object):
                 # Retry the query, as we just reconnected
                 continue
 
+            err = self.basic.commit()
             break
-        self.basic.commit()
 
         return err
 
@@ -315,21 +349,16 @@ class DBInsert(DatabaseCore):
         return err
     
     def _dataquery(self, query, params=None):
-        while 1:
-            err = self.data.executequery(query, params)
-            if err == DB_OPERATIONAL_ERROR:
-                # Retry the query, as we just reconnected
-                continue
-
-            break
-
+        err = self.data.executequery(query, params)
         return err
 
     def commit_streams(self):
-        self.streams.commit()
+        err = self.streams.commit()
+        return err
 
     def commit_data(self):
-        self.data.commit()
+        err = self.data.commit()
+        return err
 
     def create_aggregators(self):
         # Create a useful function to select a mode from any data
@@ -684,9 +713,12 @@ class DBInsert(DatabaseCore):
 
         colid, streamid = self.register_new_stream(basecol, submodule, 
                 name, timestamp, datatable)
-        
+       
+        # NOTE: this is reversed for a reason -- putting the error code
+        # into the stream values makes it easier for callers to identify
+        # the error code
         if colid < 0:
-            return colid, DB_NO_ERROR
+            return -1, colid
 
         # insert stream into our stream table
         colstr = "(stream_id"

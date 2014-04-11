@@ -62,14 +62,29 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
     props = {"filename":fname, "source":source, "host":host,
             "minres":minres, "highrows":rows}
 
-    colid, streamid =  db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
-            "rrd", "smokeping", name, 0, props)
-    if colid < 0:
-        return colid
-    if streamid < 0:
-        return streamid
+    while 1:
+        colid, streamid =  db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+                "rrd", "smokeping", name, 0, props)
 
-    db.commit_streams()
+        errorcode = DB_NO_ERROR
+        if colid < 0:
+            errorcode = streamid
+
+        if streamid < 0:
+            errorcode = streamid
+
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
+
+        err = db.commit_streams()
+        if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+            continue
+        if err != DB_NO_ERROR:
+            return err
+        break
+    
     if exp == None:
         return streamid
     props['name'] = name

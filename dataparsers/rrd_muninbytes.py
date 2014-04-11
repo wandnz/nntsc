@@ -67,13 +67,29 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
-    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
-            "rrd", "muninbytes", name, 0, props)
-    if colid < 0:
-        return colid
-    if streamid < 0:
-        return streamid
-    db.commit_streams()
+    while 1:
+        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+                "rrd", "muninbytes", name, 0, props)
+        
+        errorcode = DB_NO_ERROR
+        if colid < 0:
+            errorcode = streamid
+
+        if streamid < 0:
+            errorcode = streamid
+
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
+
+        err = db.commit_streams()
+        if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+            continue
+        if err != DB_NO_ERROR:
+            return err
+        break
+ 
 
     if exp == None:
         return streamid

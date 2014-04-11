@@ -118,28 +118,44 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     props = {"source":source, "destination":dest,
             "packet_size":size, "address": address}
 
-    colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
-            "amp", "traceroute", name, timestamp, props)
+    while 1:
+        errorcode = DB_NO_ERROR
+        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+                "amp", "traceroute", name, timestamp, props)
+        
+        if colid < 0:
+            errorcode = streamid
 
-    if colid < 0:
-        return colid
+        if streamid < 0:
+            errorcode = streamid
 
-    if streamid <= 0:
-        return streamid
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
 
-    ret = db.clone_table("data_amp_traceroute_paths", streamid)
-    if ret != DB_NO_ERROR:
-        return ret
+        errorcode = db.clone_table("data_amp_traceroute_paths", streamid)
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
 
-    # Ensure our custom foreign key gets perpetuated
-    newtable = "%s_%d" % (DATA_TABLE_NAME, streamid)
-    pathtable = "data_amp_traceroute_paths_%d" % (streamid)
-    err = db.add_foreign_key(newtable, "path_id", pathtable, "path_id")
+        # Ensure our custom foreign key gets perpetuated
+        newtable = "%s_%d" % (DATA_TABLE_NAME, streamid)
+        pathtable = "data_amp_traceroute_paths_%d" % (streamid)
+        errorcode = db.add_foreign_key(newtable, "path_id", pathtable, "path_id")
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
+        
+        err = db.commit_streams()
+        if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+            continue
+        if err != DB_NO_ERROR:
+            return err
+        break
 
-    if err != DB_NO_ERROR:
-        return err
-    
-    db.commit_streams()
     if exp == None:
         return streamid
 

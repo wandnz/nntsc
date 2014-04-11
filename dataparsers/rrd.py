@@ -28,6 +28,10 @@ import libnntscclient.logger as logger
 import sys, rrdtool, socket, time
 from libnntsc.pikaqueue import initExportPublisher
 
+RRD_RETRY = 0
+RRD_CONTINUE = 1
+RRD_HALT = 2
+
 class RRDModule:
     def __init__(self, rrds, nntsc_conf, expqueue, exchange):
 
@@ -48,6 +52,7 @@ class RRDModule:
             if r['modsubtype'] == 'muninbytes':
                 self.muninbytes[r['stream_id']] = r
 
+            r['lastcommit'] = r['lasttimestamp']
             filename = str(r['filename'])
             if filename in self.rrds:
                 self.rrds[filename].append(r)
@@ -84,110 +89,129 @@ class RRDModule:
 
         return startts, endts
 
+    def read_from_rrd(self, r, fname):
+        r['lastcommit'] = r['lasttimestamp']
+        stream_id = r['stream_id']
+        endts = rrdtool.last(str(fname))
+
+        startts, endts = self.rejig_ts(endts, r)
+
+        fetchres = rrdtool.fetch(fname, "AVERAGE", "-s",
+                str(startts), "-e", str(endts))
+
+
+        current = int(fetchres[0][0])
+        last = int(fetchres[0][1])
+        step = int(fetchres[0][2])
+
+        data = fetchres[2]
+        current += step
+
+        for line in data:
+
+            if current == last:
+                break
+
+            code = DB_DATA_ERROR
+            if r['modsubtype'] == "smokeping":
+                code = rrd_smokeping.insert_data(self.db, 
+                        self.exporter, r['stream_id'], current, 
+                        line)
+
+            if r['modsubtype'] == "muninbytes":
+                code = rrd_muninbytes.insert_data(self.db, 
+                        self.exporter, r['stream_id'], current, 
+                        line)
+
+            if code == DB_NO_ERROR:
+                if current > r['lasttimestamp']:
+                    r['lasttimestamp'] = current
+
+                # RRD streams are created before we see any data 
+                # so we have to update firsttimestamp when we see 
+                # the first data point
+                if (r['firsttimestamp'] == 0):
+                    r['firsttimestamp'] = current;
+                    code = self.db.set_firsttimestamp(
+                                r['stream_id'], 
+                                current)
+            
+            if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:
+                return code
+                
+            if code == DB_INTERRUPTED:
+                logger.log("Interrupt in RRD module")
+                return code
+
+            if code != DB_NO_ERROR:
+                logger.log("Error while inserting RRD data")
+
+            current += step
+
+        code = self.db.update_timestamp([r['stream_id']],
+                r['lasttimestamp'])
+
+        if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:
+            return code
+        if code == DB_INTERRUPTED:
+            logger.log("Interrupt in RRD module")
+            return code
+
+        if code != DB_NO_ERROR:
+            logger.log("Error while updating last timestamp for RRD stream")
+            return code
+
+        return DB_NO_ERROR
+
+    def rrdloop(self):
+        for fname,rrds in self.rrds.items():
+            for r in rrds:
+                err = self.read_from_rrd(r, fname)
+
+                if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+                    return RRD_RETRY
+                if err == DB_INTERRUPTED:
+                    return RRD_HALT
+                # Ignore other DB errors as they represent bad data or 
+                # database code. Try to carry on to the next RRD instead.
+        return RRD_CONTINUE
+
+
     def run(self):
         logger.log("Starting RRD module")
         while True:
-            for fname,rrds in self.rrds.items():
-                for r in rrds:
-                    stream_id = r['stream_id']
-                    timestamp = int(time.mktime(time.localtime()))
-                    endts = rrdtool.last(str(fname))
+            result = self.rrdloop()
+            
+            if result == RRD_RETRY:
+                self.revert_rrds()
+                time.sleep(10)
+                continue
 
-                    startts, endts = self.rejig_ts(endts, r)
+            if result == RRD_HALT:
+                break
 
-                    fetchres = rrdtool.fetch(fname, "AVERAGE", "-s",
-                            str(startts), "-e", str(endts))
+            err = self.db.commit_data()
+            if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+                # Revert our lasttimestamp back to whenever we last
+                # successfully committed to ensure we re-insert the data
+                self.revert_rrds()
+                time.sleep(10)
+                continue
 
-
-                    current = int(fetchres[0][0])
-                    last = int(fetchres[0][1])
-                    step = int(fetchres[0][2])
-
-                    data = fetchres[2]
-                    current += step
-
-                    for line in data:
-
-                        if current == last:
-                            break
-
-                        code = DB_DATA_ERROR
-                        if r['modsubtype'] == "smokeping":
-                            code = rrd_smokeping.insert_data(self.db, 
-                                    self.exporter, r['stream_id'], current, 
-                                    line)
-
-                        if r['modsubtype'] == "muninbytes":
-                            code = rrd_muninbytes.insert_data(self.db, 
-                                    self.exporter, r['stream_id'], current, 
-                                    line)
-
-                        if code == DB_NO_ERROR:
-                            if current > r['lasttimestamp']:
-                                r['lasttimestamp'] = current
-
-                            # RRD streams are created before we see any data 
-                            # so we have to update firsttimestamp when we see 
-                            # the first data point
-                            if (r['firsttimestamp'] == 0):
-                                r['firsttimestamp'] = current;
-                                code = self.db.set_firsttimestamp(
-                                            r['stream_id'], 
-                                            current)
-
-                        if code == DB_GENERIC_ERROR:
-                            logger.log("Database error while inserting RRD data")
-                            return
-                        
-                        if code == DB_QUERY_TIMEOUT:
-                            logger.log("Timeout while inserting RRD data, retrying in 1 sec")
-                            time.sleep(1)
-                            continue
-
-                        if code == DB_DATA_ERROR:
-                            logger.log("Bad RRD Data, skipping row")
-
-                        if code == DB_INTERRUPTED:
-                            logger.log("Interrupt in RRD module")
-                            return
-
-                        if code == DB_CODING_ERROR:
-                            logger.log("Programming error in insert_data for RRD %s, skipping row" % (r['modsubtype']))
-
-                        if code == DB_DUPLICATE_KEY:
-                            logger.log("Duplicate key error while inserting RRD %s data, skipping row" % (r['modsubtype']))
-
-
-                        current += step
-
-                    code = self.db.update_timestamp([r['stream_id']],
-                            r['lasttimestamp'])
-
-                    if code == DB_GENERIC_ERROR:
-                        logger.log("Database error while updating RRD stream")
-                        return
-
-                    if code == DB_DATA_ERROR:
-                        logger.log("Bad Update for RRD Data, skipping update")
-
-                    if code == DB_QUERY_TIMEOUT:
-                        logger.log("Timeout while updating last timestamp for RRD data, skipping update")
-
-                    if code == DB_INTERRUPTED:
-                        logger.log("RRDModule: Interrupt in RRD module")
-                        return
-
-                    if code == DB_CODING_ERROR:
-                        logger.log("Programming error in update_timestamp for RRD %s" % (r['modsubtype']))
-                        return
-
-                    if code == DB_DUPLICATE_KEY:
-                        logger.log("Duplicate key error in update timestamp for  RRD %s data, shouldn't get this!" % (r['modsubtype']))
-                        return
-
-            self.db.commit_data()
+            if err != DB_NO_ERROR:
+                logger.log("Error while committing RRD Data")
+                self.revert_rrds()
 
             time.sleep(30)
+
+        logger.log("Halting RRD module")
+
+    def revert_rrds(self):
+        logger.log("Reverting RRD timestamps to previous safe value")
+        for fname,rrds in self.rrds.items():
+            for r in rrds:
+                if 'lastcommit' in r:
+                    r['lasttimestamp'] = r['lastcommit']
 
 def create_rrd_stream(db, rrdtype, params, index, existing):
 

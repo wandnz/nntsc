@@ -149,14 +149,22 @@ class AmpModule:
                             properties.headers["x-amp-test-type"]))
                     code = DB_DATA_ERROR
 
+                # Inserts were successful, commit data and update error code
                 if code == DB_NO_ERROR:
-                    self.db.commit_data()
+                    code = self.db.commit_data()
 
+                if code == DB_NO_ERROR:
                     if test in self.collections:
                         self.exporter.publishPush(self.collections[test], \
                                 properties.timestamp)
                     channel.basic_ack(delivery_tag = method.delivery_tag)
                     break
+                
+                if code == DB_OPERATIONAL_ERROR:
+                    # Disconnect while inserting data, need to reporcess the
+                    # entire message
+                    logger.log("Database disconnect while processing AMP data")
+                    continue
 
                 elif code == DB_DATA_ERROR:
                     # Data was bad so we couldn't insert into the database.
