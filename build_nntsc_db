@@ -28,6 +28,7 @@ from libnntsc.database import Database, DB_NO_ERROR, DB_GENERIC_ERROR, \
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
 from libnntsc.parsers.rrd import insert_rrd_streams
+from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 def print_usage(prog):
@@ -75,14 +76,18 @@ if dbconf["name"] == "":
     sys.exit(1)
 
 db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
-db.connect_db()
-db.build_databases(modules, new=clean_db)
+db.connect_db(15)
+result = db.build_databases(modules, new=clean_db)
+
+if result != DB_NO_ERROR:
+    logger.log("Failed to create core database tables -- exiting")
+    sys.exit(1)
 
 if 'rrd' in enabled_modules:
 
     rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
-    if rrd_conf == "NNTSCConfigError":
-        sys.exit(1)
+    if rrd_conf == "NNTSCConfigError" or rrd_conf == "NNTSCConfigMissing":
+        sys.exit(0)
     res = insert_rrd_streams(db, rrd_conf) 
     if res == DB_DATA_ERROR:
         logger.log("Failed to create RRD streams -- check RRD List for invalid content")

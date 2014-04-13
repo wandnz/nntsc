@@ -20,11 +20,8 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-        String, MetaData, ForeignKey, UniqueConstraint
-from sqlalchemy.types import Integer, String, Float
-from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
+from libnntsc.database import Database
+from libnntsc.dberrorcodes import *
 from libnntsc.configurator import *
 from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
 import libnntscclient.logger as logger
@@ -40,7 +37,7 @@ class RRDModule:
 
         self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
-        self.db.connect_db()
+        self.db.connect_db(15)
 
         self.smokepings = {}
         self.muninbytes = {}
@@ -141,6 +138,11 @@ class RRDModule:
                         if code == DB_GENERIC_ERROR:
                             logger.log("Database error while inserting RRD data")
                             return
+                        
+                        if code == DB_QUERY_TIMEOUT:
+                            logger.log("Timeout while inserting RRD data, retrying in 1 sec")
+                            time.sleep(1)
+                            continue
 
                         if code == DB_DATA_ERROR:
                             logger.log("Bad RRD Data, skipping row")
@@ -148,6 +150,13 @@ class RRDModule:
                         if code == DB_INTERRUPTED:
                             logger.log("Interrupt in RRD module")
                             return
+
+                        if code == DB_CODING_ERROR:
+                            logger.log("Programming error in insert_data for RRD %s, skipping row" % (r['modsubtype']))
+
+                        if code == DB_DUPLICATE_KEY:
+                            logger.log("Duplicate key error while inserting RRD %s data, skipping row" % (r['modsubtype']))
+
 
                         current += step
 
@@ -157,11 +166,23 @@ class RRDModule:
                     if code == DB_GENERIC_ERROR:
                         logger.log("Database error while updating RRD stream")
                         return
+
                     if code == DB_DATA_ERROR:
                         logger.log("Bad Update for RRD Data, skipping update")
 
+                    if code == DB_QUERY_TIMEOUT:
+                        logger.log("Timeout while updating last timestamp for RRD data, skipping update")
+
                     if code == DB_INTERRUPTED:
                         logger.log("RRDModule: Interrupt in RRD module")
+                        return
+
+                    if code == DB_CODING_ERROR:
+                        logger.log("Programming error in update_timestamp for RRD %s" % (r['modsubtype']))
+                        return
+
+                    if code == DB_DUPLICATE_KEY:
+                        logger.log("Duplicate key error in update timestamp for  RRD %s data, shouldn't get this!" % (r['modsubtype']))
                         return
 
             self.db.commit_transaction()
@@ -241,7 +262,11 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
 
 def insert_rrd_streams(db, conf):
 
-    rrds = db.select_streams_by_module("rrd")
+    code, rrds = db.select_streams_by_module("rrd")
+
+    if code != DB_NO_ERROR:
+        logger.log("Error while fetching existing RRD streams from database")
+        return
 
     files = {}
     for r in rrds:
@@ -256,6 +281,8 @@ def insert_rrd_streams(db, conf):
     except IOError, e:
         logger.log("WARNING: %s does not exist - no RRD streams will be added" % (conf))
         return
+
+    logger.log("Reading RRD list from %s" % (conf))
 
     index = 1
     subtype = None
@@ -284,6 +311,17 @@ def insert_rrd_streams(db, conf):
                 if code == DB_INTERRUPTED:
                     logger.log("RRD stream processing interrupted")
                     return code
+                if code == DB_DUPLICATE_KEY:
+                    # Note, we should not see this error as we should get
+                    # back the id of the duplicate stream instead
+                    logger.log("Duplicate key error while inserting RRD stream")
+                    return code
+                if code == DB_CODING_ERROR:
+                    logger.log("Programming error while inserting RRD stream")
+                    return code
+                if code == DB_QUERY_TIMEOUT:
+                    logger.log("Timeout while inserting RRD stream")
+                    return code
                     
             parameters = {}
             subtype = x[1]
@@ -303,6 +341,17 @@ def insert_rrd_streams(db, conf):
         if code == DB_INTERRUPTED:
             logger.log("RRD stream processing interrupted")
             return code
+        if code == DB_DUPLICATE_KEY:
+            # Note, we should not see this error as we should get
+            # back the id of the duplicate stream instead
+            logger.log("Duplicate key error while inserting RRD stream")
+            return code
+        if code == DB_CODING_ERROR:
+            logger.log("Programming error while inserting RRD stream")
+            return code
+        if code == DB_QUERY_TIMEOUT:
+            logger.log("Timeout while inserting RRD stream")
+            return code
 
     db.commit_transaction()
     f.close()
@@ -319,13 +368,27 @@ def tables(db):
     st_name = rrd_smokeping.stream_table(db)
     dt_name = rrd_smokeping.data_table(db)
 
-    db.register_collection("rrd", "smokeping", st_name, dt_name)
+    if st_name == None or dt_name == None:
+        logger.log("Error creating RRD Smokeping base tables")
+        return
+
+    code = db.register_collection("rrd", "smokeping", st_name, dt_name)
+
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register rrd smokeping collection")
+        return
 
     st_name = rrd_muninbytes.stream_table(db)
     dt_name = rrd_muninbytes.data_table(db)
 
+    if st_name == None or dt_name == None:
+        logger.log("Error creating RRD Muninbytes base tables")
+        return
     db.register_collection("rrd", "muninbytes", st_name, dt_name)
 
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register rrd muninbytes collection")
+        return
     #res = {}
     #res["rrd_smokeping"] = (smokeping_stream_table(), smokeping_stream_constraints(), smokeping_data_table())
 

@@ -22,13 +22,13 @@
 
 import sys
 
-from libnntsc.database import Database, DB_NO_ERROR, DB_DATA_ERROR, \
-        DB_GENERIC_ERROR, DB_INTERRUPTED, DB_OPERATIONAL_ERROR
+from libnntsc.database import Database
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 import pika
 from ampsave.importer import import_data_functions
-from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns, amp_http
+from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns
+from libnntsc.dberrorcodes import *
 import time
 import logging
 
@@ -45,7 +45,7 @@ class AmpModule:
         self.db = Database(self.dbconf["name"], self.dbconf["user"], 
                 self.dbconf["pass"], self.dbconf["host"])
 
-        self.db.connect_db()
+        self.db.connect_db(15)
 
         # the amp modules understand how to extract the test data from the blob
         self.amp_modules = import_data_functions()
@@ -68,8 +68,8 @@ class AmpModule:
                 key = amp_traceroute.create_existing_stream(i)
             elif testtype == "dns":
                 key = amp_dns.create_existing_stream(i)
-            elif testtype == "http":
-                key = amp_http.create_existing_stream(i)
+            #elif testtype == "http":
+            #    key = amp_http.create_existing_stream(i)
 
 
         self.initSource(nntsc_config)
@@ -79,29 +79,30 @@ class AmpModule:
     def initSource(self, nntsc_config):
         # Parse connection info
         username = get_nntsc_config(nntsc_config, "amp", "username")
-        if username == "NNTSCConfigError":
-            logger.log("Invalid username option for AMP")
-            sys.exit(1)
+        if username == "NNTSCConfigMissing":
+            username = "amp"
         password = get_nntsc_config(nntsc_config, "amp", "password")
-        if password == "NNTSCConfigError":
-            logger.log("Invalid password option for AMP")
-            sys.exit(1)
+        if password == "NNTSCConfigMissing":
+            logger.log("Password not set for AMP RabbitMQ source, using empty string as default")
+            password = ""
         host = get_nntsc_config(nntsc_config, "amp", "host")
-        if host == "NNTSCConfigError":
-            logger.log("Invalid host option for AMP")
-            sys.exit(1)
+        if host == "NNTSCConfigMissing":
+            host = "localhost"
         port = get_nntsc_config(nntsc_config, "amp", "port")
-        if port == "NNTSCConfigError":
-            logger.log("Invalid port option for AMP")
-            sys.exit(1)
+        if port == "NNTSCConfigMissing":
+            port = "5672"
         ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
-        if ssl == "NNTSCConfigError":
-            logger.log("Invalid ssl option for AMP")
-            sys.exit(1)
+        if ssl == "NNTSCConfigMissing":
+            ssl = False
         queue = get_nntsc_config(nntsc_config, "amp", "queue")
-        if queue == "NNTSCConfigError":
-            logger.log("Invalid queue option for AMP")
+        if queue == "NNTSCConfigMissing":
+            queue = "amp-nntsc"
+
+        if "NNTSCConfigError" in [username, password, host, port, ssl, queue]:
+            logger.log("Failed to configure AMP source")
             sys.exit(1)
+
+        logger.log("Connecting to RabbitMQ queue %s on host %s:%s (ssl=%s), username %s" % (queue, host, port, ssl, username))
 
         self.source = PikaConsumer('', queue, host, port, 
                 ssl, username, password)
@@ -113,7 +114,7 @@ class AmpModule:
         """
 
         # We need this loop so that we can try processing the message again
-        # if a DB_GENERIC_ERROR requires us to reconnect to the database. If
+        # if an insert fails due to a query timeout. If
         # we exit this function without acknowledging the message then we
         # will stop getting messages (including the unacked one!)
         while 1:
@@ -133,8 +134,10 @@ class AmpModule:
                         code = amp_dns.process_data(self.db, self.exporter,
                                 properties.timestamp, data, source)
                     elif test == "http":
-                        code = amp_http.process_data(self.db, self.exporter,
-                                properties.timestamp, data, source)
+                        channel.basic_ack(delivery_tag=method.delivery_tag)
+                        break
+                    #    code = amp_http.process_data(self.db, self.exporter,
+                    #            properties.timestamp, data, source)
                     else:
                         code = DB_DATA_ERROR
                 else:
@@ -168,7 +171,18 @@ class AmpModule:
                     logger.log("Database error while processing AMP data")
                     channel.close()
                     return
-
+                elif code == DB_QUERY_TIMEOUT:
+                    logger.log("Database timeout while processing AMP data")
+                    continue
+                elif code == DB_CODING_ERROR:
+                    logger.log("Bad database code encountered while processing AMP data")
+                    channel.close()
+                    return
+                elif code == DB_DUPLICATE_KEY:
+                    logger.log("Duplicate key error while processing AMP data")
+                    channel.close()
+                    return    
+            
                 else:
                     logger.log("Unknown error code returned by database: %d" % (code))
                     logger.log("Shutting down AMP module")
@@ -196,10 +210,16 @@ def run_module(tests, config, key, exchange):
 
 def tables(db):
 
-    amp_icmp.register(db)
-    amp_traceroute.register(db)
-    amp_dns.register(db)
-    amp_http.register(db)
-    #amp_udpstream.register(db)
+    code = amp_icmp.register(db)
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register AMP ICMP collection")
+
+    code = amp_traceroute.register(db)
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register AMP Traceroute collection")
+    
+    code = amp_dns.register(db)
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register AMP DNS collection")
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

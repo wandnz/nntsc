@@ -119,6 +119,26 @@ class DBWorker(threading.Thread):
 
         return -1
 
+    def _merge_aggregators(self, columns, func):
+        # Combine the aggcols and aggfunc variables into a nice single
+        # list to match the format now expected by the dbselect functions
+        aggs = []
+
+        if type(func) is str:
+            for c in columns:
+                aggs.append((c,func))
+
+        elif len(func) == 1:
+            for c in columns:
+                aggs.append((c, func[0]))
+
+        elif len(func) == len(columns):
+            for i in range(0, len(columns)):
+                aggs.append((columns[i], func[i]))
+
+
+        return aggs
+
     def aggregate(self, aggmsg):
         tup = pickle.loads(aggmsg)
         name, start, end, labels, aggcols, groupcols, binsize, aggfunc = tup
@@ -139,6 +159,8 @@ class DBWorker(threading.Thread):
         else:
             stoppoint = end
 
+        aggs = self._merge_aggregators(aggcols, aggfunc)
+
         while start < stoppoint:
             queryend = start + MAX_HISTORY_QUERY
 
@@ -155,8 +177,8 @@ class DBWorker(threading.Thread):
 
             
 
-            generator = self.db.select_aggregated_data(name, labels, aggcols,
-                    start, queryend, groupcols, binsize, aggfunc)
+            generator = self.db.select_aggregated_data(name, labels, aggs,
+                    start, queryend, groupcols, binsize)
 
             error = self._query_history(generator, name, labels, more, start,
                     queryend)
@@ -197,6 +219,9 @@ class DBWorker(threading.Thread):
             stoppoint = int(time.time())
         else:
             stoppoint = end
+        
+        ntileaggs = self._merge_aggregators(ntilecols, ntileagg)
+        otheraggs = self._merge_aggregators(othercols, otheragg)
 
         while start < stoppoint:
             queryend = start + MAX_HISTORY_QUERY
@@ -212,8 +237,8 @@ class DBWorker(threading.Thread):
                 if queryend % binsize < binsize - 1:
                     queryend = (int(queryend / binsize) * binsize) - 1
 
-            generator = self.db.select_percentile_data(name, labels, ntilecols,
-                    othercols, start, queryend, binsize, ntileagg, otheragg)
+            generator = self.db.select_percentile_data(name, labels, ntileaggs,
+                    otheraggs, start, queryend, binsize)
 
             error = self._query_history(generator, name, labels, more, start,
                     queryend)
@@ -260,6 +285,10 @@ class DBWorker(threading.Thread):
         else:
             stoppoint = end
 
+        if aggs != []:
+            aggcols = self._merge_aggregators(cols, aggs)
+            
+
         # Register our interest in these streams before we start querying, so
         # the client can stockpile any live data that arrives while we're
         # busy querying the db.
@@ -298,7 +327,7 @@ class DBWorker(threading.Thread):
             # otherwise fetch full historical data
             if aggs != []:
                 generator = self.db.select_aggregated_data(name, labels,
-                        cols, start, queryend, [], 1, aggs)
+                        aggcols, start, queryend, [], 1)
             else:
                 generator = self.db.select_data(name, labels, cols, start,
                         queryend)
@@ -842,7 +871,7 @@ class NNTSCClient(threading.Thread):
                             len(pushdata))
                     
                     try:
-                        self.releasedlive.put((header, pushdata))
+                        self.releasedlive.put((header, pushdata), True, 10)
                     except StdQueue.Full:
                         log("Could not release stored live data, queue full")
                         log("Dropping client")
@@ -854,7 +883,7 @@ class NNTSCClient(threading.Thread):
                     continue
 
                 try:
-                    self.releasedlive.put(d)
+                    self.releasedlive.put(d, True, 10)
                 except StdQueue.Full:
                     log("Could not release stored live data, queue full")
                     log("Dropping client")
@@ -865,7 +894,7 @@ class NNTSCClient(threading.Thread):
             header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, 
                     len(pushdata))
             try:
-                self.releasedlive.put((header, pushdata))
+                self.releasedlive.put((header, pushdata), True, 10)
             except StdQueue.Full:
                 log("Could not release stored live data, queue full")
                 log("Dropping client")
@@ -1100,7 +1129,7 @@ class NNTSCClient(threading.Thread):
 
         # Add "halt" jobs to the job queue for each worker
         for w in self.workers:
-            self.jobs.put((-1, None), True)
+            self.jobs.put((-1, None), True, 60)
 
 class NNTSCExporter:
     def __init__(self, port):
@@ -1198,7 +1227,7 @@ class NNTSCExporter:
                 continue
             
             try:
-                self.clients[sock]['queue'].put((header, pushdata))
+                self.clients[sock]['queue'].put((header, pushdata), True, 10)
             except StdQueue.Full:
                 # This may not actually stop the client thread,
                 # but apparently killing threads is bad so let's
@@ -1249,7 +1278,7 @@ class NNTSCExporter:
             if sock not in self.clients.keys():
                 continue
             try:
-                self.clients[sock]['queue'].put((header, ns_data))
+                self.clients[sock]['queue'].put((header, ns_data), True, 10)
             except StdQueue.Full:
                 # This may not actually stop the client thread,
                 # but apparently killing threads is bad so let's
@@ -1300,7 +1329,7 @@ class NNTSCExporter:
 
                 if sock in self.clients.keys():
                     try:
-                        self.clients[sock]['queue'].put((header, contents, timestamp))
+                        self.clients[sock]['queue'].put((header, contents, timestamp), True, 10)
                     except StdQueue.Full:
                         # This may not actually stop the client thread,
                         # but apparently killing threads is bad so let's

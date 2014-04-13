@@ -1,6 +1,8 @@
 import psycopg2
 import psycopg2.extras
 from libnntscclient.logger import *
+from libnntsc.parsers import amp_traceroute
+from libnntsc.querybuilder import QueryBuilder
 import time
 
 # Class used for querying the NNTSC database.
@@ -30,9 +32,12 @@ class DBSelector:
     def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None,
             timeout=0):
 
+        self.qb = QueryBuilder()
         self.dbselid = uniqueid
         self.timeout = timeout
-        connstr = "dbname=%s user=%s" % (dbname, dbuser)
+        connstr = "dbname=%s" % (dbname) 
+        if dbuser != "" and dbuser != None:
+            connstr += " user=%s" % (dbuser)
         if dbpass != "" and dbpass != None:
             connstr += " password=%s" % (dbpass)
         if dbhost != "" and dbhost != None:
@@ -365,7 +370,7 @@ class DBSelector:
 
     def select_aggregated_data(self, col, labels, aggcols,
             start_time = None, stop_time = None, groupcols = None,
-            binsize = 0, aggregator="avg"):
+            binsize = 0):
 
         """ Queries the database for time series data, splits the time
             series into bins and applies the given aggregation function(s)
@@ -379,8 +384,11 @@ class DBSelector:
 
             Parameters:
                 col -- the id of the collection to query
-                stream_ids -- a list of stream ids to get data for
-                aggcols -- a list of data columns to aggregate
+                labels -- a dictionary of labels and their corresponding
+                          stream ids
+                aggcols -- a list of tuples describing the columns to 
+                           aggregate and the aggregation function to apply to 
+                           that column
                 start_time -- a timestamp describing the start of the
                               time period that data is required for. If
                               None, this is set to 1 day before the stop
@@ -394,18 +402,6 @@ class DBSelector:
                 binsize -- the size of each time bin. If 0 (the default),
                            the entire data series will aggregated into a
                            single summary value.
-                aggregator -- the aggregator function(s) to be applied to the
-                              aggcols. If this is a string, the described
-                              function will be applied to all columns. If
-                              this is a list with one string in it, the same
-                              thing happens. If this is a list with multiple
-                              strings, then each string describes the function
-                              to apply to the column in the matching position
-                              in the aggcols list.
-
-                              In the last case, there MUST be an entry in the
-                              aggregator list for every column provided in
-                              aggcols.
 
             This function is a generator function and will yield a tuple each
             time it is iterated over. The tuple contains a row from the result
@@ -416,18 +412,15 @@ class DBSelector:
             1, 2 and 3 from collection 1 for a given week:
 
                 for row, tscol, binsize in db.select_aggregated_data(1,
-                        [1,2,3], ['value'], 1380758400, 1381363200, None,
-                        60 * 60, "avg"):
+                        {'stream1':[1], 'stream2':[2], 'stream3':[3]}, 
+                        {'value':'avg'}, 1380758400, 1381363200, None,
+                        60 * 60):
                     process_row(row)
         """
 
         if type(binsize) is not int:
             return
 
-        # Make sure we have a usable cursor
-        self._reset_cursor()
-        if self.datacursor == None:
-            return
 
         # Set default time boundaries
         if stop_time == None:
@@ -436,9 +429,6 @@ class DBSelector:
             start_time = stop_time - (24 * 60 * 60)
 
         assert(type(labels) is dict)
-
-        # TODO cast to a set to make unique entries?
-        all_streams = reduce(lambda x, y: x+y, labels.values())
 
         # Find the data table and make sure we are only querying for
         # valid columns
@@ -455,12 +445,17 @@ class DBSelector:
             del groupcols[groupcols.index("stream_id")]
 
         # Make sure we only query for columns that exist in the data table
-        # XXX Could we do this in one sanitise call?
-        groupcols = self._sanitise_columns(columns, groupcols)
-        aggcols = self._sanitise_columns(columns, aggcols)
+        if table == "data_amp_traceroute":
+            groupcols = amp_traceroute.sanitise_columns(groupcols)
+        else:
+            groupcols = self._sanitise_columns(columns, groupcols)
+
+        aggcols = self._filter_aggregation_columns(table, aggcols)
+
+        self.qb.reset()
 
         # Convert our column and aggregator lists into useful bits of SQL
-        labeled_aggcols, aggfuncs = self._apply_aggregation(aggcols, aggregator)
+        labeled_aggcols = self._apply_aggregation(aggcols)
         labeled_groupcols = list(groupcols)
 
         # Add a column for the maximum timestamp in the bin
@@ -482,50 +477,73 @@ class DBSelector:
 
         # Constructing the innermost SELECT query, which lists the label for
         # each measurement
-        sql_agg = " SELECT label, timestamp "
+        innselclause = " SELECT label, timestamp "
 
-        uniquecols = list(set(aggcols))
+        uniquecols = list(set([k[0] for k in aggcols]))
         for col in uniquecols:
-            sql_agg += ", " + col
+            innselclause += ", " + col
 
-        from_sql, from_params = self._generate_from(table, labels)
-        sql_agg += " FROM %s " % from_sql
-        sql_agg += self._generate_where()
+        self.qb.add_clause("innersel", innselclause, [])
 
+        self._generate_where(start_time, stop_time)
+        
         # Constructing the outer SELECT query, which will aggregate across
         # each label to find the aggregate values
-        sql = "SELECT label"
+        outselclause = "SELECT label"
         for col in labeled_groupcols:
-            sql += "," + col
+            outselclause += "," + col
         for col in labeled_aggcols:
-            sql += "," + col
+            outselclause += "," + col
+        outselclause += " FROM ( "
 
-        sql += " FROM ( %s ) AS aggregates" % (sql_agg)
-        sql += " GROUP BY label"
+        self.qb.add_clause("outsel", outselclause, binparam)
+
+        outselend = " ) AS aggregates"
+        self.qb.add_clause("outselend", outselend, [])
+
+        outgroup = " GROUP BY label"
         for col in groupcols:
-            sql += ", " + col
+            outgroup += ", " + col
 
-        sql += " ORDER BY label, timestamp"
+        outgroup += " ORDER BY label, timestamp"
 
-        # Execute our query!
-        # XXX Getting these parameters in the right order is a pain!
-        params = tuple(binparam + from_params + [start_time, stop_time] +
-                all_streams + [start_time, stop_time])
+        self.qb.add_clause("outgroup", outgroup, [])
 
-        try:
-            self.datacursor.execute(sql, params)
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_CANCEL)
-        except psycopg2.OperationalError:
-            self.datacursor = None
-            yield (None, None, None, DB_QUERY_RETRY) 
-        
+        for label, streams in labels.iteritems():
 
-        fetched = self._query_data_generator()
-        for row, cancelled in fetched:
-            yield (row, tscol, binsize, cancelled)
+            # Make sure we have a usable cursor
+            self._reset_cursor()
+            if self.datacursor == None:
+                return
+            
+            self._generate_from(table, label, streams, start_time, stop_time)
+            order = ["outsel", "innersel", "activestreams", "activejoin", 
+                    "union", "joincondition", "wheretime", "outselend",
+                    "outgroup"]
+            query, params = self.qb.create_query(order)
+           
+            try:
+                self.datacursor.execute(query, params)
+            except psycopg2.extensions.QueryCanceledError:
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
+            except psycopg2.OperationalError:
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_RETRY) 
+            except psycopg2.ProgrammingError as e:
+                # XXX Band-aid solution until new DBSelector is deployed
+                # Will at least keep NNTSC going when an old ampy talks to
+                # a NNTSC that has a completely different stream mapping.
+                log(e)
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
+            
+
+            fetched = self._query_data_generator()
+            for row, cancelled in fetched:
+                yield (row, tscol, binsize, cancelled)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -580,87 +598,75 @@ class DBSelector:
 
 
         # Make sure we only query for columns that are in the data table
-        selectcols = self._sanitise_columns(columns, selectcols)
+        if table == "data_amp_traceroute":
+            selectcols = amp_traceroute.sanitise_columns(selectcols)
+        else:
+            selectcols = self._sanitise_columns(columns, selectcols)
 
         # XXX for now, lets try to munge graph types that give a list of
         # stream ids into the label dictionary format that we want
         assert(type(labels) is dict)
 
-        # TODO cast to a set to make unique entries?
-        all_streams = reduce(lambda x, y: x+y, labels.values())
-
         # These columns are important so include them regardless
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
+        if 'stream_id' not in selectcols:
+            selectcols.append('stream_id')
         if 'label' not in selectcols:
             selectcols.append('label')
 
-        params = [start_time, stop_time] + all_streams + [start_time, stop_time]
-
-        for resultrow in self._generic_select(table, labels, params,
-                selectcols, None, 'timestamp', 0):
-            yield resultrow
-
-
-    def _generic_select(self, table, labels, params, selcols, groupcols,
-            tscol, binsize):
-        """ Generator function that constructs and executes the SQL query
-            required for both select_data and select_aggregated_data.
-        """
-
-        # Make sure our datacursor is usable
-        self._reset_cursor()
-        if self.datacursor == None:
-            return
+        self.qb.reset()
+        order = []
 
         selclause = "SELECT "
-        for i in range(0, len(selcols)):
-            selclause += selcols[i]
-            # rename stream_id to label so it matches the results if we are
-            # querying and aggregating across many stream ids
-            if selcols[i] == "stream_id":
-                selclause += " AS label"
+        for i in range(0, len(selectcols)):
+            selclause += selectcols[i]
 
-            if i != len(selcols) - 1:
+            if i != len(selectcols) - 1:
                 selclause += ", "
 
-        from_sql, from_params =  self._generate_from(table, labels)
-        fromclause = " FROM %s " % from_sql
-        whereclause = self._generate_where()
+        self.qb.add_clause("select", selclause, [])
 
-        # Form the "GROUP BY" section of our query (if asking
-        # for aggregated data)
-        if groupcols == None or len(groupcols) == 0:
-            groupclause = ""
-        else:
-            groupclause = " GROUP BY "
-            for i in range(0, len(groupcols)):
-                groupclause += groupcols[i]
-                if i != len(groupcols) - 1:
-                    groupclause += ", "
+        self._generate_where(start_time, stop_time)
 
         # Order the results both chronologically and by stream id
-        orderclause = " ORDER BY label, %s " % (tscol)
+        orderclause = " ORDER BY label, timestamp " 
+        self.qb.add_clause("order", orderclause, [])
 
-        sql = selclause + fromclause + whereclause + groupclause \
-                + orderclause
-        params = tuple(from_params + params)
-        self.datacursor.execute(sql, params)
+        for label, streams in labels.iteritems():
+            # Make sure our datacursor is usable
+            self._reset_cursor()
+            if self.datacursor == None:
+                return
+            
+            self._generate_from(table, label, streams, start_time, stop_time)
+            order = ["select", "activestreams", "activejoin", "union",
+                    "joincondition", "wheretime", "order"]
+            sql, params = self.qb.create_query(order)
 
-        fetched = self._query_data_generator()
-        for row, cancelled in fetched:
-            yield (row, tscol, binsize, cancelled)
+            try:
+                self.datacursor.execute(sql, params)
+            except psycopg2.extensions.QueryCanceledError:
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
+            except psycopg2.OperationalError:
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_RETRY) 
+            
+            fetched = self._query_data_generator()
+            for row, cancelled in fetched:
+                yield (row, "timestamp", 0, cancelled)
 
 
-    def _generate_label_case(self, labels):
+    def _generate_label_case(self, label, stream_ids):
         """ Forms a CASE statement for an SQL query that converts all stream
             ids into the label to which they belong
         """
         case = "CASE"
         caseparams = []
-        for label, stream_ids in labels.iteritems():
-            #case += " WHEN stream_id in (%s) THEN '%s'" % (
-                #",".join(str(x) for x in stream_ids), label)
+
+        if len(stream_ids) > 0:
             case += " WHEN id in (%s)" % (
                 ",".join(["%s"] * len(stream_ids)))
             case += " THEN %s"
@@ -668,7 +674,24 @@ class DBSelector:
             caseparams += stream_ids
             caseparams.append(label)
         case += " END"
-        return case, caseparams
+        self.qb.add_clause("caselabel", case, caseparams)
+
+
+    def _generate_union(self, basetable, streams):
+
+        unionparams = []
+        sql = "("
+
+        for i in range(0, len(streams)):
+            unionparams.append(streams[i])
+            sql += "SELECT * FROM %s_" % (basetable)
+            sql += "%s"     # stream id will go here
+
+            if i != len(streams) - 1:
+                sql += " UNION ALL "
+
+        sql += ") AS dataunion"
+        self.qb.add_clause("union", sql, unionparams)
 
 
     # It looks like restricting the number of stream ids that are checked for
@@ -678,32 +701,65 @@ class DBSelector:
     # TODO this needs to be tidied up, returning lists of arguments back
     # through multiple levels of function calls doesn't feel very nice, and
     # anyway, the whole way sql query parameters are done needs to be reworked.
-    def _generate_from(self, table, labels):
+    def _generate_from(self, table, label, streams, start, end):
         """ Forms a FROM clause for an SQL query that encompasses all
             streams in the provided list that fit within a given time period.
         """
+        uniquestreams = {}
+
+        for s in streams:
+            if s not in uniquestreams:
+                uniquestreams[s] = 0
+
+        
+        
         # build the case statement that will label our stream ids
-        case, caseparams = self._generate_label_case(labels)
-        count = reduce(lambda x, y: x+len(y), labels.values(), 0)
+        self._generate_label_case(label, streams)
 
         # get all stream ids that are active in the period
-        sql = "(SELECT id, %s as label FROM streams " % case
-        sql += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
+        caseparams = []
+        active = "FROM ((SELECT id, CASE "
+        
+        if len(streams) > 0:
+            active += " WHEN id in (%s)" % (
+                ",".join(["%s"] * len(streams)))
+            active += " THEN %s"
 
-        assert(count > 0)
-        sql += " AND id IN ("
+            caseparams += streams
+            caseparams.append(label)
+        active += " END as label FROM streams "
+        
+        active += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
+        caseparams += [start, end]
+
+        active += " AND id in ("
+        count = len(uniquestreams)
         for i in range(0, count):
-            sql += "%s"
+            active += "%s"
             if i != count - 1:
-                sql += ", "
-        # join the active streams with the appropriate data table
-        sql += ")) AS activestreams INNER JOIN %s ON " % table
-        sql += "%s.stream_id = activestreams.id" % table
-        return sql, caseparams
+                active += ", "
+        active += ")) AS activestreams"
+        caseparams += uniquestreams.keys()
 
-    def _generate_where(self):
+        self.qb.add_clause("activestreams", active, caseparams)
+        self.qb.add_clause("activejoin", "INNER JOIN", [])
+
+        joincond = "ON dataunion.stream_id = activestreams.id)"
+        self.qb.add_clause("joincondition", joincond, [])
+
+
+        if table == "data_amp_traceroute":
+            amp_traceroute.generate_union(self.qb, table, uniquestreams.keys())
+        else:
+            self._generate_union(table, uniquestreams.keys())
+
+
+    def _generate_where(self, start, end):
         """ Forms a WHERE clause for an SQL query based on a time period """
-        return " WHERE timestamp >= %s AND timestamp <= %s "
+       
+        sql = " WHERE timestamp >= %s AND timestamp <= %s "
+        self.qb.add_clause("wheretime", sql, [start, end])
+        return "wheretime" 
 
     def _get_data_table(self, col):
         """ Finds the data table for a given collection
@@ -774,89 +830,61 @@ class DBSelector:
         # which would be very bad.
 
         sanitised = []
-        for cn in selcols:
+
+        for i in range(0, len(selcols)):
+            cn = selcols[i]
+            
             if cn in columns:
                 sanitised.append(cn)
         return sanitised
 
-    def _apply_aggregation(self, selectors, aggregator):
+    def _apply_aggregation(self, aggregators):
 
-        """ Given a list of columns and a list of aggregation functions
-            to apply to those columns, produces a list of SQL AS clauses
-            describing how to apply the appropriate aggregation to each
-            column.
-
-            Returns a tuple with 2 items:
-             1. The list of aggregations as SQL AS clauses, e.g.
-                "avg(foo) AS foo_avg"
-             2. The list of aggregation functions being applied to
-                each column.
-
-            Parameters:
-                selectors -- the list of columns to apply aggregation to
-                aggregator -- the aggregation function(s) to apply. This may
-                              be a string if one aggregation function is to
-                              be applied to all columns. Otherwise, it should
-                              be a list of strings.
-
-            See in-code comment for a more detailed description of how
-            'aggregator' may be specified.
-        """
-
-        # 'aggregator' can take many forms:
-        #    It can be a string (in which case, the aggregation function will
-        #    be applied to all of the aggcols).
-        #    It can be a list with one string in it (same result as above).
-        #    It can be a list with multiple strings. In this case, there must
-        #    be one entry in the aggregator list for every entry in the
-        #    aggcols list -- the aggregator in position 0 will be applied to
-        #    the column in position 0, etc.
-
-        if type(aggregator) is str:
-            # Only one aggregator, use it for all columns
-            aggfuncs = [aggregator] * len(selectors)
-        elif len(aggregator) == 1:
-            aggfuncs = aggregator * len(selectors)
-        else:
-            aggfuncs = []
-            for agg in aggregator:
-                aggfuncs.append(agg)
-
-        # Ensure we have one aggregator per column
-        if None in aggfuncs or len(aggfuncs) != len(selectors):
-            return [], []
-
-        index = 0
         rename = False
         aggcols = []
+
+        columns = [k[0] for k in aggregators]
 
         # If we have duplicates in the select column list, we'll need
         # to rename them to differentiate them based on the aggregation
         # function applied to them
-        if len(set(selectors)) < len(selectors):
+        if len(set(columns)) < len(columns):
             rename = True
 
-        for colname in selectors:
+        for colname, func in aggregators:
             labelstr = colname
             if rename:
-                labelstr += "_" + aggfuncs[index]
+                labelstr += "_" + func
 
             # this isn't the greatest, but we have to treat this one different
-            if aggfuncs[index] == "most_array":
+            if func == "most_array":
                 colclause = "string_to_array(" + \
                     "most(array_to_string(%s,',')),',') AS %s" % (
                         colname, labelstr)
             else:
                 colclause = "%s(%s) AS %s" % (
-                        aggfuncs[index], colname, labelstr)
+                        func, colname, labelstr)
             aggcols.append(colclause)
-            index += 1
 
-        return aggcols, aggfuncs
+        return aggcols
+    
+    def _filter_aggregation_columns(self, table, aggcols):
+        keys = [k[0] for k in aggcols]
+        
+        if table == "data_amp_traceroute":
+            keys = amp_traceroute.sanitise_columns(keys)
+
+        filtered = []
+        for k,v in aggcols:
+            if k not in keys:
+                continue
+            filtered.append((k,v))
+
+        return filtered
+      
 
     def select_percentile_data(self, col, labels, ntilecols, othercols,
-            start_time = None, stop_time = None, binsize=0,
-            ntile_aggregator = "avg", other_aggregator = "avg"):
+            start_time = None, stop_time = None, binsize=0):
         """ Queries the database for time series data, splits the time
             series into bins and calculates the percentiles for the data
             within each bin.
@@ -968,11 +996,6 @@ class DBSelector:
         if type(binsize) is not int:
             return
 
-        # Make sure we have a usable cursor
-        self._reset_cursor()
-        if self.datacursor == None:
-            return
-
         # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())
@@ -985,9 +1008,6 @@ class DBSelector:
 
         assert(type(labels) is dict)
 
-        # TODO cast to a set to make unique entries?
-        all_streams = reduce(lambda x, y: x+y, labels.values())
-
         # Find the data table and make sure we are only querying for
         # valid columns
         try:
@@ -996,38 +1016,48 @@ class DBSelector:
             yield (None, None, None, DB_QUERY_CANCEL)
         except NNTSCDatabaseDisconnect as e:
             yield (None, None, None, DB_QUERY_RETRY)
-            
         
-        ntilecols = self._sanitise_columns(columns, ntilecols)
-        othercols = self._sanitise_columns(columns, othercols)
+        ntilecols = self._filter_aggregation_columns(table, ntilecols)
+        othercols = self._filter_aggregation_columns(table, othercols)
+        
 
         # Convert our column and aggregator lists into useful bits of SQL
-        labeledntilecols, ntileaggfuncs = \
-                self._apply_aggregation(ntilecols, ntile_aggregator)
-        labeledothercols, otheraggfuncs = \
-                self._apply_aggregation(othercols, other_aggregator)
+        labeledntilecols = self._apply_aggregation(ntilecols)
+        labeledothercols = self._apply_aggregation(othercols)
+
+        self.qb.reset()
 
         # Constructing the innermost SELECT query, which lists the ntile for
         # each measurement
 
-        sql_ntile = "SELECT label, timestamp, "
-        sql_ntile += "timestamp - (timestamp %% %s) AS binstart, "
+        innersel =  "SELECT label, timestamp, "
+        innersel += "timestamp - (timestamp %% %s) AS binstart, "
 
-        initcols = ntilecols + othercols
-        for i in range(0, len(initcols)):
-            sql_ntile += initcols[i]
-            sql_ntile += ", "
+        selected = []
+        for col, agg in ntilecols:
+            if col in selected:
+                continue
+            innersel += col
+            innersel += ", "
+            selected.append(col)
+        for col, agg in othercols:
+            if col in selected:
+                continue
+            innersel += col
+            innersel += ", "
+            selected.append(col)
 
         # XXX rename ntile to something unique if we support multiple
         # percentile columns
-        sql_ntile += "ntile(20) OVER ( PARTITION BY "
-        sql_ntile += "timestamp - (timestamp %%%% %d), label" % (binsize)
-        sql_ntile += " ORDER BY %s )" % (ntilecols[0])
+        innersel += "ntile(20) OVER ( PARTITION BY "
+        innersel += "timestamp - (timestamp %% %s), label"
+        innersel += " ORDER BY %s )" % (ntilecols[0][0])
 
-        from_sql, from_params = self._generate_from(table, labels)
-        sql_ntile += " FROM %s " % from_sql
-        sql_ntile += self._generate_where()
-        sql_ntile += " ORDER BY binstart "
+        self.qb.add_clause("ntilesel", innersel, [binsize, binsize])
+
+        self._generate_where(start_time, stop_time)
+        
+        self.qb.add_clause("ntileorder", " ORDER BY binstart ", [])
 
         # Constructing the middle SELECT query, which will aggregate across
         # each ntile to find the average value within each ntile
@@ -1038,23 +1068,28 @@ class DBSelector:
         for l in labeledothercols:
             sql_agg += l + ", "
 
-        sql_agg += "binstart FROM ( %s ) AS ntiles" % (sql_ntile)
-        sql_agg += " GROUP BY label, binstart, ntile ORDER BY binstart, "
+        sql_agg += "binstart FROM ("
+        
+        self.qb.add_clause("aggsel", sql_agg, [])
+        
+        agggroup = " ) AS ntiles GROUP BY label, binstart, ntile"
+        agggroup += " ORDER BY binstart, "
 
         # Extracting the labels for the ntile columns for the ORDER BY clause
         for i in range(0, len(labeledntilecols)):
             labelsplit = labeledntilecols[i].split("AS")
             assert(len(labelsplit) == 2)
 
-            sql_agg += labelsplit[1].strip()
+            agggroup += labelsplit[1].strip()
             if i != len(labeledntilecols) - 1:
-                sql_agg += ", "
+                agggroup += ", "
+        
+        self.qb.add_clause("agggroup", agggroup, [])
 
         # Finally, construct the outermost SELECT which will collapse the
         # ntiles into an array so we get one row per bin with all of the
         # ntiles in a single "values" column
-        qcols = ["timestamp", "binstart", "label"]
-        sql = "SELECT label, max(recent) AS timestamp, "
+        outersel = "SELECT label, max(recent) AS timestamp, "
 
         # Again, horrible label splitting so that we use the right column
         # names
@@ -1068,30 +1103,54 @@ class DBSelector:
             # we have no data.
 
             # XXX Need unique names if we ever support mulitple ntiles
-            sql += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ','), ','), ARRAY[]::text[]) AS values, " % (labelsplit[1].strip())
-            qcols.append("values")
+            outersel += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ',' ORDER BY %s), ','), ARRAY[]::text[]) AS values, " % \
+                    (labelsplit[1].strip(), labelsplit[1].strip())
 
         for i in range(0, len(labeledothercols)):
             labelsplit = labeledothercols[i].split("AS")
+            aggregator = labelsplit[0].split("(")[0]
 
-            assert(len(labelsplit) == 2)
-            sql += "%s(%s) AS %s, " % (otheraggfuncs[i], \
-                    labelsplit[1].strip(), othercols[i])
-            qcols.append(othercols[i])
+            outersel += "%s(%s) AS %s," % (aggregator,labelsplit[1].strip(), \
+                    labelsplit[1].strip())
+            #outersel += labeledothercols[i] + ","
+
+        outersel += "binstart FROM ( "
+
+        self.qb.add_clause("outersel", outersel, [])
 
         # make sure the outer query is sorted by stream_id then binsize, so
         # that we get all the time sorted data for each stream_id in turn
-        sql += "binstart FROM (%s) AS agg GROUP BY binstart, label ORDER BY label, binstart" % (sql_agg)
+        outergroup = " ) AS agg GROUP BY binstart, label "
+        outergroup += "ORDER BY label, binstart"
+        self.qb.add_clause("outergroup", outergroup, [])
 
+        for label, streams in labels.iteritems():
+            # Make sure we have a usable cursor
+            self._reset_cursor()
+            if self.datacursor == None:
+                return
 
-        # Execute our query!
-        params = tuple([binsize] + from_params + [start_time, stop_time] +
-                all_streams + [start_time, stop_time])
-        self.datacursor.execute(sql, params)
+            self._generate_from(table, label, streams, start_time, stop_time)
 
-        fetched = self._query_data_generator()
-        for row, cancelled in fetched:
-            yield (row, "binstart", binsize, cancelled)
+            order = ["outersel", "aggsel", "ntilesel", "activestreams",
+                    "activejoin", "union", "joincondition", "wheretime",
+                    "ntileorder", "agggroup", "outergroup"] 
+
+            query, params = self.qb.create_query(order)
+
+            try:
+                self.datacursor.execute(query, params)
+            except psycopg2.extensions.QueryCanceledError:
+                self.conn.rollback()
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_CANCEL)
+            except psycopg2.OperationalError:
+                self.datacursor = None
+                yield (None, None, None, DB_QUERY_RETRY) 
+
+            fetched = self._query_data_generator()
+            for row, cancelled in fetched:
+                yield (row, "binstart", binsize, cancelled)
 
 
     # This generator is called by a generator function one level up, but

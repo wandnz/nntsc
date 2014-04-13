@@ -20,62 +20,42 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean, BigInteger
-from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError,\
-        DataError, SQLAlchemyError
-from sqlalchemy.dialects import postgresql
 import libnntscclient.logger as logger
-from libnntsc.partition import PartitionedTable
-from libnntsc.database import DB_NO_ERROR, DB_DATA_ERROR, DB_GENERIC_ERROR
 import sys, string
+from libnntsc.dberrorcodes import *
 
 STREAM_TABLE_NAME = "streams_lpi_bytes"
 DATA_TABLE_NAME = "data_lpi_bytes"
 
-partitions = None
 lpi_bytes_streams = {}
 
 def stream_table(db):
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+    streamcols = [ \
+        {"name":"source", "type":"varchar", "null":False},
+        {"name":"user", "type":"varchar", "null":False},
+        {"name":"dir", "type":"varchar", "null":False},
+        {"name":"freq", "type":"integer", "null":False},
+        {"name":"protocol", "type":"varchar", "null":False},
+    ]
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        Column('source', String, nullable=False),
-        Column('user', String, nullable=False),
-        Column('dir', String, nullable=False),
-        Column('freq', Integer, nullable=False),
-        Column('protocol', String, nullable=False),
-        UniqueConstraint('source', 'user', 'dir', 'freq', 'protocol'),
-        useexisting=True
-    )
+    uniqcols = ['source', 'user', 'dir', 'freq', 'protocol']
 
-    Index('index_lpi_bytes_source', st.c.source)
-    Index('index_lpi_bytes_user', st.c.user)
-    Index('index_lpi_bytes_dir', st.c.dir)
-    Index('index_lpi_bytes_protocol', st.c.protocol)
+    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
 
+    if err != DB_NO_ERROR:
+        return None
     return STREAM_TABLE_NAME
 
 def data_table(db):
 
-    if DATA_TABLE_NAME in db.metadata.tables:
-        return DATA_TABLE_NAME
-    dt = Table(DATA_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                nullable = False),
-        Column('timestamp', Integer, nullable=False),
-        Column('bytes', BigInteger),
-        useexisting=True
-    )
+    datacols = [ \
+        {"name":"bytes", "type":"bigint"}
+    ]
 
-    #Index('index_lpi_bytes_stream_id', dt.c.stream_id)
-    #Index('index_lpi_bytes_timestamp', dt.c.timestamp)
-
+    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
+    if err != DB_NO_ERROR:
+        return None
     return DATA_TABLE_NAME
 
 
@@ -107,18 +87,11 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
     props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 
             'protocol':proto}
 
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "lpi", "bytes", namestr,
-            ts, props)
+    return db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+            "lpi", "bytes", namestr, ts, props)
 
 
 def insert_data(db, exp, stream_id, ts, value):
-    global partitions
-
-    if partitions == None:
-        partitions = PartitionedTable(db, DATA_TABLE_NAME, 60 * 60 * 24 * 7, ["timestamp", "stream_id"])
-
-    partitions.update(ts)
-
     result = {"bytes": value}
 
     return db.insert_data(exp, DATA_TABLE_NAME, "lpi_bytes", stream_id, ts, result)
