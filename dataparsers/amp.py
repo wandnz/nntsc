@@ -34,8 +34,12 @@ import logging
 
 import libnntscclient.logger as logger
 
+COMMIT_THRESH=50
+
 class AmpModule:
     def __init__(self, tests, nntsc_config, expqueue, exchange):
+
+        self.processed = 0
 
         logging.basicConfig()
         self.dbconf = get_nntsc_db_config(nntsc_config)
@@ -151,13 +155,17 @@ class AmpModule:
 
                 # Inserts were successful, commit data and update error code
                 if code == DB_NO_ERROR:
-                    code = self.db.commit_data()
+                    self.processed += 1
+                    if self.processed >= COMMIT_THRESH:
+                        code = self.db.commit_data()
 
                 if code == DB_NO_ERROR:
                     if test in self.collections:
                         self.exporter.publishPush(self.collections[test], \
                                 properties.timestamp)
-                    channel.basic_ack(delivery_tag = method.delivery_tag)
+                    if self.processed >= COMMIT_THRESH:
+                        channel.basic_ack(method.delivery_tag, True)
+                        self.processed = 0
                     break
                 
                 if code == DB_OPERATIONAL_ERROR:
@@ -211,7 +219,7 @@ class AmpModule:
 
         logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
         self.source.connect()
-        self.source.configure_consumer(self.process_data)
+        self.source.configure_consumer(self.process_data, COMMIT_THRESH)
 
         self.source.run_consumer()
         logger.log("AMP: Closed connection to RabbitMQ")

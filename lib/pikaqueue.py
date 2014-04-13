@@ -94,8 +94,8 @@ class PikaConsumer(PikaBasic):
         self._queue = None
         self._queuename = queuename
 
-    def configure_consumer(self, callback):
-        self._channel.basic_qos(prefetch_count=1)
+    def configure_consumer(self, callback, prefetch=1):
+        self._channel.basic_qos(prefetch_count=prefetch)
         self._channel.basic_consume(callback, queue=self._queuename)
 
     def run_consumer(self):
