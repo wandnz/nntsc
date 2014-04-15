@@ -141,8 +141,17 @@ class NNTSCCursor(object):
         except KeyboardInterrupt:
             return DB_INTERRUPTED
         except psycopg2.Error as e:
+            # Some disconnect cases seem to end up here :/
+            if "server closed the connection unexpectedly" in e.str():
+                log("Database appears to have disappeared, fell through to catch-all error case -- reconnecting")
+                self.reconnect()
+                return DB_OPERATIONAL_ERROR
+
             log(e.pgerror)
-            self.conn.rollback()
+            try:
+                self.conn.rollback()
+            except InterfaceError as e:
+                log(e)
             return DB_GENERIC_ERROR
     
         return DB_NO_ERROR
@@ -172,6 +181,11 @@ class NNTSCCursor(object):
         except KeyboardInterrupt:
             return DB_INTERRUPTED
         except psycopg2.Error as e:
+            # Some disconnect cases seem to end up here :/
+            if "server closed the connection unexpectedly" in e.str():
+                log("Database appears to have disappeared, fell through to catch-all error case -- reconnecting")
+                self.reconnect()
+                return DB_OPERATIONAL_ERROR
             log(e.pgerror)
             return DB_GENERIC_ERROR
     
