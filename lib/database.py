@@ -92,8 +92,12 @@ class NNTSCCursor(object):
     def createcursor(self):
                 
         try:
-            self.cursor = self.conn.cursor(self.cursorname,
-                    cursor_factory=psycopg2.extras.DictCursor)
+            if self.cursorname is not None:
+                self.cursor = self.conn.cursor(self.cursorname,
+                        cursor_factory=psycopg2.extras.DictCursor)
+            else:
+                self.cursor = self.conn.cursor(
+                        cursor_factory=psycopg2.extras.DictCursor)
         except psycopg2.OperationalError as e:
             log("Database disconnect while resetting cursor")
             self.cursor = None
