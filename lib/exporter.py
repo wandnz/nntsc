@@ -32,7 +32,8 @@ from libnntsc.dbselect import DBSelector
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
-from libnntsc.pikaqueue import initExportConsumer
+from libnntsc.pikaqueue import initExportConsumer, PIKA_CONSUMER_HALT, \
+        PIKA_CONSUMER_RETRY
 from libnntsc.dberrorcodes import *
 
 # There are 4 classes defined in this file that form a hierarchy for
@@ -1407,12 +1408,18 @@ class NNTSCExporter:
         if self.livequeue is not None:
          
             # Prepare our export queue consumer
-            for s in self.sources:
-                self.livequeue.bind_queue(s)
-            self.livequeue.configure_consumer(self.receive_source)
+            while 1:
+                for s in self.sources:
+                    self.livequeue.bind_queue(s)
+                self.livequeue.configure_consumer(self.receive_source)
 
-            # Start reading from the queue
-            self.livequeue.run_consumer()
+                # Start reading from the queue
+                retval = self.livequeue.run_consumer()
+                if retval == PIKA_CONSUMER_HALT:
+                    break
+
+                # Reconnect if we are going to be retrying
+                self.livequeue.connect()
         else:
             while 1:
                 try:

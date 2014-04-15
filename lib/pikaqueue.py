@@ -5,6 +5,18 @@ import libnntscclient.logger as logger
 from libnntsc.configurator import get_nntsc_config
 import logging
 
+PIKA_CONSUMER_HALT = 0
+PIKA_CONSUMER_RETRY = 1
+
+class PikaNNTSCException(Exception):
+    def __init__(self, retry):
+        self.retry = retry
+    def __str__(self):
+        if self.retry:
+            return "NNTSC Exception encountered while reading Rabbit Queue -- retrying"
+        else:
+            return "NNTSC Exception encountered while reading Rabbit Queue -- halting"
+
 class PikaBasic(object):
     def __init__(self, exchange, host, port, ssl, user, pword):
         self._connection = None
@@ -57,17 +69,32 @@ class PikaPublisher(PikaBasic):
         super(PikaPublisher, self).__init__(exchange, host, port,
                 ssl, user, pword)
         self._pubkey = key
+        self._halted = False
 
     def publish_data(self, data, contenttype, key=None):
 
+        retries = 0
+        maxretries = 5
         if key == None:
             key = self._pubkey
 
-        return self._channel.basic_publish(exchange=self._exchangename, 
-                routing_key=key,
-                body=data,
-                properties=pika.BasicProperties(delivery_mode=2,
-                        content_type=contenttype))
+        if self._halted:
+            return None
+        
+        while retries < maxretries:
+            try:
+                return self._channel.basic_publish(exchange=self._exchangename, 
+                    routing_key=key,
+                    body=data,
+                    properties=pika.BasicProperties(delivery_mode=2,
+                            content_type=contenttype))
+            except pika.ChannelClosed as e:
+                retries += 1
+                self.connect()
+
+        logger.log("Unable to publish message using key %s after %d retries" % (key, retries))
+        self._halted = True    
+        return None
 
     def publishStream(self, colid, colname, streamid, streamprops):
         content = (1, (colid, colname, streamid, streamprops))
@@ -99,16 +126,22 @@ class PikaConsumer(PikaBasic):
         self._channel.basic_consume(callback, queue=self._queuename)
 
     def run_consumer(self):
-        while 1:
-            try:
-                self._channel.start_consuming()
-            except pika.exceptions.ConnectionClosed:
-                self._channel.close()
-                self.connect()
-                continue
-            except Exception as e:
-                self._channel.stop_consuming()
-                break
+        try:
+            self._channel.start_consuming()
+        except PikaNNTSCException as e:
+            logger.log(e)
+            self._channel.close()
+            if e.retry == False:
+                return PIKA_CONSUMER_HALT 
+            return PIKA_CONSUMER_RETRY
+        except pika.exceptions.ConnectionClosed:
+            self._channel.close()
+            return PIKA_CONSUMER_RETRY
+        except Exception as e:
+            self._channel.stop_consuming()
+            return PIKA_CONSUMER_HALT
+
+        return PIKA_CONSUMER_HALT
 
         #self._connection.close()
     

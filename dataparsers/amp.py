@@ -24,7 +24,8 @@ import sys
 
 from libnntsc.database import DBInsert
 from libnntsc.configurator import *
-from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
+from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
+        PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
 import pika
 from ampsave.importer import import_data_functions
 from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns
@@ -169,10 +170,10 @@ class AmpModule:
                     break
                 
                 if code == DB_OPERATIONAL_ERROR:
-                    # Disconnect while inserting data, need to reporcess the
-                    # entire message
+                    # Disconnect while inserting data, need to reprocess the
+                    # entire set of messages
                     logger.log("Database disconnect while processing AMP data")
-                    continue
+                    raise PikaNNTSCException(True)
 
                 elif code == DB_DATA_ERROR:
                     # Data was bad so we couldn't insert into the database.
@@ -184,30 +185,25 @@ class AmpModule:
 
                 elif code == DB_INTERRUPTED:
                     logger.log("Interrupt while processing AMP data")
-                    channel.close()
-                    return            
+                    raise PikaNNTSCException(False)
                 
                 elif code == DB_GENERIC_ERROR:
                     logger.log("Database error while processing AMP data")
-                    channel.close()
-                    return
+                    raise PikaNNTSCException(False)
                 elif code == DB_QUERY_TIMEOUT:
                     logger.log("Database timeout while processing AMP data")
                     continue
                 elif code == DB_CODING_ERROR:
                     logger.log("Bad database code encountered while processing AMP data")
-                    channel.close()
-                    return
+                    raise PikaNNTSCException(False)
                 elif code == DB_DUPLICATE_KEY:
                     logger.log("Duplicate key error while processing AMP data")
-                    channel.close()
-                    return    
+                    raise PikaNNTSCException(False)
             
                 else:
                     logger.log("Unknown error code returned by database: %d" % (code))
                     logger.log("Shutting down AMP module")
-                    channel.close()
-                    return
+                    raise PikaNNTSCException(False)
 
             else:
                 # ignore any messages that don't have user_id set
@@ -218,10 +214,15 @@ class AmpModule:
         """ Run forever, calling the process_data callback for each message """
 
         logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
-        self.source.connect()
-        self.source.configure_consumer(self.process_data, COMMIT_THRESH)
 
-        self.source.run_consumer()
+        while 1:
+            self.source.connect()
+            self.source.configure_consumer(self.process_data, COMMIT_THRESH)
+            
+            retval = self.source.run_consumer()
+            if retval == PIKA_CONSUMER_HALT:
+                break
+
         logger.log("AMP: Closed connection to RabbitMQ")
 
 def run_module(tests, config, key, exchange):
