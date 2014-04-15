@@ -3,6 +3,8 @@ import psycopg2.extras
 from libnntscclient.logger import *
 from libnntsc.parsers import amp_traceroute
 from libnntsc.querybuilder import QueryBuilder
+from libnntsc.database import DatabaseCore, NNTSCCursor
+from libnntsc.dberrorcodes import *
 import time
 
 # Class used for querying the NNTSC database.
@@ -12,79 +14,19 @@ import time
 #  * named cursors allow us to easily deal with large result sets
 #  * documentation that makes sense
 
-DB_QUERY_OK = 0
-DB_QUERY_CANCEL = -1
-DB_QUERY_RETRY = -2
+#DB_QUERY_OK = 0
+#DB_QUERY_CANCEL = -1
+#DB_QUERY_RETRY = -2
 
-class NNTSCDatabaseTimeout(Exception):
-    def __init__(self, secs):
-        self.timeout = secs
-    def __str__(self):
-        return "Database Query timed out after %d secs" % (self.timeout)
-
-class NNTSCDatabaseDisconnect(Exception):
-    def __init__(self):
-        pass
-    def __str__(self):
-        return "Connection to NNTSC Database was lost"
-
-class DBSelector:
-    def __init__(self, uniqueid, dbname, dbuser, dbpass=None, dbhost=None,
+class DBSelector(DatabaseCore):
+    def __init__(self, uniqueid, dbname, dbuser=None, dbpass=None, dbhost=None,
             timeout=0):
+
+        super(DBSelector, self).__init__(dbname, dbuser, dbpass, dbhost, 
+                False, False, timeout)
 
         self.qb = QueryBuilder()
         self.dbselid = uniqueid
-        self.timeout = timeout
-        connstr = "dbname=%s" % (dbname) 
-        if dbuser != "" and dbuser != None:
-            connstr += " user=%s" % (dbuser)
-        if dbpass != "" and dbpass != None:
-            connstr += " password=%s" % (dbpass)
-        if dbhost != "" and dbhost != None:
-            connstr += " host=%s" % (dbhost)
-
-        # Force all queries we make to timeout after 50 seconds so they don't
-        # hang around causing trouble if the user changes page and abandons
-        # the request or similar. Varnish will return an error if the page
-        # doesn't load after 60s, so we don't need to go for longer than that.
-        if timeout != 0:
-            connstr += " options='-c statement_timeout=%d'" % (timeout * 1000.0)
-        
-        #log("Setting DB timeout to %d" % (timeout * 1000.0))
-
-        self.conn = None
-        reconnect = 30
-        while self.conn == None:
-
-            try:
-                self.conn = psycopg2.connect(connstr)
-            except psycopg2.DatabaseError as e:
-                log("DBSelector: Error connecting to database: %s" % e)
-                log("Retrying in %d seconds" % reconnect);
-                self.conn = None
-                self.basiccursor = None
-                self.datacursor = None
-                
-                time.sleep(reconnect)
-                reconnect *= 2
-                if (reconnect > 600):
-                    reconnect = 600;
-
-
-        # The basiccursor is used for all "short" queries that are
-        # unlikely to produce a large result. The full result will be
-        # sent to us and held in memory.
-        #
-        # The main advantage of using a client-side cursor is that
-        # we can re-use it without having to recreate it after each
-        # query.
-        try:
-            self.basiccursor = self.conn.cursor(
-                    cursor_factory=psycopg2.extras.DictCursor)
-        except psycopg2.DatabaseError as e:
-            log("DBSelector: Failed to create basic cursor: %s" % e)
-            self.basiccursor = None
-            return
 
         # The datacursor is used for querying the time series data tables.
         # It is a named server-side cursor which means that the results
@@ -96,74 +38,36 @@ class DBSelector:
         # from the database but in most use cases, the database and the
         # DBSelector are located on the same host so this should not be
         # a major issue.
-        self.datacursor = None
         self.cursorname = "cursor_" + uniqueid
 
-        #log("DBSelector: Successfully created DBSelector %s" % self.dbselid)
+        self.data = NNTSCCursor(self.connstr, False, self.cursorname)
 
-    def _reset_cursor(self):
-        if self.conn == None:
-            return
+    def connect_db(self, retrywait):
+        if self.data.connect(retrywait) == -1:
+            return -1
+        return super(DBSelector, self).connect_db(retrywait)
 
-        # Re-create the datacursor as it seems you can't just re-use a
-        # a named cursor for multiple queries.
-        if self.datacursor:
-            self.datacursor.close()
+    def disconnect(self):
+        self.data.destroy()
 
-        try:
-            self.datacursor = self.conn.cursor(self.cursorname,
-                    cursor_factory=psycopg2.extras.DictCursor)
-        except psycopg2.DatabaseError as e:
-            log("DBSelector: Failed to create data cursor: %s" % e)
-            self.datacursor = None
-            return
+        super(DBSelector, self).disconnect()
 
-    def __del__(self):
-        self.close()
+    def _dataquery(self, query, params=None):
+        while 1:
+            err = self.data.reset()
+            if err == DB_OPERATIONAL_ERROR:
+                continue
 
-    def close(self):
+            err = self.data.executequery(query, params)
+            if err == DB_OPERATIONAL_ERROR:
+                # Retry the query, as we just reconnected
+                continue
+            if err != DB_NO_ERROR:
+                self.data.cursor = None
+            break
 
-        if self.datacursor:
-            self.datacursor.close()
-        if self.basiccursor:
-            self.basiccursor.close()
-        if self.conn:
-            self.conn.close()
-            #log("DBSelector: Closed database connection for %s" % self.dbselid)
-
-        self.basiccursor = None
-        self.datacursor = None
-        self.conn = None
-
-
-    def list_collections(self):
-        """ Fetches all of the collections that are supported by this
-            instance of NNTSC.
-        """
-        if self.basiccursor == None:
-            return []
-
-        collections = []
-
-        try:
-            self.basiccursor.execute("SELECT * from collections")
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
-        
-        while True:
-            row = self.basiccursor.fetchone()
-
-            if row == None:
-                break
-            col = {}
-            for k, v in row.items():
-                col[k] = v
-            collections.append(col)
-        return collections
-
+        return err           
+ 
     def get_collection_schema(self, colid):
         """ Fetches the column names for both the stream and data tables
             for the given collection.
@@ -172,117 +76,37 @@ class DBSelector:
             names from the streams table and the second item is the list
             of column names from the data table.
         """
-        if self.basiccursor == None:
-            return [], []
 
-        try:
-            self.basiccursor.execute(
+        err = self._basicquery(
                 "SELECT streamtable, datatable from collections WHERE id=%s",
                 (colid,))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
+        if err != DB_NO_ERROR:
+            log("Error selecting table names from collections")
+            raise DBQueryException(err)
 
-        tables = self.basiccursor.fetchone()
+        tables = self.basic.cursor.fetchone()
 
         # Parameterised queries don't work on the FROM clause -- our table
         # names *shouldn't* be an SQL injection risk, right?? XXX
-        try:
-            self.basiccursor.execute(
+        err = self._basicquery(
                     "SELECT * from %s LIMIT 1" % (tables['streamtable']))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
+        if err != DB_NO_ERROR:
+            log("Error selecting single row from stream table")
+            raise DBQueryException(err)
 
-        streamcolnames = [cn[0] for cn in self.basiccursor.description]
+        streamcolnames = [cn[0] for cn in self.basic.cursor.description]
 
-        try:
-            self.basiccursor.execute(
+        err = self._basicquery(
                     "SELECT * from %s LIMIT 1" % (tables['datatable']))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
+        if err != DB_NO_ERROR:
+            log("Error selecting single row from data table")
+            raise DBQueryException(err)
 
-        datacolnames = [cn[0] for cn in self.basiccursor.description]
+        datacolnames = [cn[0] for cn in self.basic.cursor.description]
         return streamcolnames, datacolnames
 
-    def select_streams_by_module(self, mod):
-        """ Fetches all streams that belong to collections that have a common
-            parent module, e.g. amp, lpi or rrd.
-
-            For example, passing "amp" into this function would give you
-            all amp-icmp and amp-traceroute streams.
-
-            Note that if you want the streams for a single collection, you
-            should use select_streams_by_collection.
-
-            Returns a list of streams, where each stream is a dictionary
-            describing all of the stream parameters.
-        """
-
-        # Find all streams for a given parent collection, e.g. amp, lpi
-        #
-        # For each stream:
-        #   Form a dictionary containing all the relevant information about
-        #   that stream (this will require info from both the combined streams
-        #   table and the module/subtype specific table
-        # Put all the dictionaries into a list
-
-        # Find the collections matching this module
-        if self.basiccursor == None:
-            return []
-        try:
-            self.basiccursor.execute(
-                    "SELECT * from collections where module=%s", (mod,))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
-
-        streamtables = {}
-
-        cols = self.basiccursor.fetchall()
-
-        for c in cols:
-            streamtables[c["id"]] = (c["streamtable"], c["modsubtype"])
-
-        streams = []
-        for cid, (tname, sub) in streamtables.items():
-            sql = """ SELECT * FROM streams, %s WHERE streams.collection=%s
-                      AND streams.id = %s.stream_id """ % (tname, "%s", tname)
-            try:
-                self.basiccursor.execute(sql, (cid,))
-            except psycopg2.extensions.QueryCanceledError:
-                self.conn.rollback()
-                raise NNTSCDatabaseTimeout(self.timeout)
-            except psycopg2.OperationalError:
-                raise NNTSCDatabaseDisconnect()
-
-
-            while True:
-                row = self.basiccursor.fetchone()
-                if row == None:
-                    break
-                row_dict = {"modsubtype":sub}
-                for k, v in row.items():
-                    if k == "id":
-                        continue
-                    row_dict[k] = v
-                streams.append(row_dict)
-        return streams
-
     def select_streams_by_collection(self, coll, minid):
-        """ Fetches all streams that belong to a given collection.
-
-            For example, passing "amp-icmp" into this function would give you
-            all amp-icmp streams.
+        """ Fetches all streams that belong to a given collection id.
 
             Only streams with an id number greater than 'minid' will be
             returned. This is useful for getting all of the new streams that
@@ -294,36 +118,29 @@ class DBSelector:
             Returns a list of streams, where each stream is a dictionary
             describing all of the stream parameters.
         """
-        if self.basiccursor == None:
-            return []
-        try:
-            self.basiccursor.execute(
+        err = self._basicquery(
                     "SELECT * from collections where id=%s", (coll,))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
-       
-        assert(self.basiccursor.rowcount == 1)
 
-        coldata = self.basiccursor.fetchone()
+        if err != DB_NO_ERROR:
+            log("Failed to query database for collection id %d" % (coll))
+            raise DBQueryException(err)
+       
+        assert(self.basic.cursor.rowcount == 1)
+
+        coldata = self.basic.cursor.fetchone()
 
         tname = coldata['streamtable']
         sql = """SELECT * FROM streams, %s WHERE streams.id = %s.stream_id
                  AND streams.id > %s""" % (tname, tname, "%s")
-        
-        try:
-            self.basiccursor.execute(sql, (minid,))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
-
+      
+        err = self._basicquery(sql, (minid,))
+        if err != DB_NO_ERROR:
+            log("Failed to query streams for collection id %d" % (coll))
+            raise DBQueryException(err)
+              
         selected = []
         while True:
-            row = self.basiccursor.fetchone()
+            row = self.basic.cursor.fetchone()
             if row == None:
                 break
             stream_dict = {}
@@ -335,10 +152,8 @@ class DBSelector:
         return selected
 
     def select_active_streams_by_collection(self, coll, lastactivity):
-        """ Fetches all recently active streams belonging to a given collection.
-
-            For example, passing "amp-icmp" into this function would give you
-            all amp-icmp streams.
+        """ Fetches all recently active streams belonging to a given collection
+            id.
 
             Only streams with data after the lastactivity timestamp will be
             returned. To get all streams for a collection, set lastactivity
@@ -346,21 +161,17 @@ class DBSelector:
 
             Returns a list of stream ids
         """
-        if self.basiccursor == None:
-            return []
 
         sql = "SELECT id FROM streams WHERE collection=%s AND lasttimestamp>%s"
-        try:
-            self.basiccursor.execute(sql, (coll, lastactivity))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
-
+        err = self._basicquery(sql, (coll, lastactivity))
+        
+        if err != DB_NO_ERROR:
+            log("Failed to query active streams for collection id %d" % (coll))
+            raise DBQueryException(err)
+        
         active = []
         while True:
-            row = self.basiccursor.fetchone()
+            row = self.basic.cursor.fetchone()
             if row == None:
                 break
             for stream_id in row.values():
@@ -434,11 +245,8 @@ class DBSelector:
         # valid columns
         try:
             table, columns = self._get_data_table(col)
-        except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, DB_QUERY_CANCEL)
-        except NNTSCDatabaseDisconnect as e:
-            yield (None, None, None, DB_QUERY_RETRY)
-            
+        except DBQueryException as e:
+            yield(None, None, None, e)
 
         # XXX get rid of stream_id, ideally it wouldnt even get to here
         if "stream_id" in groupcols:
@@ -511,39 +319,22 @@ class DBSelector:
 
         for label, streams in labels.iteritems():
 
-            # Make sure we have a usable cursor
-            self._reset_cursor()
-            if self.datacursor == None:
-                return
-            
             self._generate_from(table, label, streams, start_time, stop_time)
             order = ["outsel", "innersel", "activestreams", "activejoin", 
                     "union", "joincondition", "wheretime", "outselend",
                     "outgroup"]
             query, params = self.qb.create_query(order)
-           
-            try:
-                self.datacursor.execute(query, params)
-            except psycopg2.extensions.QueryCanceledError:
-                self.conn.rollback()
-                self.datacursor = None
-                yield (None, None, None, DB_QUERY_CANCEL)
-            except psycopg2.OperationalError:
-                self.datacursor = None
-                yield (None, None, None, DB_QUERY_RETRY) 
-            except psycopg2.ProgrammingError as e:
-                # XXX Band-aid solution until new DBSelector is deployed
-                # Will at least keep NNTSC going when an old ampy talks to
-                # a NNTSC that has a completely different stream mapping.
-                log(e)
-                self.conn.rollback()
-                self.datacursor = None
-                yield (None, None, None, DB_QUERY_CANCEL)
-            
-
+   
+            err = self._dataquery(query, params)
+            if err != DB_NO_ERROR:
+                yield(None, None, None, DBQueryException(err))
+ 
             fetched = self._query_data_generator()
-            for row, cancelled in fetched:
-                yield (row, tscol, binsize, cancelled)
+            for row, errcode in fetched:
+                if errcode != DB_NO_ERROR:
+                    yield(None, None, None, DBQueryException(errcode))
+                else:
+                    yield (row, tscol, binsize, None)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -591,11 +382,8 @@ class DBSelector:
         # Find the data table for the requested collection
         try:
             table, columns = self._get_data_table(col)
-        except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, DB_QUERY_CANCEL)
-        except NNTSCDatabaseDisconnect as e:
-            yield (None, None, None, DB_QUERY_RETRY)
-
+        except DBQueryException as e:
+            yield(None, None, None, e)
 
         # Make sure we only query for columns that are in the data table
         if table == "data_amp_traceroute":
@@ -634,29 +422,21 @@ class DBSelector:
         self.qb.add_clause("order", orderclause, [])
 
         for label, streams in labels.iteritems():
-            # Make sure our datacursor is usable
-            self._reset_cursor()
-            if self.datacursor == None:
-                return
-            
             self._generate_from(table, label, streams, start_time, stop_time)
             order = ["select", "activestreams", "activejoin", "union",
                     "joincondition", "wheretime", "order"]
             sql, params = self.qb.create_query(order)
 
-            try:
-                self.datacursor.execute(sql, params)
-            except psycopg2.extensions.QueryCanceledError:
-                self.conn.rollback()
-                self.datacursor = None
-                yield (None, None, None, DB_QUERY_CANCEL)
-            except psycopg2.OperationalError:
-                self.datacursor = None
-                yield (None, None, None, DB_QUERY_RETRY) 
-            
+            err = self._dataquery(sql, params)
+            if err != DB_NO_ERROR:
+                yield(None, None, None, DBQueryException(err))
+
             fetched = self._query_data_generator()
-            for row, cancelled in fetched:
-                yield (row, "timestamp", 0, cancelled)
+            for row, errcode in fetched:
+                if errcode != DB_NO_ERROR:
+                    yield(None, None, None, DBQueryException(errcode))
+                else:
+                    yield (row, "timestamp", 0, None)
 
 
     def _generate_label_case(self, label, stream_ids):
@@ -711,8 +491,6 @@ class DBSelector:
             if s not in uniquestreams:
                 uniquestreams[s] = 0
 
-        
-        
         # build the case statement that will label our stream ids
         self._generate_label_case(label, streams)
 
@@ -769,20 +547,15 @@ class DBSelector:
              2. a list of columns present in the table
 
         """
-        if self.basiccursor == None:
-            return None, []
-        try:
-            self.basiccursor.execute(
+        err = self._basicquery(
                     "SELECT * from collections where id=%s", (col,))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
+        if err != DB_NO_ERROR:
+            log("Failed to query for collection id %d" % (col))
+            raise DBQueryException(err)
 
-        assert(self.basiccursor.rowcount == 1)
+        assert(self.basic.cursor.rowcount == 1)
 
-        coldata = self.basiccursor.fetchone()
+        coldata = self.basic.cursor.fetchone()
         tname = coldata['datatable']
         module = coldata['module']
         subtype = coldata['modsubtype']
@@ -792,20 +565,17 @@ class DBSelector:
         # This is the quickest way to get the column names -- don't
         # try querying the data table itself because that could be slow
         # if the table is, for example, a complicated view.
-        try:
-            self.basiccursor.execute(
+        err = self._basicquery(
                 "SELECT * from information_schema.columns WHERE table_name=%s",
                 (tname,))
-        except psycopg2.extensions.QueryCanceledError:
-            self.conn.rollback()
-            raise NNTSCDatabaseTimeout(self.timeout)
-        except psycopg2.OperationalError:
-            raise NNTSCDatabaseDisconnect()
 
+        if err != DB_NO_ERROR:
+            log("Failed to query for data table column names")
+            raise DBQueryException(err)
 
         columns = []
         while True:
-            row = self.basiccursor.fetchone()
+            row = self.basic.cursor.fetchone()
             if row == None:
                 break
 
@@ -882,301 +652,36 @@ class DBSelector:
 
         return filtered
       
-
-    def select_percentile_data(self, col, labels, ntilecols, othercols,
-            start_time = None, stop_time = None, binsize=0):
-        """ Queries the database for time series data, splits the time
-            series into bins and calculates the percentiles for the data
-            within each bin.
-
-            This function is mainly used for converting conventional time
-            series data into a suitable format for display on a
-            smokeping-style graph. The percentiles are used to draw 'smoke'
-            in addition to the median to show variation within the bin.
-
-            "other" is used to describe columns that should be fetched in
-            addition to the percentile columns. The data values for these
-            columns will be aggregated into bins as though they had been
-            fetched using select_aggregated_data, i.e. there will be just
-            one value per bin rather than an array, as with percentile
-            columns.
-
-            Parameters:
-                col -- the id of the collection to query
-                stream_ids -- a list of stream ids to get data for
-                ntilecols -- a list of data columns to fetch as percentiles
-                othercols -- a list of data columns to fetch as aggregated
-                             data
-                start_time -- a timestamp describing the start of the
-                              time period that data is required for. If
-                              None, this is set to 1 day before the stop
-                              time
-                stop_time -- a timestamp describing the end of the time
-                             period that data is required for. If None,
-                             this is set to the current time.
-                binsize -- the size of each time bin. If 0 (the default),
-                           the entire data series will aggregated into a
-                           single summary value.
-                ntile_aggregator -- the aggregator function(s) to be applied
-                                    to the percentile columns
-                other_aggregator -- the aggregator function(s) to be applied
-                                    to the aggregate columns
-
-            At present, we only allow support one column being fetched as
-            percentile data.
-
-            There may be multiple 'other' columns, though. Specifying
-            aggregation functions for them (i.e. the other_aggregator
-            parameter) works exactly the same as it does in
-            select_aggregated_data.
-
-            This function is a generator function and will yield a tuple each
-            time it is iterated over. The tuple contains a row from the result
-            set, the name of the column describing the start of each bin and
-            the binsize.
-
-            Example usage -- get the hourly percentiles of 'value' for streams
-            1, 2 and 3 from collection 1 for a given week:
-
-                for row, tscol, binsize in db.select_percentile_data(1,
-                        [1,2,3], ['value'], [], 1380758400, 1381363200,
-                        60 * 60, "avg", "avg"):
-                    process_row(row)
-        """
-
-        # TODO this SQL is out of date slightly
-        # This is a horrible looking function, but we are trying to construct
-        # a pretty complicated query
-        #
-        # The main use case for this code is to generate "smokeping" style
-        # data from AMP latency measurements. AMP measurements have only one
-        # result but are conducted more frequently than smokeping, so we can
-        # group together nearby measurements to approximate the N pings that
-        # Smokeping does.
-        #
-        # In that case, we're trying to generate a query that looks roughly
-        # like (sub in BINSIZE, DATATABLE, STREAMS, START, END as appropriate):
-        #   SELECT max(recent) AS timestamp,
-        #       binstart,
-        #       array_agg(rtt_avg) AS values,
-        #       avg(loss_avg) AS loss,
-        #       stream_id
-        #   FROM (
-        #       SELECT max(timestamp) AS recent,
-        #           binstart,
-        #           coalesce(avg(rtt), ARRAY[]::text[]) AS rtt_avg,
-        #           avg(loss) AS loss_avg,
-        #           stream_id
-        #       FROM (
-        #           SELECT timestamp,
-        #               stream_id,
-        #               timestamp-timestamp%BINSIZE AS binstart,
-        #               rtt,
-        #               loss,
-        #               ntile(20) OVER (
-        #                   PARTITION BY timestamp-timestamp%BINSIZE, label
-        #                   ORDER BY rtt
-        #               )
-        #           FROM DATATABLE
-        #           WHERE stream_id in STREAMS AND timestamp >= START AND
-        #               timestamp <= END
-        #           ORDER BY binstart
-        #       ) AS ntiles
-        #       GROUP BY binstart, ntile, stream_id ORDER BY binstart, rtt_avg
-        #   ) AS agg
-        #   GROUP BY binstart, stream_id ORDER BY binstart"
-        #
-        # We only support percentiles across a single column at the moment.
-        # If more than one column is in the list, we ignore every one except
-        # the first one.
-        #
-        # You can have multiple supporting columns (othercols) and the
-        # aggregation functions can be something other than 'avg' if desired.
-
-        if type(binsize) is not int:
-            return
-
-        # Set default time boundaries
-        if stop_time == None:
-            stop_time = int(time.time())
-        if start_time == None:
-            start_time = stop_time - (24 * 60 * 60)
-
-        # Let's just limit ourselves to 1 set of percentiles for now, huh
-        if len(ntilecols) != 1:
-            ntilecols = ntilecols[0:1]
-
-        assert(type(labels) is dict)
-
-        # Find the data table and make sure we are only querying for
-        # valid columns
-        try:
-            table, columns = self._get_data_table(col)
-        except NNTSCDatabaseTimeout as e:
-            yield (None, None, None, DB_QUERY_CANCEL)
-        except NNTSCDatabaseDisconnect as e:
-            yield (None, None, None, DB_QUERY_RETRY)
-        
-        ntilecols = self._filter_aggregation_columns(table, ntilecols)
-        othercols = self._filter_aggregation_columns(table, othercols)
-        
-
-        # Convert our column and aggregator lists into useful bits of SQL
-        labeledntilecols = self._apply_aggregation(ntilecols)
-        labeledothercols = self._apply_aggregation(othercols)
-
-        self.qb.reset()
-
-        # Constructing the innermost SELECT query, which lists the ntile for
-        # each measurement
-
-        innersel =  "SELECT label, timestamp, "
-        innersel += "timestamp - (timestamp %% %s) AS binstart, "
-
-        selected = []
-        for col, agg in ntilecols:
-            if col in selected:
-                continue
-            innersel += col
-            innersel += ", "
-            selected.append(col)
-        for col, agg in othercols:
-            if col in selected:
-                continue
-            innersel += col
-            innersel += ", "
-            selected.append(col)
-
-        # XXX rename ntile to something unique if we support multiple
-        # percentile columns
-        innersel += "ntile(20) OVER ( PARTITION BY "
-        innersel += "timestamp - (timestamp %% %s), label"
-        innersel += " ORDER BY %s )" % (ntilecols[0][0])
-
-        self.qb.add_clause("ntilesel", innersel, [binsize, binsize])
-
-        self._generate_where(start_time, stop_time)
-        
-        self.qb.add_clause("ntileorder", " ORDER BY binstart ", [])
-
-        # Constructing the middle SELECT query, which will aggregate across
-        # each ntile to find the average value within each ntile
-        sql_agg = "SELECT label, max(timestamp) AS recent, "
-
-        for l in labeledntilecols:
-            sql_agg += l + ", "
-        for l in labeledothercols:
-            sql_agg += l + ", "
-
-        sql_agg += "binstart FROM ("
-        
-        self.qb.add_clause("aggsel", sql_agg, [])
-        
-        agggroup = " ) AS ntiles GROUP BY label, binstart, ntile"
-        agggroup += " ORDER BY binstart, "
-
-        # Extracting the labels for the ntile columns for the ORDER BY clause
-        for i in range(0, len(labeledntilecols)):
-            labelsplit = labeledntilecols[i].split("AS")
-            assert(len(labelsplit) == 2)
-
-            agggroup += labelsplit[1].strip()
-            if i != len(labeledntilecols) - 1:
-                agggroup += ", "
-        
-        self.qb.add_clause("agggroup", agggroup, [])
-
-        # Finally, construct the outermost SELECT which will collapse the
-        # ntiles into an array so we get one row per bin with all of the
-        # ntiles in a single "values" column
-        outersel = "SELECT label, max(recent) AS timestamp, "
-
-        # Again, horrible label splitting so that we use the right column
-        # names
-        for i in range(0, len(labeledntilecols)):
-            labelsplit = labeledntilecols[i].split("AS")
-
-            # This is nasty -- we often end up with null entries at the end
-            # of our array as part of the ntile process. We can drop these by
-            # casting the array to a string and then back again.
-            # The coalesce will ensure we return an empty array in cases where
-            # we have no data.
-
-            # XXX Need unique names if we ever support mulitple ntiles
-            outersel += "coalesce(string_to_array(string_agg(cast(%s AS TEXT), ',' ORDER BY %s), ','), ARRAY[]::text[]) AS values, " % \
-                    (labelsplit[1].strip(), labelsplit[1].strip())
-
-        for i in range(0, len(labeledothercols)):
-            labelsplit = labeledothercols[i].split("AS")
-            aggregator = labelsplit[0].split("(")[0]
-
-            outersel += "%s(%s) AS %s," % (aggregator,labelsplit[1].strip(), \
-                    labelsplit[1].strip())
-            #outersel += labeledothercols[i] + ","
-
-        outersel += "binstart FROM ( "
-
-        self.qb.add_clause("outersel", outersel, [])
-
-        # make sure the outer query is sorted by stream_id then binsize, so
-        # that we get all the time sorted data for each stream_id in turn
-        outergroup = " ) AS agg GROUP BY binstart, label "
-        outergroup += "ORDER BY label, binstart"
-        self.qb.add_clause("outergroup", outergroup, [])
-
-        for label, streams in labels.iteritems():
-            # Make sure we have a usable cursor
-            self._reset_cursor()
-            if self.datacursor == None:
-                return
-
-            self._generate_from(table, label, streams, start_time, stop_time)
-
-            order = ["outersel", "aggsel", "ntilesel", "activestreams",
-                    "activejoin", "union", "joincondition", "wheretime",
-                    "ntileorder", "agggroup", "outergroup"] 
-
-            query, params = self.qb.create_query(order)
-
-            try:
-                self.datacursor.execute(query, params)
-            except psycopg2.extensions.QueryCanceledError:
-                self.conn.rollback()
-                self.datacursor = None
-                yield (None, None, None, DB_QUERY_CANCEL)
-            except psycopg2.OperationalError:
-                self.datacursor = None
-                yield (None, None, None, DB_QUERY_RETRY) 
-
-            fetched = self._query_data_generator()
-            for row, cancelled in fetched:
-                yield (row, "binstart", binsize, cancelled)
-
-
     # This generator is called by a generator function one level up, but
     # nesting them all seems to work ok
     def _query_data_generator(self):
         while True:
             try:
-                fetched = self.datacursor.fetchmany(100)
+                fetched = self.data.cursor.fetchmany(100)
             except psycopg2.extensions.QueryCanceledError:
-                # The named datacursor is invalidated as soon as the
-                # transaction ends/fails, we don't need to close it (and it
-                # won't allow us to close it). We do have to rollback though
-                # so that the basic cursor will continue to work.
-                self.datacursor = None
-                self.conn.rollback()
-                #info = sql % params
-                #log("DBSelector: Query cancelled")
-                yield None, DB_QUERY_CANCEL 
-                #break
+                yield None, DB_QUERY_TIMEOUT 
             except psycopg2.OperationalError:
-                yield None, DB_QUERY_RETRY
+                yield None, DB_OPERATIONAL_ERROR
+            except psycopg2.ProgrammingError as e:
+                log(e)
+                yield None, DB_CODING_ERROR
+            except psycopg2.IntegrityError as e:
+                # XXX Duplicate key shouldn't be an issue here
+                log(e)
+                yield None, DB_DATA_ERROR
+            except psycopg2.DataError as e:
+                log(e)
+                yield None, DB_DATA_ERROR
+            except KeyboardInterrupt:
+                yield None, DB_INTERRUPTED
+            except psycopg2.Error as e:
+                log(e)
+                yield None, DB_CODING_ERROR
 
             if fetched == []:
                 break
 
             for row in fetched:
-                yield row, DB_QUERY_OK
+                yield row, DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

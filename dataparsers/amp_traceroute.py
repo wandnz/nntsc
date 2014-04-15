@@ -118,24 +118,51 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     props = {"source":source, "destination":dest,
             "packet_size":size, "address": address}
 
-    streamid = db.insert_stream(exp, STREAM_TABLE_NAME, DATA_TABLE_NAME, 
-            "amp", "traceroute", name, timestamp, props)
+    while 1:
+        errorcode = DB_NO_ERROR
+        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
+                "amp", "traceroute", name, timestamp, props)
+        
+        if colid < 0:
+            errorcode = streamid
 
-    if streamid <= 0:
+        if streamid < 0:
+            errorcode = streamid
+
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
+
+        errorcode = db.clone_table("data_amp_traceroute_paths", streamid)
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
+
+        # Ensure our custom foreign key gets perpetuated
+        newtable = "%s_%d" % (DATA_TABLE_NAME, streamid)
+        pathtable = "data_amp_traceroute_paths_%d" % (streamid)
+        errorcode = db.add_foreign_key(newtable, "path_id", pathtable, "path_id")
+        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+            continue
+        if errorcode != DB_NO_ERROR:
+            return errorcode
+        
+        err = db.commit_streams()
+        if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+            continue
+        if err != DB_NO_ERROR:
+            return err
+        break
+
+    if exp == None:
         return streamid
 
-    ret = db.clone_table("data_amp_traceroute_paths", streamid)
-    if ret != DB_NO_ERROR:
-        return ret
-
-    # Ensure our custom foreign key gets perpetuated
-    newtable = "%s_%d" % (DATA_TABLE_NAME, streamid)
-    pathtable = "data_amp_traceroute_paths_%d" % (streamid)
-    err = db.add_foreign_key(newtable, "path_id", pathtable, "path_id")
-
-    if err == DB_NO_ERROR:
-        return streamid
-    return err
+    props['name'] = name
+    exp.publishStream(colid, "amp_traceroute", streamid, props)
+    
+    return streamid
 
 def insert_data(db, exp, stream, ts, result):
     """ Insert data for a single traceroute test into the database """
@@ -172,9 +199,17 @@ def insert_data(db, exp, stream, ts, result):
         else:
             filtered[col["name"]] = None
 
-    return db.insert_data(exp, DATA_TABLE_NAME, "amp_traceroute", stream,
+    err = db.insert_data(DATA_TABLE_NAME, "amp_traceroute", stream,
             ts, filtered, {'hop_rtt':'integer[]'})
 
+    if err != DB_NO_ERROR:
+        return err
+
+    filtered['path'] = result['path']
+    if exp != None:
+        exp.publishLiveData("amp_traceroute", stream, ts, filtered)
+
+    return DB_NO_ERROR
 
 
 def process_data(db, exp, timestamp, data, source):

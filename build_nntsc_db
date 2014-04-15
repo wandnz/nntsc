@@ -23,8 +23,7 @@
 
 import sys, getopt, socket, time, os, imp
 
-from libnntsc.database import Database, DB_NO_ERROR, DB_GENERIC_ERROR, \
-        DB_DATA_ERROR
+from libnntsc.database import DBInsert
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
 from libnntsc.parsers.rrd import insert_rrd_streams
@@ -75,7 +74,7 @@ if dbconf["name"] == "":
     print >> sys.stderr, "No database name specified in the config file. Please edit your config file (%s)" % (conf_fname)
     sys.exit(1)
 
-db = Database(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
+db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
 db.connect_db(15)
 result = db.build_databases(modules, new=clean_db)
 

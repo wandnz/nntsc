@@ -20,7 +20,7 @@
 # $Id$
 
 
-from libnntsc.database import Database
+from libnntsc.database import DBInsert
 from libnntsc.configurator import *
 from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
 from libnntsc.parsers import lpi_users, lpi_packets
@@ -61,7 +61,7 @@ class LPIModule:
         if self.lpiport == "":
             self.lpiport = 3678
 
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
+        self.db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
         self.db.connect_db(15)
 
@@ -170,8 +170,18 @@ class LPIModule:
                 rec_type, data = lpi_common.read_lpicp(self.server_fd)
 
                 if rec_type == 3:
-                    if self.insert_zeroes() == DB_NO_ERROR:
-                        self.db.commit_transaction()
+                    while 1:
+                        if self.insert_zeroes() == DB_NO_ERROR:
+                            err = self.db.commit_data()
+
+                            if err not in [DB_NO_ERROR]:
+                                logger.log("Failed to commit LPI zeroes")
+                                break
+                            if err == DB_OPERATIONAL_ERROR:
+                                logger.log("Retrying insert of zero values")
+                                continue
+                            break
+
                     self.reset_seen()
 
                 if rec_type == 4:
@@ -181,6 +191,12 @@ class LPIModule:
                 if rec_type == 0:
                     self.update_seen(data)
                     code = self.process_stats(data)
+                    # TODO Store results locally so that we don't lose data 
+                    # when we lose the database
+                    if code == DB_OPERATIONAL_ERROR:
+                        logger.log("DB disappeared while inserting LPI data")
+                        logger.log("LPI data potentially lost")
+                        continue
                    
                     if code == DB_INTERRUPTED:
                         logger.log("Interrupt while processing LPI data")

@@ -25,7 +25,7 @@
 import sys, time, getopt, string, os, imp, select, argparse
 from multiprocessing import *
 
-from libnntsc.database import Database
+from libnntsc.database import DBInsert
 from libnntsc.configurator import *
 from libnntsc.dberrorcodes import *
 from libnntsc.importer import import_parsers
@@ -38,12 +38,12 @@ import daemon, lockfile, signal
 class DataCollector():
     def start_module(self, name, mod, conf):
         try:
-            err, streams = self.db.select_streams_by_module(name)
-            
-            if err != DB_NO_ERROR:
-                logger.log("Failed to query streams for %s module" % (name))
-                return
+            streams = self.db.select_streams_by_module(name)
+        except DBQueryException as e:
+            logger.log(e)
+            return
 
+        try:
             routingkey = self.queueid + "-" + name
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
                     routingkey, 'nntsclive'))
@@ -86,7 +86,7 @@ class DataCollector():
             logger.log("No database name specified in the NNTSC configuration file")
             sys.exit(1)
 
-        self.db = Database(dbconf["name"], dbconf["user"], dbconf["pass"],
+        self.db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"])
 
         logger.log("Connecting to NNTSC database %s on host %s with user %s" % (dbconf["name"], dbconf["host"], dbconf["user"]))
