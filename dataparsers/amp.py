@@ -35,7 +35,7 @@ import logging
 
 import libnntscclient.logger as logger
 
-COMMIT_THRESH=50
+DEFAULT_COMMIT_FREQ=50
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, expqueue, exchange):
@@ -106,6 +106,12 @@ class AmpModule:
         queue = get_nntsc_config(nntsc_config, "amp", "queue")
         if queue == "NNTSCConfigMissing":
             queue = "amp-nntsc"
+        
+        self.commitfreq = get_nntsc_config(nntsc_config, "amp", "commitfreq")
+        if self.commitfreq == "NNTSCConfigMissing":
+            self.commitfreq = DEFAULT_COMMIT_FREQ
+        else:
+            self.commitfreq = int(self.commitfreq)
 
         if "NNTSCConfigError" in [username, password, host, port, ssl, queue]:
             logger.log("Failed to configure AMP source")
@@ -157,14 +163,14 @@ class AmpModule:
                 # Inserts were successful, commit data and update error code
                 if code == DB_NO_ERROR:
                     self.processed += 1
-                    if self.processed >= COMMIT_THRESH:
+                    if self.processed >= self.commitfreq:
                         code = self.db.commit_data()
 
                 if code == DB_NO_ERROR:
                     if test in self.collections:
                         self.exporter.publishPush(self.collections[test], \
                                 properties.timestamp)
-                    if self.processed >= COMMIT_THRESH:
+                    if self.processed >= self.commitfreq:
                         channel.basic_ack(method.delivery_tag, True)
                         self.processed = 0
                     break
@@ -217,7 +223,8 @@ class AmpModule:
 
         while 1:
             self.source.connect()
-            self.source.configure_consumer(self.process_data, COMMIT_THRESH)
+            self.source.configure_consumer(self.process_data, self.commitfreq)
+
             
             retval = self.source.run_consumer()
             if retval == PIKA_CONSUMER_HALT:
