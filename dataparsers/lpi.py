@@ -170,8 +170,17 @@ class LPIModule:
                 rec_type, data = lpi_common.read_lpicp(self.server_fd)
 
                 if rec_type == 3:
-                    if self.insert_zeroes() == DB_NO_ERROR:
-                        err = self.db.commit_data()
+                    while 1:
+                        if self.insert_zeroes() == DB_NO_ERROR:
+                            err = self.db.commit_data()
+
+                            if err not in [DB_NO_ERROR]:
+                                logger.log("Failed to commit LPI zeroes")
+                                break
+                            if err == DB_OPERATIONAL_ERROR:
+                                logger.log("Retrying insert of zero values")
+                                continue
+                            break
 
                     self.reset_seen()
 
