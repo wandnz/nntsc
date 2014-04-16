@@ -346,71 +346,56 @@ class DBWorker(threading.Thread):
                 else:
                     return DBWORKER_ERROR
 
-            # Limit the amount of history we export at any given time
-            # to prevent us from using too much memory during processing
-            if row['label'] != currlabel or historysize > 10000:
+            # If we have reached the end of the history for the current label,
+            # flush any history we've got remaining for that stream
+            if row['label'] != currlabel:
                 if currlabel != -1:
 
-                    # We've reached the history limit, so make sure we
-                    # avoid duplicate subscriptions and set the 'more'
-                    # flag correctly
-                    if row['label'] == currlabel:
-                        thismore = True
-                    else:
-                        thismore = more
-                           
-                    # Export the history to the pipe
-                    freq = self._calc_frequency(freqstats, binsize)
-                    lastts = freqstats['lastts']
+                    if freq == 0:
+                        freq = self._calc_frequency(freqstats, binsize)
 
-                    assert(currlabel in labels)
-                    err = self._enqueue_history(name, currlabel, history, thismore, freq, lastts)
+                    err = self._enqueue_history(name, currlabel, history, \
+                            more, freq, freqstats['lastts'])
                     if err != DBWORKER_SUCCESS:
                         return err
                     
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
                             'totaldiffs':0, 'tsdiffs':{} }
+                freq = 0
                 currlabel = row['label']
-                assert(currlabel in labels)
-
+                observed.add(currlabel)
                 history = []
                 historysize = 0
-                observed.add(currlabel)
 
-            # Extract info needed for measurement frequency calculations
-            if freqstats['lastts'] == 0:
+            # Don't keep more than 10,000 results without exporting some
+            # of them to the client
+            if historysize > 10000:
+                if freq == 0:
+                    freq = self._calc_frequency(freqstats, binsize)
+                err = self._enqueue_history(name, currlabel, history, True, 
+                        freq, freqstats['lastts'])
+                if err != DBWORKER_SUCCESS:
+                    return err
+                history = []
+                historysize = 0
+
+
+            if freq == 0:
+                freq = self._update_frequency_stats(freqstats, row, binsize, 
+                        tscol)
+            else:
                 freqstats['lastts'] = row['timestamp']
-                freqstats['lastbin'] = row[tscol]
-            elif freqstats['lastts'] != row['timestamp']:
-                tsdiff = row['timestamp'] - freqstats['lastts']
-                bindiff = row[tscol] - freqstats['lastbin']
-
-                if bindiff == binsize:
-                    freqstats['perfectbins'] += 1
-
-                if tsdiff in freqstats['tsdiffs']:
-                    freqstats['tsdiffs'][tsdiff] += 1
-                else:
-                    freqstats['tsdiffs'][tsdiff] = 1
-
-                freqstats['totaldiffs'] += 1
-                freqstats['lastts'] = row['timestamp']
-                freqstats['lastbin'] = row[tscol]
-
-            # Convert the row into a nice dictionary and add it to the
-            # history to be exported
-            datadict = {}
-            for k, v in row.items():
-                datadict[k] = v
-            history.append(datadict)
+            history.append(row)
             historysize += 1
 
         if historysize != 0:
             # Make sure we write out the last stream
-            freq = self._calc_frequency(freqstats, binsize)
-            lastts = freqstats['lastts']
-            err = self._enqueue_history(name, currlabel, history, more, freq, lastts)
+            if freq == 0:
+                freq = self._calc_frequency(freqstats, binsize)
+
+            err = self._enqueue_history(name, currlabel, history, more, 
+                    freq, freqstats['lastts'])
             if err != DBWORKER_SUCCESS:
                 return err
 
@@ -429,6 +414,31 @@ class DBWorker(threading.Thread):
 
         return DBWORKER_SUCCESS
 
+    def _update_frequency_stats(self, freqstats, row, binsize, tscol):
+        # Extract info needed for measurement frequency calculations
+        if freqstats['lastts'] == 0:
+            freqstats['lastts'] = row['timestamp']
+            freqstats['lastbin'] = row[tscol]
+        elif freqstats['lastts'] != row['timestamp']:
+            tsdiff = row['timestamp'] - freqstats['lastts']
+            bindiff = row[tscol] - freqstats['lastbin']
+
+            if bindiff == binsize:
+                freqstats['perfectbins'] += 1
+
+            if tsdiff in freqstats['tsdiffs']:
+                freqstats['tsdiffs'][tsdiff] += 1
+            else:
+                freqstats['tsdiffs'][tsdiff] = 1
+
+            freqstats['totaldiffs'] += 1
+            freqstats['lastts'] = row['timestamp']
+            freqstats['lastbin'] = row[tscol]
+
+            if freqstats['totaldiffs'] >= 1000:
+                return self._calc_frequency(freqstats, binsize)
+
+        return 0
 
     def _subscribe_streams(self, streams, start, subend, cols, name, label):
         try:
@@ -451,6 +461,7 @@ class DBWorker(threading.Thread):
 
     def _enqueue_history(self, name, label, history, more, freq, lastts):
 
+        #print label, lastts, len(history), freq 
         contents = pickle.dumps((name, label, history, more, freq))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
