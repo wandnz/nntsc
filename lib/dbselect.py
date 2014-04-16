@@ -53,10 +53,13 @@ class DBSelector(DatabaseCore):
         super(DBSelector, self).disconnect()
 
     def _dataquery(self, query, params=None):
+
         while 1:
-            err = self.data.reset()
+            err = self.data.closecursor()
             if err == DB_OPERATIONAL_ERROR:
                 continue
+            if err != DB_NO_ERROR:
+                break
 
             err = self.data.executequery(query, params)
             if err == DB_OPERATIONAL_ERROR:
@@ -67,6 +70,10 @@ class DBSelector(DatabaseCore):
             break
 
         return err           
+
+    def release_data(self):
+        err = self.data.closecursor()
+        return err
  
     def get_collection_schema(self, colid):
         """ Fetches the column names for both the stream and data tables
@@ -103,6 +110,11 @@ class DBSelector(DatabaseCore):
             raise DBQueryException(err)
 
         datacolnames = [cn[0] for cn in self.basic.cursor.description]
+        err = self._releasebasic()
+        if err != DB_NO_ERROR:
+            log("Error while tidying up after querying column names")
+            raise DBQueryException(err)
+
         return streamcolnames, datacolnames
 
     def select_streams_by_collection(self, coll, minid):
@@ -149,6 +161,11 @@ class DBSelector(DatabaseCore):
                     continue
                 stream_dict[k] = v
             selected.append(stream_dict)
+        
+        err = self._releasebasic()
+        if err != DB_NO_ERROR:
+            log("Error while tidying up after querying streams by collection")
+            raise DBQueryException(err)
         return selected
 
     def select_active_streams_by_collection(self, coll, lastactivity):
@@ -176,6 +193,11 @@ class DBSelector(DatabaseCore):
                 break
             for stream_id in row.values():
                 active.append(stream_id)
+
+        err = self._releasebasic()
+        if err != DB_NO_ERROR:
+            log("Error while tidying up after querying active streams by collection")
+            raise DBQueryException(err)
         return active
 
 
@@ -580,6 +602,10 @@ class DBSelector(DatabaseCore):
                 break
 
             columns.append(row['column_name'])
+        err = self._releasebasic()
+        if err != DB_NO_ERROR:
+            log("Error while tidying up after querying data table properties")
+            raise DBQueryException(err)
         return table, columns
 
     def _sanitise_columns(self, columns, selcols):

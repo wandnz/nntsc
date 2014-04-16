@@ -208,6 +208,10 @@ class DBWorker(threading.Thread):
             if end == None:
                 stoppoint = int(time.time())
 
+        error = self.db.release_data()
+        if error != DB_NO_ERROR:
+            return DBWORKER_ERROR
+
         return DBWORKER_SUCCESS
 
     def subscribe(self, submsg):
@@ -296,6 +300,9 @@ class DBWorker(threading.Thread):
 
             start = queryend + 1
 
+        error = self.db.release_data()
+        if error != DB_NO_ERROR:
+            return DBWORKER_ERROR
 
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return DBWORKER_SUCCESS
