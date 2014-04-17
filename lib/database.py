@@ -76,7 +76,7 @@ class NNTSCCursor(object):
         try:
             if self.cursorname is not None:
                 self.cursor = self.conn.cursor(self.cursorname,
-                        cursor_factory=psycopg2.extras.DictCursor)
+                        cursor_factory=psycopg2.extras.RealDictCursor)
             else:
                 self.cursor = self.conn.cursor(
                         cursor_factory=psycopg2.extras.DictCursor)
