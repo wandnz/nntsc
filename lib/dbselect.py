@@ -268,7 +268,7 @@ class DBSelector(DatabaseCore):
         try:
             table, columns = self._get_data_table(col)
         except DBQueryException as e:
-            yield(None, None, None, e)
+            yield(None, None, None, None, e)
 
         # XXX get rid of stream_id, ideally it wouldnt even get to here
         if "stream_id" in groupcols:
@@ -349,14 +349,14 @@ class DBSelector(DatabaseCore):
    
             err = self._dataquery(query, params)
             if err != DB_NO_ERROR:
-                yield(None, None, None, DBQueryException(err))
+                yield(None, label, None, None, DBQueryException(err))
  
             fetched = self._query_data_generator()
             for row, errcode in fetched:
                 if errcode != DB_NO_ERROR:
-                    yield(None, None, None, DBQueryException(errcode))
+                    yield(None, label, None, None, DBQueryException(errcode))
                 else:
-                    yield (row, tscol, binsize, None)
+                    yield (row, label, tscol, binsize, None)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -405,7 +405,7 @@ class DBSelector(DatabaseCore):
         try:
             table, columns = self._get_data_table(col)
         except DBQueryException as e:
-            yield(None, None, None, e)
+            yield(None, None, None, None, e)
 
         # Make sure we only query for columns that are in the data table
         if table == "data_amp_traceroute":
@@ -451,14 +451,14 @@ class DBSelector(DatabaseCore):
 
             err = self._dataquery(sql, params)
             if err != DB_NO_ERROR:
-                yield(None, None, None, DBQueryException(err))
+                yield(None, label, None, None, DBQueryException(err))
 
             fetched = self._query_data_generator()
             for row, errcode in fetched:
                 if errcode != DB_NO_ERROR:
-                    yield(None, None, None, DBQueryException(errcode))
+                    yield(None, label, None, None, DBQueryException(errcode))
                 else:
-                    yield (row, "timestamp", 0, None)
+                    yield (row, label, "timestamp", 0, None)
 
 
     def _generate_label_case(self, label, stream_ids):
@@ -707,7 +707,6 @@ class DBSelector(DatabaseCore):
             if fetched == []:
                 break
 
-            for row in fetched:
-                yield row, DB_NO_ERROR
+            yield fetched, DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
