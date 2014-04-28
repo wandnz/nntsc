@@ -201,7 +201,9 @@ class NNTSCClient:
             msgdict['streams'] = arrived
 
         if header[1] == NNTSC_HISTORY:
-            name, stream_id, data, more, binsize = pickle.loads(self.buf[header_end:total_len])
+            compressed = self.buf[header_end:total_len]
+            uncompressed = compressed.decode("zlib")
+            name, stream_id, data, more, binsize = pickle.loads(uncompressed)
             msgdict['collection'] = name
             msgdict['streamid'] = stream_id
             msgdict['data'] = data
