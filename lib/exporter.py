@@ -22,7 +22,8 @@
 # $Id$
 
 
-import sys, socket, time, struct, getopt, pickle
+import sys, socket, time, struct, getopt
+import cPickle as pickle
 from socket import *
 from multiprocessing import Pipe, Queue
 import Queue as StdQueue
@@ -469,6 +470,7 @@ class DBWorker(threading.Thread):
 
         #print name, label, lastts, len(history), freq, more 
         contents = pickle.dumps((name, label, history, more, freq))
+        contents = contents.encode("zlib")
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
         try:
@@ -484,6 +486,8 @@ class DBWorker(threading.Thread):
                 log("Unable to push history onto full worker queue")
                 return DBWORKER_FULLQUEUE
 
+        #log("Queue size: %d" % (self.queue.qsize()))
+        
         return DBWORKER_SUCCESS
 
     def _reconnect_database(self):
