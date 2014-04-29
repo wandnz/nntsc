@@ -505,7 +505,7 @@ class DBWorker(threading.Thread):
          
         try:
             cols = self.db.list_collections()
-        except DBQueueException as e:
+        except DBQueryException as e:
             if e.code == DB_QUERY_TIMEOUT:
                 log("Query timed out while fetching collections")
                 err = self._enqueue_cancel(NNTSC_COLLECTIONS, None)    
