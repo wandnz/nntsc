@@ -236,7 +236,7 @@ class DBWorker(threading.Thread):
                 if err != DBWORKER_SUCCESS:
                     return err
 
-            return 0
+            return DBWORKER_SUCCESS
         
         if end == None:
             stoppoint = int(time.time())
