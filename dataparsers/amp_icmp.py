@@ -111,13 +111,13 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
         if streamid < 0:
             errorcode = streamid
 
-        if errorcode == DB_OPERATIONAL_ERROR or errorcode == DB_QUERY_TIMEOUT:
+        if errorcode == DB_QUERY_TIMEOUT:
             continue
         if errorcode != DB_NO_ERROR:
             return errorcode
 
         err = db.commit_streams()
-        if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
+        if err == DB_QUERY_TIMEOUT:
             continue
         if err != DB_NO_ERROR:
             return err
