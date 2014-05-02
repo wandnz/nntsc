@@ -114,12 +114,12 @@ class RRDModule:
 
             code = DB_DATA_ERROR
             if r['modsubtype'] == "smokeping":
-                code = rrd_smokeping.insert_data(self.db, 
+                code = rrd_smokeping.process_data(self.db, 
                         self.exporter, r['stream_id'], current, 
                         line)
 
             if r['modsubtype'] == "muninbytes":
-                code = rrd_muninbytes.insert_data(self.db, 
+                code = rrd_muninbytes.process_data(self.db, 
                         self.exporter, r['stream_id'], current, 
                         line)
 

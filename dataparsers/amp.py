@@ -28,7 +28,7 @@ from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
         PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
 import pika
 from ampsave.importer import import_data_functions
-from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns
+from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns, amp_throughput
 from libnntsc.dberrorcodes import *
 import time
 import logging
@@ -77,6 +77,8 @@ class AmpModule:
                 key = amp_traceroute.create_existing_stream(i)
             elif testtype == "dns":
                 key = amp_dns.create_existing_stream(i)
+            elif testtype == "throughput":
+                key = amp_throughput.create_existing_stream(i)
             #elif testtype == "http":
             #    key = amp_http.create_existing_stream(i)
 
@@ -151,6 +153,10 @@ class AmpModule:
                     elif test == "http":
                         channel.basic_ack(delivery_tag=method.delivery_tag)
                         break
+                    elif test == "throughput":
+                        code = amp_throughput.process_data(self.db,
+                                self.exporter, properties.timestamp, data,
+                                source)
                     #    code = amp_http.process_data(self.db, self.exporter,
                     #            properties.timestamp, data, source)
                     else:
@@ -250,4 +256,7 @@ def tables(db):
     if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
         logger.log("Failed to register AMP DNS collection")
 
+    code = amp_throughput.register(db)
+    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        logger.log("Failed to register AMP Throughput collection")
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

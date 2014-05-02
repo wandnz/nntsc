@@ -21,14 +21,13 @@
 
 import libnntscclient.logger as logger
 from libnntsc.dberrorcodes import *
+from libnntsc.parsers.common import create_new_stream, insert_data
 
 STREAM_TABLE_NAME="streams_rrd_smokeping"
 DATA_TABLE_NAME="data_rrd_smokeping"
 COLNAME = "rrd_smokeping"
 
-def stream_table(db):
-
-    streamcols = [ \
+smoke_streamcols = [ \
         {"name":"filename", "type":"varchar", "null":False}, 
         {"name":"source", "type":"varchar", "null":False}, 
         {"name":"host", "type":"varchar", "null":False}, 
@@ -36,9 +35,18 @@ def stream_table(db):
         {"name":"highrows", "type":"integer", "null":False, "default":"1008"}
     ]
 
+smoke_datacols = [ \
+        {"name":"loss", "type":"smallint"},
+        {"name":"median", "type":"double precision"},
+        {"name":"pings", "type":"double precision[]"}
+    ]
+
+
+def stream_table(db):
+
     uniqcols = ['filename', 'source', 'host']
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    err = db.create_streams_table(STREAM_TABLE_NAME, smoke_streamcols, uniqcols)
 
     if err != DB_NO_ERROR:
         return None
@@ -46,13 +54,7 @@ def stream_table(db):
 
 def data_table(db):
 
-    datacols = [ \
-        {"name":"loss", "type":"smallint"},
-        {"name":"median", "type":"double precision"},
-        {"name":"pings", "type":"double precision[]"}
-    ]
-
-    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
+    err =  db.create_data_table(DATA_TABLE_NAME, smoke_datacols)
     if err != DB_NO_ERROR:
         return None
     return DATA_TABLE_NAME
@@ -62,37 +64,11 @@ def insert_stream(db, exp, name, fname, source, host, minres, rows):
     props = {"filename":fname, "source":source, "host":host,
             "minres":minres, "highrows":rows}
 
-    while 1:
-        colid, streamid =  db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
-                "rrd", "smokeping", name, 0, props)
-
-        errorcode = DB_NO_ERROR
-        if colid < 0:
-            errorcode = streamid
-
-        if streamid < 0:
-            errorcode = streamid
-
-        if errorcode == DB_QUERY_TIMEOUT:
-            continue
-        if errorcode != DB_NO_ERROR:
-            return errorcode
-
-        err = db.commit_streams()
-        if err == DB_QUERY_TIMEOUT:
-            continue
-        if err != DB_NO_ERROR:
-            return err
-        break
-    
-    if exp == None:
-        return streamid
-    props['name'] = name
-    exp.publishStream(colid, COLNAME, streamid, props)
-    return streamid
+    return create_new_stream(db, exp, "rrd", "smokeping", name, 
+            smoke_streamcols, props, 0, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 
-def insert_data(db, exp, stream, ts, line):
+def process_data(db, exp, stream, ts, line):
     kwargs = {}
 
     if len(line) >= 1:
@@ -117,13 +93,8 @@ def insert_data(db, exp, stream, ts, line):
 
         kwargs['pings'].append(val)
 
-    err = db.insert_data(DATA_TABLE_NAME, COLNAME, stream, ts, 
-            kwargs, {"pings":"double precision[]"})
-    if err != DB_NO_ERROR:
-        return err
-    if exp != None:
-        exp.publishLiveData(COLNAME, stream, ts, kwargs)
-    return DB_NO_ERROR
+    return insert_data(db, exp, stream, ts, kwargs, smoke_datacols, COLNAME,
+            DATA_TABLE_NAME, {"pings":"double precision[]"})
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
