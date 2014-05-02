@@ -22,9 +22,11 @@
 
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
+from libnntsc.parsers.common import create_new_stream, insert_data
 
 STREAM_TABLE_NAME = "streams_amp_dns"
 DATA_TABLE_NAME = "data_amp_dns"
+COLNAME = "amp_dns"
 
 amp_dns_streams = {}
 
@@ -51,6 +53,21 @@ dns_datacols = [ \
     {"name":"flag_ra", "type":"boolean", "null":True},
 ]
 
+dns_streamcols = [ \
+        {"name":"source", "type":"varchar", "null":False},
+        {"name":"destination", "type":"varchar", "null":False},
+        {"name":"instance", "type":"varchar", "null":False},
+        {"name":"address", "type":"inet", "null":False},
+        {"name":"query", "type":"varchar", "null":False},
+        {"name":"query_type", "type":"varchar", "null":False},
+        {"name":"query_class", "type":"varchar", "null":False},
+        {"name":"udp_payload_size", "type":"integer", "null":False},
+        {"name":"recurse", "type":"boolean", "null":False},
+        {"name":"dnssec", "type":"boolean", "null":False},
+        {"name":"nsid", "type":"boolean", "null":False}
+    ]
+
+
 def result_to_key(res):
     key = (str(res['source']), str(res['destination']), str(res['instance']),
             res['address'], str(res['query']), str(res['query_type']),
@@ -67,63 +84,16 @@ def create_existing_stream(s):
 def insert_stream(db, exp, data, timestamp):
     name = "dns %s:%s:%s" % (data['source'], data['destination'], data['query'])
 
-    props = {}
-
-    for k,v in data.items():
-        if k in streamkeys:
-            props[k] = v
-
-    while 1:
-        errorcode = DB_NO_ERROR
-        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME,
-            "amp", "dns", name, timestamp, props)
-
-        if colid < 0:
-            errorcode = streamid
-
-        if streamid < 0:
-            errorcode = streamid
-
-        if errorcode == DB_QUERY_TIMEOUT:
-            continue
-        if errorcode != DB_NO_ERROR:
-            return errorcode
-
-        err = db.commit_streams()
-        if err == DB_QUERY_TIMEOUT:
-            continue
-        if err != DB_NO_ERROR:
-            return err
-        break
-
-    if exp == None:
-        return streamid
-
-    props['name'] = name
-    exp.publishStream(colid, "amp_dns", streamid, props)
-    return streamid
+    return create_new_stream(db, exp, "amp", "dns", name, dns_streamcols,
+            data, timestamp, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 def stream_table(db):
     
-    streamcols = [ \
-        {"name":"source", "type":"varchar", "null":False},
-        {"name":"destination", "type":"varchar", "null":False},
-        {"name":"instance", "type":"varchar", "null":False},
-        {"name":"address", "type":"inet", "null":False},
-        {"name":"query", "type":"varchar", "null":False},
-        {"name":"query_type", "type":"varchar", "null":False},
-        {"name":"query_class", "type":"varchar", "null":False},
-        {"name":"udp_payload_size", "type":"integer", "null":False},
-        {"name":"recurse", "type":"boolean", "null":False},
-        {"name":"dnssec", "type":"boolean", "null":False},
-        {"name":"nsid", "type":"boolean", "null":False}
-    ]
-
     uniqcols = ['source', 'destination', 'query', 'address', 'query_type',
             'query_class', 'udp_payload_size', 'recurse', 'dnssec', 'nsid',
             'instance']
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    err = db.create_streams_table(STREAM_TABLE_NAME, dns_streamcols, uniqcols)
     if err != DB_NO_ERROR:
         logger.log("Failed to create streams table for amp-icmp")
         return None
@@ -155,24 +125,6 @@ def data_table(db):
 
 
     return DATA_TABLE_NAME
-
-
-def insert_data(db, exp, stream, ts, result):
-    filtered = {}
-    for col in dns_datacols:
-        if col["name"] in result:
-            filtered[col["name"]] = result[col["name"]]
-        else:
-            filtered[col["name"]] = None
- 
-
-    err = db.insert_data(DATA_TABLE_NAME, "amp_dns", stream, ts, filtered)
-    if err != DB_NO_ERROR:
-        return err
-
-    if exp != None:
-        exp.publishLiveData("amp_dns", stream, ts, filtered)
-    return DB_NO_ERROR
 
 
 def split_result(alldata, result):
@@ -224,7 +176,8 @@ def process_data(db, exp, timestamp, data, source):
                 return stream_id
             amp_dns_streams[key] = stream_id
 
-        res = insert_data(db, exp, stream_id, timestamp, dataresult)
+        res = insert_data(db, exp, stream_id, timestamp, dataresult, 
+                dns_datacols, COLNAME, DATA_TABLE_NAME)
         if res != DB_NO_ERROR:
             return res
         done[stream_id] = 0

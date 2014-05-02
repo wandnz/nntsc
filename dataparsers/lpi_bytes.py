@@ -23,6 +23,7 @@
 import libnntscclient.logger as logger
 import sys, string
 from libnntsc.dberrorcodes import *
+from libnntsc.parsers.common import *
 
 STREAM_TABLE_NAME = "streams_lpi_bytes"
 DATA_TABLE_NAME = "data_lpi_bytes"
@@ -30,15 +31,21 @@ COLNAME = "lpi_bytes"
 
 lpi_bytes_streams = {}
 
-def stream_table(db):
-
-    streamcols = [ \
+streamcols = [ \
         {"name":"source", "type":"varchar", "null":False},
         {"name":"user", "type":"varchar", "null":False},
         {"name":"dir", "type":"varchar", "null":False},
         {"name":"freq", "type":"integer", "null":False},
         {"name":"protocol", "type":"varchar", "null":False},
     ]
+
+datacols = [ \
+        {"name":"bytes", "type":"bigint"}
+]
+
+
+def stream_table(db):
+
 
     uniqcols = ['source', 'user', 'dir', 'freq', 'protocol']
 
@@ -49,10 +56,6 @@ def stream_table(db):
     return STREAM_TABLE_NAME
 
 def data_table(db):
-
-    datacols = [ \
-        {"name":"bytes", "type":"bigint"}
-    ]
 
     err =  db.create_data_table(DATA_TABLE_NAME, datacols)
     if err != DB_NO_ERROR:
@@ -87,47 +90,10 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
 
     props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 
             'protocol':proto}
+    
+    return create_new_stream(db, exp, "lpi", "bytes", namestr, streamcols,
+            props, ts, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
-    while 1:
-        errorcode = DB_NO_ERROR
-        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME,
-            "lpi", "bytes", namestr, ts, props)
-
-        if colid < 0:
-            errorcode = streamid
-
-        if streamid < 0:
-            errorcode = streamid
-
-        if errorcode == DB_OPERATIONAL_ERROR:
-            continue
-        if errorcode != DB_NO_ERROR:
-            return errorcode
-
-        err = db.commit_streams()
-        if err == DB_QUERY_TIMEOUT:
-            continue
-        if err != DB_NO_ERROR:
-            return err
-        break
- 
-    if exp == None:
-        return streamid
-
-    props['name'] = namestr
-    exp.publishStream(colid, COLNAME, streamid, props)
-    return streamid
-
-
-def insert_data(db, exp, stream_id, ts, value):
-    result = {"bytes": value}
-
-    err = db.insert_data(DATA_TABLE_NAME, COLNAME, stream_id, ts, result)
-    if err != DB_NO_ERROR:
-        return err
-    if exp != None:
-        exp.publishLiveData(COLNAME, stream_id, ts, result)
-    return DB_NO_ERROR
 
 def process_data(db, exp, protomap, data):
 
@@ -157,7 +123,8 @@ def process_data(db, exp, protomap, data):
             else:
                 lpi_bytes_streams[(mon, user, dir, freq, protomap[p])] = stream_id
 
-        code = insert_data(db, exp, stream_id, data['ts'], val)
+        code = insert_data(db, exp, stream_id, data['ts'], {'bytes':val},
+                datacols, COLNAME, DATA_TABLE_NAME)
         
         if code != DB_NO_ERROR:
             return code

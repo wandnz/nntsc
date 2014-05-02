@@ -23,15 +23,14 @@
 import libnntscclient.logger as logger
 import sys, string
 from libnntsc.dberrorcodes import *
+from libnntsc.parsers.common import *
 
 STREAM_TABLE_NAME = "streams_lpi_packets"
 DATA_TABLE_NAME = "data_lpi_packets"
 COLNAME = "lpi_packets"
 
 lpi_packets_streams = {}
-
-def stream_table(db):
-    streamcols = [ \
+streamcols = [ \
         {"name":"source", "type":"varchar", "null":False},
         {"name":"user", "type":"varchar", "null":False},
         {"name":"dir", "type":"varchar", "null":False},
@@ -39,6 +38,11 @@ def stream_table(db):
         {"name":"protocol", "type":"varchar", "null":False},
     ]
 
+datacols = [ \
+        {"name":"packets", "type":"bigint"}
+    ]
+
+def stream_table(db):
     uniqcols = ['source', 'user', 'dir', 'freq', 'protocol']
 
     err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
@@ -49,9 +53,6 @@ def stream_table(db):
 
 def data_table(db):
 
-    datacols = [ \
-        {"name":"packets", "type":"bigint"}
-    ]
 
     err =  db.create_data_table(DATA_TABLE_NAME, datacols)
     if err != DB_NO_ERROR:
@@ -86,47 +87,8 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
     props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 
             'protocol':proto}
 
-    while 1:
-        errorcode = DB_NO_ERROR
-        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME,
-            "lpi", "packets", namestr, ts, props)
-    
-        if colid < 0:
-            errorcode = streamid
-        
-        if streamid < 0:
-            errorcode = streamid
-    
-        if errorcode == DB_QUERY_TIMEOUT:
-            continue
-        if errorcode != DB_NO_ERROR:
-            return errorcode 
-    
-        err = db.commit_streams()
-        if err == DB_QUERY_TIMEOUT:
-            continue
-        if err != DB_NO_ERROR:
-            return err
-        break
-
-
-    if exp == None:
-        return streamid
-
-    props["name"] = namestr
-    exp.publishStream(colid, COLNAME, streamid, props)
-    return streamid
-
-def insert_data(db, exp, stream_id, ts, value):
-    result = {"packets":value}
-
-    err = db.insert_data(DATA_TABLE_NAME, COLNAME, stream_id, ts,
-            result)
-    if err != DB_NO_ERROR:
-        return err
-    if exp != None:
-        exp.publishLiveData(COLNAME, stream_id, ts, result)
-    return DB_NO_ERROR
+    return create_new_stream(db, exp, "lpi", "packets", namestr, streamcols,
+            props, ts, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 def process_data(db, exp, protomap, data):
 
@@ -156,7 +118,8 @@ def process_data(db, exp, protomap, data):
             else:
                 lpi_packets_streams[(mon, user, dir, freq, protomap[p])] = stream_id
 
-        res = insert_data(db, exp, stream_id, data['ts'], val)
+        res = insert_data(db, exp, stream_id, data['ts'], {"packets":val},
+                datacols, COLNAME, DATA_TABLE_NAME)
         if res != DB_NO_ERROR:
             return res
         done.append(stream_id)

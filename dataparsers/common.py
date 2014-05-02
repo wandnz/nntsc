@@ -40,7 +40,8 @@ def create_new_stream(db, exp, basecol, subtype, name, streamcols, result,
     exp.publishStream(colid, basecol + "_" + subtype, streamid, streamprops)
     return streamid
 
-def insert_data(db, exp, stream, ts, result, datacols, colname, datatable):
+def insert_data(db, exp, stream, ts, result, datacols, colname, datatable,
+        casts = {}):
     filtered = {}
     for col in datacols:
         if col["name"] in result:
@@ -48,7 +49,7 @@ def insert_data(db, exp, stream, ts, result, datacols, colname, datatable):
         else:
             filtered[col["name"]] = None
 
-    err = db.insert_data(datatable, colname, stream, ts, filtered)
+    err = db.insert_data(datatable, colname, stream, ts, filtered, casts)
     if err != DB_NO_ERROR:
         return err
 

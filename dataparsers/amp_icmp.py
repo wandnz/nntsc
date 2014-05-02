@@ -19,11 +19,13 @@
 #
 # $Id$
 
+from libnntsc.parsers.common import create_new_stream, insert_data
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 STREAM_TABLE_NAME = "streams_amp_icmp"
 DATA_TABLE_NAME = "data_amp_icmp"
+COLNAME = "amp_icmp"
 
 amp_icmp_streams = {}
     
@@ -100,54 +102,9 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     props = {"source":source, "destination":dest,
             "packet_size":size, "datastyle":"rtt_ms", "address":address}
 
-    while 1:
-        errorcode = DB_NO_ERROR
-        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME,
-            "amp", "icmp", name, timestamp, props)
+    return create_new_stream(db, exp, "amp", "icmp", name, icmp_streamcols,
+            props, timestamp, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
-        if colid < 0:
-            errorcode = streamid
-
-        if streamid < 0:
-            errorcode = streamid
-
-        if errorcode == DB_QUERY_TIMEOUT:
-            continue
-        if errorcode != DB_NO_ERROR:
-            return errorcode
-
-        err = db.commit_streams()
-        if err == DB_QUERY_TIMEOUT:
-            continue
-        if err != DB_NO_ERROR:
-            return err
-        break
-
-    if exp == None:
-        return streamid
-
-    props['name'] = name
-    exp.publishStream(colid, "amp_icmp", streamid, props)
-    return streamid
-
-def insert_data(db, exp, stream, ts, result):
-    """ Insert a new measurement into the database and export to listeners """
-
-    filtered = {}
-    for col in icmp_datacols:
-        if col["name"] in result:
-            filtered[col["name"]] = result[col["name"]]
-        else:
-            filtered[col["name"]] = None
-
-    err = db.insert_data(DATA_TABLE_NAME, "amp_icmp", stream, ts, filtered)
-    if err != DB_NO_ERROR:
-        return err
-
-    if exp != None:
-        exp.publishLiveData("amp_icmp", stream, ts, filtered)
-
-    return DB_NO_ERROR
 
 def process_data(db, exp, timestamp, data, source):
     """ Process a data object, which can contain 1 or more sets of results """
@@ -179,7 +136,8 @@ def process_data(db, exp, timestamp, data, source):
             else:
                 amp_icmp_streams[key] = stream_id
 
-        res = insert_data(db, exp, stream_id, timestamp, d)
+        res = insert_data(db, exp, stream_id, timestamp, d, icmp_datacols, 
+                COLNAME, DATA_TABLE_NAME)
         if res != DB_NO_ERROR:
             return res
         done[stream_id] = 0

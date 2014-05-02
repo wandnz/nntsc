@@ -22,14 +22,13 @@
 
 import libnntscclient.logger as logger
 from libnntsc.dberrorcodes import *
+from libnntsc.parsers.common import create_new_stream, insert_data
 
 STREAM_TABLE_NAME = "streams_rrd_muninbytes"
 DATA_TABLE_NAME = "data_rrd_muninbytes"
 COLNAME = "rrd_muninbytes"
 
-def stream_table(db):
-
-    streamcols = [ \
+rrd_streamcols = [ \
         {"name":"filename", "type":"varchar", "null":False},
         {"name":"switch", "type":"varchar", "null":False},
         {"name":"interface", "type":"varchar", "null":False},
@@ -39,9 +38,17 @@ def stream_table(db):
         {"name":"highrows", "type":"integer", "null":False, "default":"1008"}
     ]
 
+rrd_datacols = [ \
+        {"name":"bytes", "type":"bigint"}
+    ]
+
+
+def stream_table(db):
+
+
     uniqcols = ['filename', 'interface', 'switch', 'direction']
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    err = db.create_streams_table(STREAM_TABLE_NAME, rrd_streamcols, uniqcols)
 
     if err != DB_NO_ERROR:
         return None
@@ -50,11 +57,7 @@ def stream_table(db):
 
 def data_table(db):
 
-    datacols = [ \
-        {"name":"bytes", "type":"bigint"}
-    ]
-
-    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
+    err =  db.create_data_table(DATA_TABLE_NAME, rrd_datacols)
     if err != DB_NO_ERROR:
         return None
     return DATA_TABLE_NAME
@@ -67,39 +70,11 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
-    while 1:
-        colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
-                "rrd", "muninbytes", name, 0, props)
-        
-        errorcode = DB_NO_ERROR
-        if colid < 0:
-            errorcode = streamid
-
-        if streamid < 0:
-            errorcode = streamid
-
-        if errorcode == DB_QUERY_TIMEOUT:
-            continue
-        if errorcode != DB_NO_ERROR:
-            return errorcode
-
-        err = db.commit_streams()
-        if err == DB_QUERY_TIMEOUT:
-            continue
-        if err != DB_NO_ERROR:
-            return err
-        break
- 
-
-    if exp == None:
-        return streamid
-    props["name"] = name
-    exp.publishStream(colid, COLNAME, streamid, props)
-    return streamid
+    return create_new_stream(db, exp, "rrd", "muninbytes", name, 
+            rrd_streamcols, props, 0, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 
-
-def insert_data(db, exp, stream, ts, line):
+def process_data(db, exp, stream, ts, line):
     assert(len(line) == 1)
 
     exportdict = {}
@@ -114,13 +89,10 @@ def insert_data(db, exp, stream, ts, line):
 
         exportdict[line_map[i]] = val
 
-    err = db.insert_data(DATA_TABLE_NAME, "rrd_muninbytes", stream, ts,
-            exportdict)
-    if err != DB_NO_ERROR:
-        return err
-    if exp != None:
-        exp.publishLiveData(COLNAME, stream, ts, exportdict)
-    return DB_NO_ERROR
+    err = insert_data(db, exp, stream, ts, exportdict, rrd_datacols, COLNAME,
+            DATA_TABLE_NAME)
+    
+    return err
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
