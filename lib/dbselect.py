@@ -340,6 +340,9 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("outgroup", outgroup, [])
 
         for label, streams in labels.iteritems():
+            if len(streams) == 0:
+                yield(None, label, None, None, None)
+                continue
 
             self._generate_from(table, label, streams, start_time, stop_time)
             order = ["outsel", "innersel", "activestreams", "activejoin", 

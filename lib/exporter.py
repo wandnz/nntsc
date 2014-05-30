@@ -346,7 +346,7 @@ class DBWorker(threading.Thread):
                     return DBWORKER_RETRY
                 else:
                     return DBWORKER_ERROR
-
+                
             # If we have reached the end of the history for the current label,
             # flush any history we've got remaining for that stream
             if label != currlabel:
@@ -372,6 +372,12 @@ class DBWorker(threading.Thread):
                 observed.add(currlabel)
                 history = []
                 historysize = 0
+            
+            if rows is None:    
+                err = self._enqueue_history(name, label, [], more, 0, start)
+                if err != DBWORKER_SUCCESS:
+                    return err
+                continue
 
             # Don't keep more than 10,000 results without exporting some
             # of them to the client
