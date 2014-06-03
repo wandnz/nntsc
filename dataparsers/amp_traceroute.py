@@ -27,6 +27,7 @@ STREAM_TABLE_NAME = "streams_amp_traceroute"
 DATA_TABLE_NAME = "data_amp_traceroute"
 
 amp_trace_streams = {}
+amp_trace_paths = {}
 
 traceroute_datacols = [ \
     {"name":"path_id", "type":"integer", "null":False},
@@ -170,27 +171,36 @@ def insert_data(db, exp, stream, ts, result):
     # sqlalchemy is again totally useless and makes it impossible to cast
     # types on insert, so lets do it ourselves.
 
-    pathtable = "data_amp_traceroute_paths_%d" % (stream)
+    keystr = "%s" % (stream)
+    for p in result['path']:
+        keystr += "_%s" % (p)
 
-    pathinsert = "WITH s AS (SELECT path_id, path FROM %s " % (pathtable)
-    pathinsert += "WHERE path = CAST (%s as inet[])), "
-    pathinsert += "i AS (INSERT INTO %s (path) " % (pathtable)
-    pathinsert += "SELECT CAST(%s as inet[]) WHERE NOT EXISTS "
-    pathinsert += "(SELECT path FROM %s " % (pathtable)
-    pathinsert += "WHERE path = CAST(%s as inet[])) RETURNING path_id, path) "
-    pathinsert += "SELECT path_id, path FROM i UNION ALL "
-    pathinsert += "SELECT path_id, path FROM s"
+    if keystr in amp_trace_paths:
+        result['path_id'] = amp_trace_paths[keystr]
+    else:
 
-    params = (result['path'], result['path'], result["path"])
-    err, queryret = db.custom_insert(pathinsert, params)
-     
-    if err != DB_NO_ERROR:
-        return err
+        pathtable = "data_amp_traceroute_paths_%d" % (stream)
 
-    if queryret == None:
-        return DB_DATA_ERROR
-            
-    result['path_id'] = queryret[0]
+        pathinsert = "WITH s AS (SELECT path_id, path FROM %s " % (pathtable)
+        pathinsert += "WHERE path = CAST (%s as inet[])), "
+        pathinsert += "i AS (INSERT INTO %s (path) " % (pathtable)
+        pathinsert += "SELECT CAST(%s as inet[]) WHERE NOT EXISTS "
+        pathinsert += "(SELECT path FROM %s " % (pathtable)
+        pathinsert += "WHERE path = CAST(%s as inet[])) RETURNING path_id,path)"
+        pathinsert += "SELECT path_id, path FROM i UNION ALL "
+        pathinsert += "SELECT path_id, path FROM s"
+
+        params = (result['path'], result['path'], result["path"])
+        err, queryret = db.custom_insert(pathinsert, params)
+         
+        if err != DB_NO_ERROR:
+            return err
+
+        if queryret == None:
+            return DB_DATA_ERROR
+                
+        result['path_id'] = queryret[0]
+        amp_trace_paths[keystr] = queryret[0]
    
     filtered = {}
     for col in traceroute_datacols:
