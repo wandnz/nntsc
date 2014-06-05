@@ -359,6 +359,7 @@ class DBWorker(threading.Thread):
                         lastts = history[-1]['timestamp']
                     else:
                         lastts = start
+                    
                     err = self._enqueue_history(name, currlabel, history, \
                             more, freq, lastts)
                     if err != DBWORKER_SUCCESS:
@@ -374,9 +375,9 @@ class DBWorker(threading.Thread):
                 historysize = 0
             
             if rows is None:    
-                err = self._enqueue_history(name, label, [], more, 0, start)
-                if err != DBWORKER_SUCCESS:
-                    return err
+                #err = self._enqueue_history(name, label, [], more, 0, start)
+                #if err != DBWORKER_SUCCESS:
+                #    return err
                 continue
 
             # Don't keep more than 10,000 results without exporting some
@@ -405,11 +406,15 @@ class DBWorker(threading.Thread):
                 freq = self._calc_frequency(freqstats, binsize)
 
             lastts = history[-1]['timestamp']
+        else:
+            freq = 0
+            lastts = start
+            history = []
 
-            err = self._enqueue_history(name, currlabel, history, more, 
-                    freq, lastts)
-            if err != DBWORKER_SUCCESS:
-                return err
+        err = self._enqueue_history(name, currlabel, history, more, 
+                freq, lastts)
+        if err != DBWORKER_SUCCESS:
+            return err
 
 
         # Also remember to export empty history for any streams that had
