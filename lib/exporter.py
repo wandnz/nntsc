@@ -411,10 +411,11 @@ class DBWorker(threading.Thread):
             lastts = start
             history = []
 
-        err = self._enqueue_history(name, currlabel, history, more, 
-                freq, lastts)
-        if err != DBWORKER_SUCCESS:
-            return err
+        if currlabel != -1:
+            err = self._enqueue_history(name, currlabel, history, more, 
+                    freq, lastts)
+            if err != DBWORKER_SUCCESS:
+                return err
 
 
         # Also remember to export empty history for any streams that had
