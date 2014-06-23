@@ -142,8 +142,9 @@ class DBSelector(DatabaseCore):
         coldata = self.basic.cursor.fetchone()
 
         tname = coldata['streamtable']
-        sql = """SELECT * FROM streams, %s WHERE streams.id = %s.stream_id
-                 AND streams.id > %s""" % (tname, tname, "%s")
+        sql = """SELECT * FROM %s AS a JOIN streams AS b ON 
+                 (a.stream_id = b.id) WHERE a.stream_id > %s""" \
+                 % (tname, "%s")
       
         err = self._basicquery(sql, (minid,))
         if err != DB_NO_ERROR:
