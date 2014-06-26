@@ -297,9 +297,9 @@ def insert_rrd_streams(db, conf):
         logger.log("Error while fetching existing RRD streams from database")
         return
 
-    files = {}
+    files = set()
     for r in rrds:
-        files[r['filename']] = r['name']
+        files.add(r['filename'])
 
 
     if conf == "":
