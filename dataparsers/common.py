@@ -1,6 +1,6 @@
 from libnntsc.dberrorcodes import *
 
-def create_new_stream(db, exp, basecol, subtype, name, streamcols, result,
+def create_new_stream(db, exp, basecol, subtype, streamcols, result,
         timestamp, streamtable, datatable):
 
     streamprops = {}
@@ -13,7 +13,7 @@ def create_new_stream(db, exp, basecol, subtype, name, streamcols, result,
     while 1:
         errorcode = DB_NO_ERROR
         colid, streamid = db.insert_stream(streamtable, datatable,
-            basecol, subtype, name, timestamp, streamprops)
+            timestamp, streamprops)
 
         if colid < 0:
             errorcode = streamid
@@ -36,7 +36,6 @@ def create_new_stream(db, exp, basecol, subtype, name, streamcols, result,
     if exp == None:
         return streamid
 
-    streamprops['name'] = name
     exp.publishStream(colid, basecol + "_" + subtype, streamid, streamprops)
     return streamid
 

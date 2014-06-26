@@ -81,12 +81,9 @@ def add_new_stream(db, exp, mon, freq, proto, metric, ts):
     if metric == "observed":
         metstr = "Observed "
 
-    namestr = "%s%s users -- measured from %s every %s seconds" \
-            % (metstr, proto, mon, freq)
-
     props = {'source':mon, 'freq':freq, 'protocol':proto, 'metric':metric}
 
-    return create_new_stream(db, exp, "lpi", "users", namestr, streamcols,
+    return create_new_stream(db, exp, "lpi", "users", streamcols,
             props, ts, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 

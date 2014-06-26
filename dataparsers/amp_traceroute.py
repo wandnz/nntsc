@@ -114,15 +114,13 @@ def create_existing_stream(stream_data):
 def insert_stream(db, exp, source, dest, size, address, timestamp):
     """ Insert a new traceroute stream into the streams table """
 
-    name = "traceroute %s:%s:%s:%s" % (source, dest, address, size)
-
     props = {"source":source, "destination":dest,
             "packet_size":size, "address": address}
 
     while 1:
         errorcode = DB_NO_ERROR
         colid, streamid = db.insert_stream(STREAM_TABLE_NAME, DATA_TABLE_NAME, 
-                "amp", "traceroute", name, timestamp, props)
+                timestamp, props)
         
         if colid < 0:
             errorcode = streamid
@@ -160,7 +158,6 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     if exp == None:
         return streamid
 
-    props['name'] = name
     exp.publishStream(colid, "amp_traceroute", streamid, props)
     
     return streamid

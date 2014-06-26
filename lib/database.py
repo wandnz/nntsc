@@ -844,8 +844,7 @@ class DBInsert(DatabaseCore):
         return row[0]
 
 
-    def insert_stream(self, tablename, datatable, basecol, submodule, 
-            name, timestamp, streamprops):
+    def insert_stream(self, tablename, datatable, timestamp, streamprops):
 
         colid = 0
 

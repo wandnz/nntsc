@@ -65,17 +65,7 @@ def create_existing_stream(stream_data):
     amp_tput_streams[key] = streamid
 
 def insert_stream(db, exp, timestamp, result):
-    if result['tcpreused'] == True:
-        reuse = ", reused"
-    else:
-        reuse = ""
-
-    name = "throughput %s:%s %s (%s:%s) %s secs, %s byte writes%s" % ( \
-            result['source'], result['destination'], result['direction'], \
-            result['localaddress'], result['remoteaddress'], \
-            result['duration'], result['writesize'], reuse) 
-
-    return create_new_stream(db, exp, "amp", "throughput", name, 
+    return create_new_stream(db, exp, "amp", "throughput", 
             tput_streamcols, result, timestamp, STREAM_TABLE_NAME, 
             DATA_TABLE_NAME)
 

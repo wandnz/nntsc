@@ -97,12 +97,10 @@ when the AMP module is first instantiated"""
 def insert_stream(db, exp, source, dest, size, address, timestamp):
     """ Insert a new stream into the database and export to listeners """
 
-    name = "icmp %s:%s:%s:%s" % (source, dest, address, size)
-
     props = {"source":source, "destination":dest,
             "packet_size":size, "datastyle":"rtt_ms", "address":address}
 
-    return create_new_stream(db, exp, "amp", "icmp", name, icmp_streamcols,
+    return create_new_stream(db, exp, "amp", "icmp", icmp_streamcols,
             props, timestamp, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 

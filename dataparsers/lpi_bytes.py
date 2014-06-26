@@ -85,13 +85,10 @@ def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
     if dir == "in":
         dirstr = "incoming"
 
-    namestr = "%s %s bytes for user %s -- measured from %s every %s seconds" \
-            % (proto, dirstr, user, mon, freq)
-
     props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 
             'protocol':proto}
     
-    return create_new_stream(db, exp, "lpi", "bytes", namestr, streamcols,
+    return create_new_stream(db, exp, "lpi", "bytes", streamcols,
             props, ts, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 

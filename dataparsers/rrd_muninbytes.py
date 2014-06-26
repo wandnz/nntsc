@@ -63,14 +63,14 @@ def data_table(db):
     return DATA_TABLE_NAME
 
 
-def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
+def insert_stream(db, exp, filename, switch, interface, dir, minres,
         rows, label):
 
     props = {"filename":filename, "switch":switch,
             "interface":interface, "direction":dir, "minres":minres,
             "highrows":rows, "interfacelabel":label}
 
-    return create_new_stream(db, exp, "rrd", "muninbytes", name, 
+    return create_new_stream(db, exp, "rrd", "muninbytes", 
             rrd_streamcols, props, 0, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 

@@ -60,12 +60,12 @@ def data_table(db):
         return None
     return DATA_TABLE_NAME
 
-def insert_stream(db, exp, name, fname, source, host, minres, rows):
+def insert_stream(db, exp, fname, source, host, minres, rows):
 
     props = {"filename":fname, "source":source, "host":host,
             "minres":minres, "highrows":rows}
 
-    return create_new_stream(db, exp, "rrd", "smokeping", name, 
+    return create_new_stream(db, exp, "rrd", "smokeping",  
             smoke_streamcols, props, 0, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 

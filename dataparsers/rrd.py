@@ -251,7 +251,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             logger.log("All Smokeping RRDs must have a 'name' parameter")
             return
 
-        code = rrd_smokeping.insert_stream(db, None, params['name'], 
+        code = rrd_smokeping.insert_stream(db, None,  
                 params['file'],
                 params["source"], params['host'], minres, rows)
 
@@ -281,9 +281,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing):
             label = params["interfacelabel"]
             namelabel = label
 
-        muninname = params["switch"] + " >> " + namelabel + " (Bytes " + params["direction"] + ")"
-
-        code = rrd_muninbytes.insert_stream(db, None, muninname, params['file'],
+        code = rrd_muninbytes.insert_stream(db, None, params['file'],
                 params['switch'], params['interface'], params['direction'],
                 minres, rows, label)
 

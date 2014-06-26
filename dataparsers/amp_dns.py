@@ -82,9 +82,7 @@ def create_existing_stream(s):
     amp_dns_streams[key] = s['stream_id']
 
 def insert_stream(db, exp, data, timestamp):
-    name = "dns %s:%s:%s" % (data['source'], data['destination'], data['query'])
-
-    return create_new_stream(db, exp, "amp", "dns", name, dns_streamcols,
+    return create_new_stream(db, exp, "amp", "dns", dns_streamcols,
             data, timestamp, STREAM_TABLE_NAME, DATA_TABLE_NAME)
 
 def stream_table(db):
