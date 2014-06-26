@@ -19,7 +19,7 @@
 #
 # $Id$
 
-
+import time
 import libnntscclient.logger as logger
 from libnntsc.dberrorcodes import *
 from libnntsc.parsers.common import create_new_stream, insert_data
@@ -72,6 +72,13 @@ def insert_stream(db, exp, name, filename, switch, interface, dir, minres,
 
     return create_new_stream(db, exp, "rrd", "muninbytes", name, 
             rrd_streamcols, props, 0, STREAM_TABLE_NAME, DATA_TABLE_NAME)
+
+
+def get_last_timestamp(db, stream):
+    err, lastts = db.get_last_timestamp(DATA_TABLE_NAME, stream)
+    if err != DB_NO_ERROR:
+        return time.time()
+    return lastts
 
 
 def process_data(db, exp, stream, ts, line):

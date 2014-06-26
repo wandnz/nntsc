@@ -20,10 +20,10 @@ import time
 
 class DBSelector(DatabaseCore):
     def __init__(self, uniqueid, dbname, dbuser=None, dbpass=None, dbhost=None,
-            timeout=0):
+            timeout=0, cachetime=86400):
 
         super(DBSelector, self).__init__(dbname, dbuser, dbpass, dbhost, 
-                False, False, timeout)
+                False, False, timeout, cachetime)
 
         self.qb = QueryBuilder()
         self.dbselid = uniqueid
@@ -345,7 +345,11 @@ class DBSelector(DatabaseCore):
                 yield(None, label, None, None, None)
                 continue
 
-            self._generate_from(table, label, streams, start_time, stop_time)
+            err = self._generate_from(table, label, streams, start_time, 
+                    stop_time)
+            if err != DB_NO_ERROR:
+                yield(None, label, None, None, DBQueryException(err))
+
             order = ["outsel", "innersel", "activestreams", "activejoin", 
                     "union", "joincondition", "wheretime", "outselend",
                     "outgroup"]
@@ -448,7 +452,10 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("order", orderclause, [])
 
         for label, streams in labels.iteritems():
-            self._generate_from(table, label, streams, start_time, stop_time)
+            err = self._generate_from(table, label, streams, start_time, 
+                    stop_time)
+            if err != DB_NO_ERROR:
+                yield(None, label, None, None, DBQueryException(err))
             order = ["select", "activestreams", "activejoin", "union",
                     "joincondition", "wheretime", "order"]
             sql, params = self.qb.create_query(order)
@@ -500,6 +507,103 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("union", sql, unionparams)
 
 
+    def _get_last_timestamp_stream(self, sid, table):
+        lastts = self.streamcache.fetch_stream(sid)
+
+        if lastts != -1:
+            # Reset cache timeout to keep stream in cache longer
+            self.streamcache.store_stream(sid, lastts)
+            self.cachehits += 1
+            return DB_NO_ERROR, lastts
+
+        self.dbqueries += 1
+
+        # Nothing useful in cache, query data table for max timestamp
+        # Warning, this isn't going to be fast so try to avoid doing
+        # this wherever possible!
+        query = "SELECT max(timestamp) FROM %s_" % (table)
+        query += "%s"   # stream id goes in here
+       
+        err = self._basicquery(query, (sid,))
+        if err != DB_NO_ERROR:
+            return err, 0
+
+        if self.basic.cursor.rowcount != 1:
+            log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+            return DB_CODING_ERROR, 0
+
+        row = self.basic.cursor.fetchone()
+
+        if row[0] == None:
+            lastts = 0
+        else:
+            lastts = int(row[0])
+            self.streamcache.store_stream(sid, lastts)
+        
+        err = self._releasebasic()
+        if err != DB_NO_ERROR:
+            return err, 0
+        
+        return DB_NO_ERROR, lastts
+    
+    def _get_first_timestamp_stream(self, sid, table):
+        firstts = self.streamcache.fetch_firstts(sid)
+
+        if firstts != -1:
+            # Reset cache timeout to keep stream in cache longer
+            self.streamcache.store_firstts(sid, firstts)
+            self.cachehits += 1
+            return DB_NO_ERROR, firstts
+
+        self.dbqueries += 1
+        # Nothing useful in cache, query data table for max timestamp
+        # Warning, this isn't going to be fast so try to avoid doing
+        # this wherever possible!
+        query = "SELECT min(timestamp) FROM %s_" % (table)
+        query += "%s"   # stream id goes in here
+       
+        err = self._basicquery(query, (sid,))
+        if err != DB_NO_ERROR:
+            return err, 0
+
+        if self.basic.cursor.rowcount != 1:
+            log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+            return DB_CODING_ERROR, 0
+
+        row = self.basic.cursor.fetchone()
+
+        if row[0] == None:
+            firstts = 0
+        else:
+            firstts = int(row[0])
+            self.streamcache.store_firstts(sid, firstts)
+        
+        err = self._releasebasic()
+        if err != DB_NO_ERROR:
+            return err, 0
+        
+        return DB_NO_ERROR, firstts
+
+    def _filter_active_streams(self, table, streams, start, end, label):
+        filtered = []
+        self.cachehits = 0
+        self.dbqueries = 0
+
+        for sid in streams:
+            err, lastts = self._get_last_timestamp_stream(sid, table)
+            if err != DB_NO_ERROR:
+                return err, []
+
+            err, firstts = self._get_first_timestamp_stream(sid, table)
+            if err != DB_NO_ERROR:
+                return err, []
+
+            if firstts <= end and lastts >= start:
+                filtered.append(sid)
+
+        print len(streams), len(filtered), self.cachehits, self.dbqueries
+        return DB_NO_ERROR, filtered
+
     # It looks like restricting the number of stream ids that are checked for
     # in the data table helps significantly with performance, so if we can
     # exclude all the streams that aren't in scope, we have a much smaller
@@ -511,11 +615,12 @@ class DBSelector(DatabaseCore):
         """ Forms a FROM clause for an SQL query that encompasses all
             streams in the provided list that fit within a given time period.
         """
-        uniquestreams = {}
+        err, filtered = self._filter_active_streams(table, streams, start, end,
+                label)
+        if err != DB_NO_ERROR:
+            return err
 
-        for s in streams:
-            if s not in uniquestreams:
-                uniquestreams[s] = 0
+        uniquestreams = list(set(streams))
 
         # build the case statement that will label our stream ids
         self._generate_label_case(label, streams)
@@ -533,17 +638,14 @@ class DBSelector(DatabaseCore):
             caseparams.append(label)
         active += " END as label FROM streams "
         
-        active += "WHERE lasttimestamp >= %s AND firsttimestamp <= %s"
-        caseparams += [start, end]
-
-        active += " AND id in ("
+        active += "WHERE id in ("
         count = len(uniquestreams)
         for i in range(0, count):
             active += "%s"
             if i != count - 1:
                 active += ", "
         active += ")) AS activestreams"
-        caseparams += uniquestreams.keys()
+        caseparams += uniquestreams
 
         self.qb.add_clause("activestreams", active, caseparams)
         self.qb.add_clause("activejoin", "INNER JOIN", [])
@@ -553,10 +655,11 @@ class DBSelector(DatabaseCore):
 
 
         if table == "data_amp_traceroute":
-            amp_traceroute.generate_union(self.qb, table, uniquestreams.keys())
+            amp_traceroute.generate_union(self.qb, table, uniquestreams)
         else:
-            self._generate_union(table, uniquestreams.keys())
+            self._generate_union(table, uniquestreams)
 
+        return DB_NO_ERROR
 
     def _generate_where(self, start, end):
         """ Forms a WHERE clause for an SQL query based on a time period """

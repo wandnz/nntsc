@@ -39,8 +39,9 @@ class RRDModule:
         if dbconf == {}:
             sys.exit(1)
 
+    
         self.db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"],
-                dbconf["host"])
+                dbconf["host"], cachetime=dbconf['cachetime'])
         self.db.connect_db(15)
 
         self.smokepings = {}
@@ -48,9 +49,17 @@ class RRDModule:
         self.rrds = {}
         for r in rrds:
             if r['modsubtype'] == 'smokeping':
+                lastts = rrd_smokeping.get_last_timestamp(self.db, 
+                        r['stream_id'])
+                r['lasttimestamp'] = lastts
                 self.smokepings[r['stream_id']] = r
-            if r['modsubtype'] == 'muninbytes':
+            elif r['modsubtype'] == 'muninbytes':
+                lastts = rrd_muninbytes.get_last_timestamp(self.db, 
+                        r['stream_id'])
+                r['lasttimestamp'] = lastts
                 self.muninbytes[r['stream_id']] = r
+            else:
+                continue
 
             r['lastcommit'] = r['lasttimestamp']
             filename = str(r['filename'])
@@ -99,13 +108,14 @@ class RRDModule:
         fetchres = rrdtool.fetch(fname, "AVERAGE", "-s",
                 str(startts), "-e", str(endts))
 
-
         current = int(fetchres[0][0])
         last = int(fetchres[0][1])
         step = int(fetchres[0][2])
 
         data = fetchres[2]
         current += step
+
+        update_needed = False
 
         for line in data:
 
@@ -126,16 +136,8 @@ class RRDModule:
             if code == DB_NO_ERROR:
                 if current > r['lasttimestamp']:
                     r['lasttimestamp'] = current
+                    update_needed = True
 
-                # RRD streams are created before we see any data 
-                # so we have to update firsttimestamp when we see 
-                # the first data point
-                if (r['firsttimestamp'] == 0):
-                    r['firsttimestamp'] = current;
-                    code = self.db.set_firsttimestamp(
-                                r['stream_id'], 
-                                current)
-            
             if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:
                 return code
                 
@@ -147,6 +149,9 @@ class RRDModule:
                 logger.log("Error while inserting RRD data")
 
             current += step
+
+        if not update_needed:
+            return DB_NO_ERROR
 
         code = self.db.update_timestamp([r['stream_id']],
                 r['lasttimestamp'])

@@ -92,11 +92,15 @@ def get_nntsc_db_config(nntsc_config):
     dbpass = get_nntsc_config(nntsc_config, 'database', 'password')
     if dbpass == "NNTSCConfigMissing":
         dbpass = None
+    cachetime = get_nntsc_config(nntsc_config, 'database', 'streamcachetime')
+    if cachetime == "NNTSCConfigMissing":
+        cachetime = 86400
 
     if "NNTSCConfigError" in [dbhost, dbname, dbuser, dbpass]:
         return {}
 
-    return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass}
+    return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass,
+            "cachetime":int(cachetime)}
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

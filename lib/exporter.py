@@ -669,7 +669,8 @@ class DBWorker(threading.Thread):
     def _connect_database(self):
         self.db = DBSelector(self.threadid, self.dbconf["name"], 
                 self.dbconf["user"],
-                self.dbconf["pass"], self.dbconf["host"], self.timeout)
+                self.dbconf["pass"], self.dbconf["host"], self.timeout,
+                cachetime = self.dbconf["cachetime"])
         self.db.connect_db(30)
 
     def run(self):

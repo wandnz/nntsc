@@ -25,6 +25,7 @@ import psycopg2
 import psycopg2.extras
 from libnntscclient.logger import *
 from libnntsc.dberrorcodes import *
+from libnntsc.streamcache import StreamCache
 
 class NNTSCCursor(object):
     def __init__(self, connstr, autocommit=False, name=None):
@@ -221,7 +222,7 @@ class NNTSCCursor(object):
 
 class DatabaseCore(object):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False, timeout=0):
+            new=False, debug=False, timeout=0, cachetime=86400):
 
         #no host means use the unix socket
         if dbhost == "":
@@ -248,6 +249,8 @@ class DatabaseCore(object):
         self.connstr = connstr
 
         self.basic = NNTSCCursor(self.connstr, False, None)
+
+        self.streamcache = StreamCache(dbname, cachetime)
 
     def connect_db(self, retrywait):
         return self.basic.connect(retrywait)
@@ -379,10 +382,10 @@ class DatabaseCore(object):
 
 class DBInsert(DatabaseCore):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False):
+            new=False, debug=False, cachetime=86400):
 
         super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost, \
-                new, debug)
+                new, debug, cachetime=cachetime)
 
         self.streams = NNTSCCursor(self.connstr, False, None)
         self.data = NNTSCCursor(self.connstr, False, None)
@@ -682,8 +685,12 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err, -1
 
+
         # Return the new stream id
         newid = self.streams.cursor.fetchone()[0]
+
+        if ts != 0:        
+            self.streamcache.store_firstts(newid, ts)
 
         return col_id, newid
 
@@ -746,28 +753,44 @@ class DBInsert(DatabaseCore):
         return DB_NO_ERROR
  
     def update_timestamp(self, stream_ids, lasttimestamp):
-        if len(stream_ids) == 0:
-            return DB_NO_ERROR
-        sql = "UPDATE streams SET lasttimestamp=%s "
-        sql += "WHERE id IN (%s)" % (",".join(["%s"] * len(stream_ids)))
-
-        err = self._dataquery(sql, tuple([lasttimestamp] + stream_ids))
-
-        if err != DB_NO_ERROR:
-            return err        
-
-        #self.conn.commit()
+        
+        for sid in stream_ids:
+            self.streamcache.store_stream(sid, lasttimestamp)
+            log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
+        
         return DB_NO_ERROR
 
-    def set_firsttimestamp(self, stream_id, ts):
-       
-        sql = "UPDATE streams SET firsttimestamp=%s WHERE id = %s"
- 
-        err = self._dataquery(sql, (ts, stream_id))
+    def get_last_timestamp(self, table, streamid):
+        lastts = self.streamcache.fetch_stream(streamid)
 
-        if err != DB_NO_ERROR:
-            return err        
-        return DB_NO_ERROR
+        if lastts == -1:
+
+            # Nothing useful in cache, query data table for max timestamp
+            # Warning, this isn't going to be fast so try to avoid doing
+            # this wherever possible!
+            query = "SELECT max(timestamp) FROM %s_" % (table)
+            query += "%s"   # stream id goes in here
+
+            err = self._basicquery(query, (streamid,))
+            if err != DB_NO_ERROR:
+                return err, 0
+
+            if self.basic.cursor.rowcount != 1:
+                log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+                return DB_CODING_ERROR, []
+
+            row = self.basic.cursor.fetchone()
+            if row[0] == None:
+                return DB_NO_ERROR, 0
+
+            lastts = int(row[0])
+            
+            err = self._releasebasic()
+            if err != DB_NO_ERROR:
+                return err, 0
+    
+        return DB_NO_ERROR, lastts
+
 
     def find_existing_stream(self, st, props):
         # We know a stream already exists that matches the given properties
