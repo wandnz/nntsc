@@ -142,8 +142,7 @@ class DBSelector(DatabaseCore):
         coldata = self.basic.cursor.fetchone()
 
         tname = coldata['streamtable']
-        sql = """SELECT * FROM %s AS a JOIN streams AS b ON 
-                 (a.stream_id = b.id) WHERE a.stream_id > %s""" \
+        sql = """SELECT * FROM %s WHERE stream_id > %s""" \
                  % (tname, "%s")
       
         err = self._basicquery(sql, (minid,))
@@ -267,7 +266,7 @@ class DBSelector(DatabaseCore):
         # Find the data table and make sure we are only querying for
         # valid columns
         try:
-            table, columns = self._get_data_table(col)
+            table, columns, streamtable = self._get_data_table(col)
         except DBQueryException as e:
             yield(None, None, None, None, e)
 
@@ -308,7 +307,7 @@ class DBSelector(DatabaseCore):
 
         # Constructing the innermost SELECT query, which lists the label for
         # each measurement
-        innselclause = " SELECT label, timestamp "
+        innselclause = " SELECT nntsclabel, timestamp "
 
         uniquecols = list(set([k[0] for k in aggcols]))
         for col in uniquecols:
@@ -320,7 +319,7 @@ class DBSelector(DatabaseCore):
         
         # Constructing the outer SELECT query, which will aggregate across
         # each label to find the aggregate values
-        outselclause = "SELECT label"
+        outselclause = "SELECT nntsclabel"
         for col in labeled_groupcols:
             outselclause += "," + col
         for col in labeled_aggcols:
@@ -332,11 +331,11 @@ class DBSelector(DatabaseCore):
         outselend = " ) AS aggregates"
         self.qb.add_clause("outselend", outselend, [])
 
-        outgroup = " GROUP BY label"
+        outgroup = " GROUP BY nntsclabel"
         for col in groupcols:
             outgroup += ", " + col
 
-        outgroup += " ORDER BY label, timestamp"
+        outgroup += " ORDER BY nntsclabel, timestamp"
 
         self.qb.add_clause("outgroup", outgroup, [])
 
@@ -346,7 +345,7 @@ class DBSelector(DatabaseCore):
                 continue
 
             err = self._generate_from(table, label, streams, start_time, 
-                    stop_time)
+                    stop_time, streamtable)
             if err != DB_NO_ERROR:
                 yield(None, label, None, None, DBQueryException(err))
 
@@ -411,7 +410,7 @@ class DBSelector(DatabaseCore):
 
         # Find the data table for the requested collection
         try:
-            table, columns = self._get_data_table(col)
+            table, columns, streamtable = self._get_data_table(col)
         except DBQueryException as e:
             yield(None, None, None, None, e)
 
@@ -428,10 +427,11 @@ class DBSelector(DatabaseCore):
         # These columns are important so include them regardless
         if 'timestamp' not in selectcols:
             selectcols.append('timestamp')
-        if 'stream_id' not in selectcols:
-            selectcols.append('stream_id')
-        if 'label' not in selectcols:
-            selectcols.append('label')
+        while 'stream_id' in selectcols:
+            selectcols.remove('stream_id')
+        
+        selectcols.append("activestreams.stream_id")
+        selectcols.append("nntsclabel")
 
         self.qb.reset()
         order = []
@@ -448,12 +448,12 @@ class DBSelector(DatabaseCore):
         self._generate_where(start_time, stop_time)
 
         # Order the results both chronologically and by stream id
-        orderclause = " ORDER BY label, timestamp " 
+        orderclause = " ORDER BY nntsclabel, timestamp " 
         self.qb.add_clause("order", orderclause, [])
 
         for label, streams in labels.iteritems():
             err = self._generate_from(table, label, streams, start_time, 
-                    stop_time)
+                    stop_time, streamtable)
             if err != DB_NO_ERROR:
                 yield(None, label, None, None, DBQueryException(err))
             order = ["select", "activestreams", "activejoin", "union",
@@ -601,7 +601,7 @@ class DBSelector(DatabaseCore):
             if firstts <= end and lastts >= start:
                 filtered.append(sid)
 
-        print len(streams), len(filtered), self.cachehits, self.dbqueries
+        #print len(streams), len(filtered), self.cachehits, self.dbqueries
         return DB_NO_ERROR, filtered
 
     # It looks like restricting the number of stream ids that are checked for
@@ -611,7 +611,7 @@ class DBSelector(DatabaseCore):
     # TODO this needs to be tidied up, returning lists of arguments back
     # through multiple levels of function calls doesn't feel very nice, and
     # anyway, the whole way sql query parameters are done needs to be reworked.
-    def _generate_from(self, table, label, streams, start, end):
+    def _generate_from(self, table, label, streams, start, end, streamtable):
         """ Forms a FROM clause for an SQL query that encompasses all
             streams in the provided list that fit within a given time period.
         """
@@ -627,18 +627,18 @@ class DBSelector(DatabaseCore):
 
         # get all stream ids that are active in the period
         caseparams = []
-        active = "FROM ((SELECT id, CASE "
+        active = "FROM ((SELECT stream_id, CASE "
         
         if len(streams) > 0:
-            active += " WHEN id in (%s)" % (
+            active += " WHEN stream_id in (%s)" % (
                 ",".join(["%s"] * len(streams)))
             active += " THEN %s"
 
             caseparams += streams
             caseparams.append(label)
-        active += " END as label FROM streams "
+        active += " END as nntsclabel FROM %s " % (streamtable)
         
-        active += "WHERE id in ("
+        active += "WHERE stream_id in ("
         count = len(uniquestreams)
         for i in range(0, count):
             active += "%s"
@@ -650,7 +650,7 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("activestreams", active, caseparams)
         self.qb.add_clause("activejoin", "INNER JOIN", [])
 
-        joincond = "ON dataunion.stream_id = activestreams.id)"
+        joincond = "ON dataunion.stream_id = activestreams.stream_id)"
         self.qb.add_clause("joincondition", joincond, [])
 
 
@@ -686,6 +686,7 @@ class DBSelector(DatabaseCore):
 
         coldata = self.basic.cursor.fetchone()
         tname = coldata['datatable']
+        streamtname = coldata['streamtable']
         module = coldata['module']
         subtype = coldata['modsubtype']
 
@@ -713,7 +714,7 @@ class DBSelector(DatabaseCore):
         if err != DB_NO_ERROR:
             log("Error while tidying up after querying data table properties")
             raise DBQueryException(err)
-        return table, columns
+        return table, columns, streamtname
 
     def _sanitise_columns(self, columns, selcols):
         """ Removes columns from the provided list if they are not present

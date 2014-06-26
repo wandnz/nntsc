@@ -129,7 +129,7 @@ class NNTSCCursor(object):
             return DB_INTERRUPTED
         except psycopg2.Error as e:
             # Some disconnect cases seem to end up here :/
-            if "server closed the connection unexpectedly" in e.str():
+            if "server closed the connection unexpectedly" in str(e):
                 log("Database appears to have disappeared, fell through to catch-all error case -- reconnecting")
                 self.reconnect()
                 return DB_OPERATIONAL_ERROR
@@ -350,8 +350,7 @@ class DatabaseCore(object):
 
         streams = []
         for cid, (tname, sub) in streamtables.items():
-            sql = """ SELECT * FROM streams, %s WHERE streams.collection=%s
-                      AND streams.id = %s.stream_id """ % (tname, "%s", tname)
+            sql = """ SELECT * FROM %s """ % (tname)
             
             err = self._basicquery(sql, (cid,))
             if err != DB_NO_ERROR:
@@ -570,6 +569,45 @@ class DBInsert(DatabaseCore):
 
         self.create_aggregators()
         
+        # Function to create a sequence if it doesn't already exist
+        # Borrowed from an answer on stack overflow:
+        # http://stackoverflow.com/questions/11905868/check-if-sequence-exists-postgres-plpgsql
+        seqfunc = """
+            CREATE OR REPLACE FUNCTION create_seq(_seq text, 
+                    _schema text = 'public') RETURNS void AS
+            $func$
+            DECLARE
+               _fullname text := quote_ident(_seq);
+
+            BEGIN
+            -- If an object of the name exists, the first RAISE EXCEPTION 
+            -- raises a meaningful message immediately.
+            -- Else, the failed cast to regclass raises its own exception 
+            -- "undefined_table".
+            -- This particular error triggers sequence creation further down.
+
+            RAISE EXCEPTION 'Object >>%<< of type "%" already exists.'
+               ,_fullname
+               ,(SELECT c.relkind FROM pg_class c
+                 WHERE  c.oid = _fullname::regclass    -- error if non-existent
+                );
+
+            EXCEPTION WHEN undefined_table THEN -- SQLSTATE '42P01'
+                EXECUTE 'CREATE SEQUENCE ' || _fullname;
+                RAISE NOTICE 'New sequence >>%<< created.', _fullname;
+
+            END
+            $func$  LANGUAGE plpgsql STRICT;
+
+            COMMENT ON FUNCTION create_seq(text, text) IS 
+                'Create new seq if name is free.
+                 $1 _seq  .. name of sequence
+                 $2 _name .. name of schema (optional; default is "public")';       
+        """
+        err = self._basicquery(seqfunc)       
+        if err != DB_NO_ERROR:
+            return err
+
         coltable = """CREATE TABLE IF NOT EXISTS collections (
                 id SERIAL PRIMARY KEY,
                 module varchar NOT NULL,
@@ -581,42 +619,17 @@ class DBInsert(DatabaseCore):
         err = self._basicquery(coltable)       
         if err != DB_NO_ERROR:
             return err
-        
-        streamtable = """CREATE TABLE IF NOT EXISTS streams (
-                id SERIAL PRIMARY KEY,
-                collection integer NOT NULL 
-                    REFERENCES collections (id) ON DELETE CASCADE,
-                name character varying NOT NULL,
-                lasttimestamp integer NOT NULL,
-                firsttimestamp integer)"""
 
-        err = self._basicquery(streamtable)
+        createseq = """SELECT create_seq('stream_id_seq');"""
+        err = self._basicquery(createseq)       
         if err != DB_NO_ERROR:
             return err
-        
+
         err = self._releasebasic()
         if err != DB_NO_ERROR:
             log("Failed to tidy up after creating core tables")
             return err
-       
-        err = self.create_index("index_streams_collection", "streams", 
-                    ["collection"])
-        if err != DB_NO_ERROR:
-            return err
 
-        err = self.create_index("index_streams_first", "streams", 
-                    ["firsttimestamp"])
-        if err != DB_NO_ERROR:
-            return err
-        
-        err = self.create_index("index_streams_last", "streams", 
-                    ["lasttimestamp"])
-        if err != DB_NO_ERROR:
-            return err
-
-        err = self.streams.commit()
-        if err != DB_NO_ERROR:
-            return err
 
         for base,mod in modules.items():
             mod.tables(self)
@@ -744,7 +757,12 @@ class DBInsert(DatabaseCore):
             err = self._basicquery("""DROP TABLE IF EXISTS %s CASCADE""" % (r['table_name'],))
             if err != DB_NO_ERROR:
                 return err            
-        
+       
+        err = self._basicquery("""DROP SEQUENCE IF EXISTS "stream_id_seq" """)
+
+        if err != DB_NO_ERROR:
+            return err
+ 
         err = self._releasebasic()
         if err != DB_NO_ERROR:
             log("Failed to tidy up after dropping all tables")
@@ -756,7 +774,7 @@ class DBInsert(DatabaseCore):
         
         for sid in stream_ids:
             self.streamcache.store_stream(sid, lasttimestamp)
-            log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
+            #log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
         
         return DB_NO_ERROR
 
@@ -829,18 +847,11 @@ class DBInsert(DatabaseCore):
     def insert_stream(self, tablename, datatable, basecol, submodule, 
             name, timestamp, streamprops):
 
-        colid, streamid = self.register_new_stream(basecol, submodule, 
-                name, timestamp, datatable)
-       
-        # NOTE: this is reversed for a reason -- putting the error code
-        # into the stream values makes it easier for callers to identify
-        # the error code
-        if colid < 0:
-            return -1, colid
+        colid = 0
 
         # insert stream into our stream table
         colstr = "(stream_id"
-        values = [streamid]
+        values = []
         for k,v in streamprops.iteritems():
             colstr += ', "%s"' % (k)
             values.append(v)    
@@ -849,19 +860,28 @@ class DBInsert(DatabaseCore):
         params = tuple(values)
         insert = "INSERT INTO %s " % (tablename)
         insert += colstr
-        insert += "VALUES (%s)" % (",".join(["%s"] * len(values)))
-
+        insert += "VALUES (nextval('stream_id_seq'), %s)" % \
+                (",".join(["%s"] * len(values)))
+        insert += " RETURNING stream_id"
         err = self._streamsquery(insert, params)
         
         if err == DB_DUPLICATE_KEY:
             return colid, self.find_existing_stream(tablename, streamprops)
         elif err != DB_NO_ERROR:
             return colid, err
+
+        # Grab the new stream ID so we can return it
+        newid = self.streams.cursor.fetchone()[0]
+
+        # Cache the observed timestamp as the first timestamp
+        if timestamp != 0:        
+            self.streamcache.store_firstts(newid, timestamp)
+
  
         # Create a new data table for this stream, using the "base" data
         # table as a template
         
-        err = self.clone_table(datatable, streamid)
+        err = self.clone_table(datatable, newid)
         if err != DB_NO_ERROR:
             return colid, err       
  
@@ -877,7 +897,7 @@ class DBInsert(DatabaseCore):
         # Also, don't live export the stream until all the new stream stuff
         # has been committed otherwise you will get netevmon asking for
         # data for a stream that hasn't had its data table committed yet.
-        return colid, streamid
+        return colid, newid
 
     def custom_insert(self, customsql, values):
         err = self._dataquery(customsql, values)
@@ -1016,7 +1036,7 @@ class DBInsert(DatabaseCore):
 
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
 
-        basesql += "stream_id integer PRIMARY KEY REFERENCES streams(id) ON DELETE CASCADE"
+        basesql += "stream_id integer PRIMARY KEY DEFAULT nextval('stream_id_seq')"
 
         basesql += self._columns_sql(columns)
 
