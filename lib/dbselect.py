@@ -567,7 +567,7 @@ class DBSelector(DatabaseCore):
             return err, 0
 
         if self.basic.cursor.rowcount != 1:
-            log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+            log("Unexpected number of results when querying for min timestamp: %d" % (self.basic.cursor.rowcount))
             return DB_CODING_ERROR, 0
 
         row = self.basic.cursor.fetchone()
@@ -584,10 +584,15 @@ class DBSelector(DatabaseCore):
         
         return DB_NO_ERROR, firstts
 
-    def _filter_active_streams(self, table, streams, start, end, label):
+    def filter_active_streams(self, collection, streams, start, end):
         filtered = []
         self.cachehits = 0
         self.dbqueries = 0
+        
+        try:
+            table, columns, streamtable = self._get_data_table(collection)
+        except DBQueryException as e:
+            return e.code
 
         for sid in streams:
             err, lastts = self._get_last_timestamp_stream(sid, table)
@@ -615,11 +620,6 @@ class DBSelector(DatabaseCore):
         """ Forms a FROM clause for an SQL query that encompasses all
             streams in the provided list that fit within a given time period.
         """
-        err, filtered = self._filter_active_streams(table, streams, start, end,
-                label)
-        if err != DB_NO_ERROR:
-            return err
-
         uniquestreams = list(set(streams))
 
         # build the case statement that will label our stream ids
@@ -637,6 +637,8 @@ class DBSelector(DatabaseCore):
             caseparams += streams
             caseparams.append(label)
         active += " END as nntsclabel FROM %s " % (streamtable)
+       
+        #print "Querying for streams", len(uniquestreams)
         
         active += "WHERE stream_id in ("
         count = len(uniquestreams)
