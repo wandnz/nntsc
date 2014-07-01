@@ -20,7 +20,7 @@ import time
 
 class DBSelector(DatabaseCore):
     def __init__(self, uniqueid, dbname, dbuser=None, dbpass=None, dbhost=None,
-            timeout=0, cachetime=86400):
+            timeout=0, cachetime=0):
 
         super(DBSelector, self).__init__(dbname, dbuser, dbpass, dbhost, 
                 False, False, timeout, cachetime)
@@ -481,7 +481,8 @@ class DBSelector(DatabaseCore):
 
         if lastts != -1:
             # Reset cache timeout to keep stream in cache longer
-            self.streamcache.store_stream(sid, lastts)
+            if self.streamcache.cachetime != 0:
+                self.streamcache.store_stream(sid, lastts)
             self.cachehits += 1
             return DB_NO_ERROR, lastts
 
@@ -520,7 +521,8 @@ class DBSelector(DatabaseCore):
 
         if firstts != -1:
             # Reset cache timeout to keep stream in cache longer
-            self.streamcache.store_firstts(sid, firstts)
+            if self.streamcache.cachetime != 0:
+                self.streamcache.store_firstts(sid, firstts)
             self.cachehits += 1
             return DB_NO_ERROR, firstts
 

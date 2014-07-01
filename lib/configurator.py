@@ -94,7 +94,7 @@ def get_nntsc_db_config(nntsc_config):
         dbpass = None
     cachetime = get_nntsc_config(nntsc_config, 'database', 'streamcachetime')
     if cachetime == "NNTSCConfigMissing":
-        cachetime = 86400
+        cachetime = 0
 
     if "NNTSCConfigError" in [dbhost, dbname, dbuser, dbpass]:
         return {}

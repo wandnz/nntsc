@@ -222,7 +222,7 @@ class NNTSCCursor(object):
 
 class DatabaseCore(object):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False, timeout=0, cachetime=86400):
+            new=False, debug=False, timeout=0, cachetime=0):
 
         #no host means use the unix socket
         if dbhost == "":
@@ -381,7 +381,7 @@ class DatabaseCore(object):
 
 class DBInsert(DatabaseCore):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False, cachetime=86400):
+            new=False, debug=False, cachetime=0):
 
         super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost, \
                 new, debug, cachetime=cachetime)
