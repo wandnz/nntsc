@@ -168,39 +168,6 @@ class DBSelector(DatabaseCore):
             raise DBQueryException(err)
         return selected
 
-    def select_active_streams_by_collection(self, coll, lastactivity):
-        """ Fetches all recently active streams belonging to a given collection
-            id.
-
-            Only streams with data after the lastactivity timestamp will be
-            returned. To get all streams for a collection, set lastactivity
-            to 0.
-
-            Returns a list of stream ids
-        """
-
-        sql = "SELECT id FROM streams WHERE collection=%s AND lasttimestamp>%s"
-        err = self._basicquery(sql, (coll, lastactivity))
-        
-        if err != DB_NO_ERROR:
-            log("Failed to query active streams for collection id %d" % (coll))
-            raise DBQueryException(err)
-        
-        active = []
-        while True:
-            row = self.basic.cursor.fetchone()
-            if row == None:
-                break
-            for stream_id in row.values():
-                active.append(stream_id)
-
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Error while tidying up after querying active streams by collection")
-            raise DBQueryException(err)
-        return active
-
-
     def select_aggregated_data(self, col, labels, aggcols,
             start_time = None, stop_time = None, groupcols = None,
             binsize = 0):
