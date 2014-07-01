@@ -620,7 +620,7 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             return err
 
-        createseq = """SELECT create_seq('stream_id_seq');"""
+        createseq = """SELECT create_seq('streams_id_seq');"""
         err = self._basicquery(createseq)       
         if err != DB_NO_ERROR:
             return err
@@ -758,7 +758,7 @@ class DBInsert(DatabaseCore):
             if err != DB_NO_ERROR:
                 return err            
        
-        err = self._basicquery("""DROP SEQUENCE IF EXISTS "stream_id_seq" """)
+        err = self._basicquery("""DROP SEQUENCE IF EXISTS "streams_id_seq" """)
 
         if err != DB_NO_ERROR:
             return err
@@ -859,7 +859,7 @@ class DBInsert(DatabaseCore):
         params = tuple(values)
         insert = "INSERT INTO %s " % (tablename)
         insert += colstr
-        insert += "VALUES (nextval('stream_id_seq'), %s)" % \
+        insert += "VALUES (nextval('streams_id_seq'), %s)" % \
                 (",".join(["%s"] * len(values)))
         insert += " RETURNING stream_id"
         err = self._streamsquery(insert, params)
@@ -1035,7 +1035,7 @@ class DBInsert(DatabaseCore):
 
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
 
-        basesql += "stream_id integer PRIMARY KEY DEFAULT nextval('stream_id_seq')"
+        basesql += "stream_id integer PRIMARY KEY DEFAULT nextval('streams_id_seq')"
 
         basesql += self._columns_sql(columns)
 
