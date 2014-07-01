@@ -344,8 +344,7 @@ class DBSelector(DatabaseCore):
                 yield(None, label, None, None, None)
                 continue
 
-            err = self._generate_from(table, label, streams, start_time, 
-                    stop_time, streamtable)
+            err = self._generate_from(table, label, streams, streamtable)
             if err != DB_NO_ERROR:
                 yield(None, label, None, None, DBQueryException(err))
 
@@ -452,10 +451,13 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("order", orderclause, [])
 
         for label, streams in labels.iteritems():
-            err = self._generate_from(table, label, streams, start_time, 
-                    stop_time, streamtable)
+            if len(streams) == 0:
+                yield(None, label, None, None, None)
+                continue
+            err = self._generate_from(table, label, streams, streamtable)
             if err != DB_NO_ERROR:
                 yield(None, label, None, None, DBQueryException(err))
+            
             order = ["select", "activestreams", "activejoin", "union",
                     "joincondition", "wheretime", "order"]
             sql, params = self.qb.create_query(order)
@@ -616,7 +618,7 @@ class DBSelector(DatabaseCore):
     # TODO this needs to be tidied up, returning lists of arguments back
     # through multiple levels of function calls doesn't feel very nice, and
     # anyway, the whole way sql query parameters are done needs to be reworked.
-    def _generate_from(self, table, label, streams, start, end, streamtable):
+    def _generate_from(self, table, label, streams, streamtable):
         """ Forms a FROM clause for an SQL query that encompasses all
             streams in the provided list that fit within a given time period.
         """
