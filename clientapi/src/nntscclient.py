@@ -45,6 +45,10 @@ class NNTSCClient:
         if reqtype == NNTSC_REQ_COLLECTION:
             col = 0
 
+        if reqtype == NNTSC_REQ_ACTIVE_STREAMS:
+            logger.log("Requesting active streams is no longer supported by NNTSC")
+            return -1
+
         request = struct.pack(nntsc_req_fmt, reqtype, col, start)
 
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_REQUEST,
@@ -195,10 +199,9 @@ class NNTSCClient:
             msgdict['streams'] = arrived
 
         if header[1] == NNTSC_ACTIVE_STREAMS:
-            name, more, arrived = pickle.loads(self.buf[header_end:total_len])
-            msgdict['collection'] = name
-            msgdict['more'] = more
-            msgdict['streams'] = arrived
+            logger.log("Current NNTSC Client version %s does not support ACTIVE_STREAMS messages" % (NNTSC_CLIENTAPI_VERSION))
+            logger.log("Closing client socket")
+            return -1, None
 
         if header[1] == NNTSC_HISTORY:
             compressed = self.buf[header_end:total_len]
