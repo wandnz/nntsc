@@ -200,10 +200,6 @@ class RRDModule:
             if result == RRD_HALT:
                 break
 
-            if err != DB_NO_ERROR:
-                logger.log("Error while committing RRD Data")
-                self.revert_rrds()
-
             time.sleep(30)
 
         logger.log("Halting RRD module")
