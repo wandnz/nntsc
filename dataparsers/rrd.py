@@ -152,6 +152,11 @@ class RRDModule:
 
         if not update_needed:
             return DB_NO_ERROR
+        
+        
+        err = self.db.commit_data()
+        if err != DB_NO_ERROR:
+            return err
 
         code = self.db.update_timestamp([r['stream_id']],
                 r['lasttimestamp'])
@@ -194,14 +199,6 @@ class RRDModule:
 
             if result == RRD_HALT:
                 break
-
-            err = self.db.commit_data()
-            if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
-                # Revert our lasttimestamp back to whenever we last
-                # successfully committed to ensure we re-insert the data
-                self.revert_rrds()
-                time.sleep(10)
-                continue
 
             if err != DB_NO_ERROR:
                 logger.log("Error while committing RRD Data")
