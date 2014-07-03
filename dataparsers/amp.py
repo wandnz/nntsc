@@ -229,7 +229,14 @@ class AmpModule:
 
         while 1:
             self.source.connect()
-            self.source.configure_consumer(self.process_data, self.commitfreq)
+            retval = self.source.configure_consumer(self.process_data, 
+                    self.commitfreq)
+            if retval == PIKA_CONSUMER_HALT:
+                break
+            if retval == PIKA_CONSUMER_RETRY:
+                logger.log("Failed to configure consumer, retrying in 5s")
+                time.sleep(5)
+                continue
 
             
             retval = self.source.run_consumer()

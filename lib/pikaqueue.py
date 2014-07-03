@@ -7,6 +7,7 @@ import logging
 
 PIKA_CONSUMER_HALT = 0
 PIKA_CONSUMER_RETRY = 1
+PIKA_CONSUMER_OK = 2
 
 class PikaNNTSCException(Exception):
     def __init__(self, retry):
@@ -123,7 +124,13 @@ class PikaConsumer(PikaBasic):
 
     def configure_consumer(self, callback, prefetch=1):
         self._channel.basic_qos(prefetch_count=prefetch)
-        self._channel.basic_consume(callback, queue=self._queuename)
+        try:
+            self._channel.basic_consume(callback, queue=self._queuename)
+        except pika.exceptions.ConnectionClosed:
+            self._channel.close()
+            return PIKA_CONSUMER_RETRY
+
+        return PIKA_CONSUMER_OK
 
     def run_consumer(self):
         try:
