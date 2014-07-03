@@ -180,7 +180,7 @@ def process_data(db, exp, timestamp, data, source):
             return res
         done[stream_id] = 0
 
-    return db.update_timestamp(done.keys(), timestamp)
+    return db.update_timestamp(DATA_TABLE_NAME, done.keys(), timestamp)
 
 
 def register(db):

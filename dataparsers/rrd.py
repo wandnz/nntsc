@@ -116,6 +116,7 @@ class RRDModule:
         current += step
 
         update_needed = False
+        datatable = None
 
         for line in data:
 
@@ -127,11 +128,15 @@ class RRDModule:
                 code = rrd_smokeping.process_data(self.db, 
                         self.exporter, r['stream_id'], current, 
                         line)
+                if datatable is None:
+                    datatable = rrd_smokeping.get_data_table_name()
 
             if r['modsubtype'] == "muninbytes":
                 code = rrd_muninbytes.process_data(self.db, 
                         self.exporter, r['stream_id'], current, 
                         line)
+                if datatable is None:
+                    datatable = rrd_muninbytes.get_data_table_name()
 
             if code == DB_NO_ERROR:
                 if current > r['lasttimestamp']:
@@ -158,7 +163,8 @@ class RRDModule:
         if err != DB_NO_ERROR:
             return err
 
-        code = self.db.update_timestamp([r['stream_id']],
+        if datatable is not None:
+            code = self.db.update_timestamp(datatable, [r['stream_id']],
                 r['lasttimestamp'])
 
         if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:

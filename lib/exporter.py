@@ -175,19 +175,10 @@ class DBWorker(threading.Thread):
 
         aggs = self._merge_aggregators(aggcols, aggfunc)
 
-        # Only query for historical data for streams that were active
-        # during that time period
-        filteredlabels = {}
-        for lab, streams in labels.iteritems():
-            err, filtered = self.db.filter_active_streams(name, streams, 
-                    start, stoppoint)
-
-            if err != DB_NO_ERROR:
-                return DBWORKER_ERROR
-            
-            filteredlabels[lab] = filtered
-
-        labels = filteredlabels
+        err, labels = self.db.filter_active_streams(name, labels, start, 
+                stoppoint)
+        if err != DB_NO_ERROR:
+            return DBWORKER_ERROR
 
         while start < stoppoint:
             queryend = start + MAX_HISTORY_QUERY
@@ -271,17 +262,10 @@ class DBWorker(threading.Thread):
 
         # Only query for historical data for streams that were active
         # during that time period
-        filteredlabels = {}
-        for lab, streams in labels.iteritems():
-            err, filtered = self.db.filter_active_streams(name, streams, 
-                    start, stoppoint)
-
-            if err != DB_NO_ERROR:
-                return DBWORKER_ERROR
-            
-            filteredlabels[lab] = filtered
-
-        labels = filteredlabels
+        err, labels = self.db.filter_active_streams(name, labels, start, 
+                stoppoint)
+        if err != DB_NO_ERROR:
+            return DBWORKER_ERROR
 
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY

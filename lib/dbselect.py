@@ -319,7 +319,7 @@ class DBSelector(DatabaseCore):
                     "union", "joincondition", "wheretime", "outselend",
                     "outgroup"]
             query, params = self.qb.create_query(order)
-   
+  
             err = self._dataquery(query, params)
             if err != DB_NO_ERROR:
                 yield(None, label, None, None, DBQueryException(err))
@@ -476,22 +476,8 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("union", sql, unionparams)
 
 
-    def _get_last_timestamp_stream(self, sid, table):
-        lastts = self.streamcache.fetch_stream(sid)
-
-        if lastts != -1:
-            # Reset cache timeout to keep stream in cache longer
-            if self.streamcache.cachetime != 0:
-                self.streamcache.store_stream(sid, lastts)
-            self.cachehits += 1
-            return DB_NO_ERROR, lastts
-
-        self.dbqueries += 1
-
-        # Nothing useful in cache, query data table for max timestamp
-        # Warning, this isn't going to be fast so try to avoid doing
-        # this wherever possible!
-        query = "SELECT max(timestamp) FROM %s_" % (table)
+    def _query_timestamp(self, datatable, sid, agg):
+        query = "SELECT %s(timestamp) FROM %s_" % (agg, datatable)
         query += "%s"   # stream id goes in here
        
         err = self._basicquery(query, (sid,))
@@ -499,86 +485,76 @@ class DBSelector(DatabaseCore):
             return err, 0
 
         if self.basic.cursor.rowcount != 1:
-            log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+            log("Unexpected number of results when querying for %s timestamp: %d" % (agg, self.basic.cursor.rowcount))
             return DB_CODING_ERROR, 0
 
         row = self.basic.cursor.fetchone()
-
+        
         if row[0] == None:
-            lastts = 0
+            ts = 0
         else:
-            lastts = int(row[0])
-            self.streamcache.store_stream(sid, lastts)
+            ts = int(row[0])
         
         err = self._releasebasic()
         if err != DB_NO_ERROR:
             return err, 0
-        
-        return DB_NO_ERROR, lastts
-    
-    def _get_first_timestamp_stream(self, sid, table):
-        firstts = self.streamcache.fetch_firstts(sid)
-
-        if firstts != -1:
-            # Reset cache timeout to keep stream in cache longer
-            if self.streamcache.cachetime != 0:
-                self.streamcache.store_firstts(sid, firstts)
-            self.cachehits += 1
-            return DB_NO_ERROR, firstts
 
         self.dbqueries += 1
-        # Nothing useful in cache, query data table for max timestamp
-        # Warning, this isn't going to be fast so try to avoid doing
-        # this wherever possible!
-        query = "SELECT min(timestamp) FROM %s_" % (table)
-        query += "%s"   # stream id goes in here
-       
-        err = self._basicquery(query, (sid,))
-        if err != DB_NO_ERROR:
-            return err, 0
+        return DB_NO_ERROR, ts
 
-        if self.basic.cursor.rowcount != 1:
-            log("Unexpected number of results when querying for min timestamp: %d" % (self.basic.cursor.rowcount))
-            return DB_CODING_ERROR, 0
+    def filter_active_streams(self, collection, labels, start, end):
+        filteredlabels = {}
 
-        row = self.basic.cursor.fetchone()
-
-        if row[0] == None:
-            firstts = 0
-        else:
-            firstts = int(row[0])
-            self.streamcache.store_firstts(sid, firstts)
-        
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            return err, 0
-        
-        return DB_NO_ERROR, firstts
-
-    def filter_active_streams(self, collection, streams, start, end):
-        filtered = []
-        self.cachehits = 0
-        self.dbqueries = 0
-        
         try:
             table, columns, streamtable = self._get_data_table(collection)
         except DBQueryException as e:
             return e.code
 
-        for sid in streams:
-            err, lastts = self._get_last_timestamp_stream(sid, table)
-            if err != DB_NO_ERROR:
-                return err, []
+        tsdict = self.streamcache.fetch_timestamp_dict(table)
 
-            err, firstts = self._get_first_timestamp_stream(sid, table)
-            if err != DB_NO_ERROR:
-                return err, []
+        for lab, streams in labels.iteritems():
+            self.cachehits = 0
+            self.dbqueries = 0
+        
+            filtered = []
+            for sid in streams:
+                if sid not in tsdict:
+                    tsdict[sid] = (None, None)
 
-            if firstts <= end and lastts >= start:
-                filtered.append(sid)
+                if tsdict[sid][0] == None:
+                    err, firstts = self._query_timestamp(table, sid, "min")
+                
+                    if err != DB_NO_ERROR:
+                        return err, {}
+                    # Not ideal, because this will re-fetch the dictionary
+                    # but means that we won't overwrite any recent updates
+                    # for other streams either (which is what would happen
+                    # if we just stored the whole tsdict at the end)
+                    self.streamcache.store_timestamps(table, sid, None, firstts)
+                    
+                else:
+                    self.cachehits += 1
+                    firstts = tsdict[sid][0]
 
-        #print len(streams), len(filtered), self.cachehits, self.dbqueries
-        return DB_NO_ERROR, filtered
+                if tsdict[sid][1] == None:
+                    err, lastts = self._query_timestamp(table, sid, "max")
+                    if err != DB_NO_ERROR:
+                        return err, {}
+                    # See firstts above for explanation why we store just
+                    # this stream rather than the whole tsdict
+                    self.streamcache.store_timestamps(table, sid, lastts)
+                else:
+                    self.cachehits += 1
+                    lastts = tsdict[sid][1]
+
+                tsdict[sid] = (firstts, lastts)
+
+                if firstts <= end and lastts >= start:
+                    filtered.append(sid)
+            filteredlabels[lab] = filtered
+            #print len(streams), len(filtered), self.cachehits, self.dbqueries
+
+        return DB_NO_ERROR, filteredlabels
 
     # It looks like restricting the number of stream ids that are checked for
     # in the data table helps significantly with performance, so if we can
@@ -609,7 +585,7 @@ class DBSelector(DatabaseCore):
             caseparams.append(label)
         active += " END as nntsclabel FROM %s " % (streamtable)
        
-        #print "Querying for streams", len(uniquestreams)
+        #print "Querying for streams", len(uniquestreams), time.time()
         
         active += "WHERE stream_id in ("
         count = len(uniquestreams)

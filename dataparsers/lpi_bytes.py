@@ -127,7 +127,7 @@ def process_data(db, exp, protomap, data):
             return code
         done.append(stream_id)
    
-    return db.update_timestamp(done, data['ts'])
+    return db.update_timestamp(DATA_TABLE_NAME, done, data['ts'])
     
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

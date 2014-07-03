@@ -104,5 +104,8 @@ def process_data(db, exp, stream, ts, line):
             DATA_TABLE_NAME, {"pings":"double precision[]"})
 
 
+def get_data_table_name():
+    return DATA_TABLE_NAME
+
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

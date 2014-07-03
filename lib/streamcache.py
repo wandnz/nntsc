@@ -18,46 +18,71 @@ class StreamCache(object):
     def __del__(self):
         self.mcpool.relinquish()
 
-    def store_firstts(self, streamid, timestamp):
-        self._store(streamid, timestamp, "firstts")
+    def store_timestamps(self, collection, streamid, last, first=None):
+        if first == None and last == None:
+            return
+        
+        coldict = self._fetch_dict(collection)
 
-    def store_stream(self, streamid, timestamp):
-        self._store(streamid, timestamp, "lastts")
+        if streamid not in coldict:
+            coldict[streamid] = (first, last)
+        else:
+            stamps = coldict[streamid]
+            # Don't overwrite the lasttimestamp if a more recent value
+            # is in the cache
+            if last is not None and last < stamps[1]:
+                last = stamps[1]
+            
+            if first == None:
+                stamps = (stamps[0], last)
+            elif last == None:
+                stamps = (first, stamps[1])
+            else:
+                stamps = (first, last)
+            coldict[streamid] = stamps
 
-    def fetch_firstts(self, streamid):
-        return self._fetch(streamid, "firstts")
+        self._store_dict(collection, coldict)
 
-    def fetch_stream(self, streamid):
-        return self._fetch(streamid, "lastts")
+    def store_timestamp_dict(self, collection, tsdict):
+        self._store_dict(collection, tsdict)
 
-    def _store(self, streamid, timestamp, tstype):
-        key = self._cache_key(streamid, tstype)
-        #print "store", key, self.cachetime, timestamp
+    def fetch_timestamp_dict(self, collection):
+        return self._fetch_dict(collection)
 
-        with self.mcpool.reserve() as mc:
-            try:
-                mc.set(key, timestamp, self.cachetime)
-            except pylibmc.SomeErrors as e:
-                log("Warning: pylibmc error while storing stream")
-                log(e)
+    def fetch_timestamps(self, collection, streamid):
 
-
-    def _fetch(self, streamid, tstype):
-        key = self._cache_key(streamid, tstype)
-        #print "fetch", key
-
+        coldict = self._fetch_dict(collection)
+        if streamid not in coldict:
+            return (None, None)
+        
+        return coldict[streamid]
+        
+    def _fetch_dict(self, collection):
+        key = self._dict_cache_key(collection)
+       
+        #print "Fetching using key", key 
         with self.mcpool.reserve() as mc:
             try:
                 if key in mc:
                     return mc.get(key)
             except pylibmc.SomeErrors as e:
-                log("Warning: pylibmc error while fetching stream")
+                log("Warning: pylibmc error while fetching collection timestamps")
+                log(e)
+        return {}
+
+    def _store_dict(self, collection, coldict):
+        key = self._dict_cache_key(collection)
+        
+        #print "Storing using key", key 
+        with self.mcpool.reserve() as mc:
+            try:
+                mc.set(key, coldict, self.cachetime)
+            except pylibmc.SomeErrors as e:
+                log("Warning: pylibmc error while storing collection timestamps")
                 log(e)
 
-        return -1
-
-
-    def _cache_key(self, streamid, tstype):
-        return "nntsc_%s_%s_%s" % (self.nntscid, tstype, str(streamid))
+    
+    def _dict_cache_key(self, collection):
+        return "nntsc_%s_%s" % (self.nntscid, str(collection))
 
 # vim: set smartindent shiftwidth=4 tabstop=4 softtabstop=4 expandtab :
