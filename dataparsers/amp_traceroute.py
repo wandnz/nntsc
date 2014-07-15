@@ -158,6 +158,12 @@ def insert_stream(db, exp, source, dest, size, address, timestamp):
     if exp == None:
         return streamid
 
+    err, colid = db.get_collection_id("amp", "traceroute")
+    if err != DB_NO_ERROR:
+        return err
+    if colid == 0:
+        return streamid
+
     exp.publishStream(colid, "amp_traceroute", streamid, props)
     
     return streamid
