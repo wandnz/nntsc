@@ -36,6 +36,12 @@ def create_new_stream(db, exp, basecol, subtype, streamcols, result,
     if exp == None:
         return streamid
 
+    err, colid = db.get_collection_id(basecol, subtype)
+    if err != DB_NO_ERROR:
+        return err
+    if colid == 0:
+        return streamid
+
     exp.publishStream(colid, basecol + "_" + subtype, streamid, streamprops)
     return streamid
 

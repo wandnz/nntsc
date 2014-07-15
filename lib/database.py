@@ -636,16 +636,43 @@ class DBInsert(DatabaseCore):
 
         return DB_NO_ERROR
 
-    def register_collection(self, mod, subtype, stable, dtable):
-       
+    def get_collection_id(self, mod, subtype):
+        
+        # Find the appropriate collection id
         colcheck = """SELECT * FROM collections WHERE module=%s 
                     AND modsubtype=%s"""
-       
+                
         err = self._basicquery(colcheck, (mod, subtype))
         if err != DB_NO_ERROR:
-            return err
+            return err, -1
 
-        if self.basic.cursor.rowcount > 0:
+        if self.basic.cursor.rowcount > 1:
+            log("Database Error: duplicate collections for %s:%s" % (mod, subtype))
+            self._releasebasic()
+            return DB_DATA_ERROR, -1
+        
+        if self.basic.cursor.rowcount == 0:
+            col_id = 0
+        else:
+            col = self.basic.cursor.fetchone()
+            col_id = col['id']
+        
+        err = self._releasebasic()
+        if err != DB_NO_ERROR:
+            log("Failed to tidy up after finding collection for new stream")
+            return err, col_id
+
+        return DB_NO_ERROR, col_id
+
+    def register_collection(self, mod, subtype, stable, dtable):
+
+        # Check if the collection already exists
+        err, colid = self.get_collection_id(mod, subtype)
+        if err != DB_NO_ERROR:
+            return err
+        
+        if colid != 0: 
+            # Collection already exists
             return DB_NO_ERROR
 
         insert = """INSERT INTO collections (module, modsubtype, 
@@ -661,51 +688,6 @@ class DBInsert(DatabaseCore):
             return err
         return DB_NO_ERROR
 
-    def register_new_stream(self, mod, subtype, name, ts, basedata):
-
-        # Find the appropriate collection id
-        colcheck = """SELECT * FROM collections WHERE module=%s 
-                    AND modsubtype=%s"""
-                
-        err = self._basicquery(colcheck, (mod, subtype))
-        if err != DB_NO_ERROR:
-            return err, -1
-
-        if self.basic.cursor.rowcount == 0:
-            log("Database Error: no collection for %s:%s" % (mod, subtype))
-            return DB_DATA_ERROR, -1
-
-        if self.basic.cursor.rowcount > 1:
-            log("Database Error: duplicate collections for %s:%s" % (mod, subtype))
-            return DB_DATA_ERROR, -1
-
-        col = self.basic.cursor.fetchone()
-        col_id = col['id']
-        
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after finding collection for new stream")
-            return err
-
-        insert = """INSERT INTO streams (collection, name, lasttimestamp,
-                    firsttimestamp) VALUES (%s, %s, %s, %s) RETURNING id
-                """
-        err = self._streamsquery(insert, (col_id, name, 0, ts))
-        
-        if err == DB_DUPLICATE_KEY:
-            log("Attempted to register duplicate stream for %s:%s, name was %s" % (mod, subtype, name))
-
-        if err != DB_NO_ERROR:
-            return err, -1
-
-
-        # Return the new stream id
-        newid = self.streams.cursor.fetchone()[0]
-
-        if ts != 0:        
-            self.streamcache.store_firstts(newid, ts)
-
-        return col_id, newid
 
     def clone_table(self, original, streamid, foreignkey=None):
         tablename = original + "_" + str(streamid)
