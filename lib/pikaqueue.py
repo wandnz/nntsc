@@ -89,7 +89,7 @@ class PikaPublisher(PikaBasic):
                     body=data,
                     properties=pika.BasicProperties(delivery_mode=2,
                             content_type=contenttype))
-            except pika.ChannelClosed as e:
+            except pika.exceptions.ChannelClosed as e:
                 retries += 1
                 self.connect()
 

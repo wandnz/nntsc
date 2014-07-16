@@ -988,30 +988,14 @@ class DBInsert(DatabaseCore):
         if err != DB_NO_ERROR:
             log("Failed to tidy up after creating data table")
             return err
-      
+
+        # Automatically create an index on timestamp      
         err = self.create_index("%s_%s_idx" % (name, "timestamp"), name, \
                     ["timestamp"])
         if err != DB_NO_ERROR:
             log("Failed to create index while creating data table %s" % ( name))
             return err
 
- 
-        for ind in indexes:
-            if "columns" not in ind or len(ind["columns"]) == 0:
-                log("Index %s for data table %s has no columns -- skipping" \
-                        % (indname, name))
-                continue
-            
-            if "name" not in ind:
-                indname = ""
-            else:
-                indname = ind["name"]
-    
-            err = self.create_index(indname, name, ind["columns"])
-            if err != DB_NO_ERROR:
-                log("Failed to create index while creating data table %s" % ( name))
-                return err
-        
         return DB_NO_ERROR
 
     def create_streams_table(self, name, columns, uniquecols=[]):
