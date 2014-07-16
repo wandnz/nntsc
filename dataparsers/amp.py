@@ -28,7 +28,10 @@ from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
         PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
 import pika
 from ampsave.importer import import_data_functions
-from libnntsc.parsers import amp_icmp, amp_traceroute, amp_dns, amp_throughput
+from libnntsc.parsers.amp_icmp import AmpIcmpParser
+from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
+from libnntsc.parsers.amp_dns import AmpDnsParser
+from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.dberrorcodes import *
 import time
 import logging
@@ -66,26 +69,26 @@ class AmpModule:
             if c['module'] == "amp":
                 self.collections[c['modsubtype']] = c['id']
 
+        self.parsers = {
+            "icmp":AmpIcmpParser(self.db),
+            "traceroute":AmpTracerouteParser(self.db),
+            "throughput":AmpThroughputParser(self.db),
+            "dns":AmpDnsParser(self.db)
+        }
+
         # set all the streams that we already know about for easy lookup of
         # their stream id when reporting data
         for i in tests:
 
             testtype = i["modsubtype"]
-            if testtype == "icmp":
-                key = amp_icmp.create_existing_stream(i)
-            elif testtype == "traceroute":
-                key = amp_traceroute.create_existing_stream(i)
-            elif testtype == "dns":
-                key = amp_dns.create_existing_stream(i)
-            elif testtype == "throughput":
-                key = amp_throughput.create_existing_stream(i)
-            #elif testtype == "http":
-            #    key = amp_http.create_existing_stream(i)
-
+            if testtype in self.parsers:
+                key = self.parsers[testtype].create_existing_stream(i)
 
         self.initSource(nntsc_config)
         self.exporter = initExportPublisher(nntsc_config, expqueue, exchange)
 
+        for k, parser in self.parsers.iteritems():
+            parser.add_exporter(self.exporter)
 
     def initSource(self, nntsc_config):
         # Parse connection info
@@ -140,25 +143,13 @@ class AmpModule:
                 if test in self.amp_modules:
                     data = self.amp_modules[test].get_data(body)
                     source = properties.user_id
-                    if test == "icmp":
-                        code = amp_icmp.process_data(self.db, self.exporter,
-                                properties.timestamp, data, source)
-                    elif test == "traceroute":
-                        code = amp_traceroute.process_data(self.db, 
-                                self.exporter, properties.timestamp, data, 
-                                source)
-                    elif test == "dns":
-                        code = amp_dns.process_data(self.db, self.exporter,
+
+                    if test in self.parsers:
+                        code = self.parsers[test].process_data(
                                 properties.timestamp, data, source)
                     elif test == "http":
                         channel.basic_ack(delivery_tag=method.delivery_tag)
                         break
-                    elif test == "throughput":
-                        code = amp_throughput.process_data(self.db,
-                                self.exporter, properties.timestamp, data,
-                                source)
-                    #    code = amp_http.process_data(self.db, self.exporter,
-                    #            properties.timestamp, data, source)
                     else:
                         code = DB_DATA_ERROR
                 else:
@@ -251,19 +242,24 @@ def run_module(tests, config, key, exchange):
 
 def tables(db):
 
-    code = amp_icmp.register(db)
-    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+    parser = AmpIcmpParser(db)
+    code = parser.register()
+    if code != DB_NO_ERROR:
         logger.log("Failed to register AMP ICMP collection")
-
-    code = amp_traceroute.register(db)
-    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+        
+    parser = AmpTracerouteParser(db)
+    code = parser.register()
+    if code != DB_NO_ERROR:
         logger.log("Failed to register AMP Traceroute collection")
-    
-    code = amp_dns.register(db)
-    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+
+    parser = AmpDnsParser(db)
+    code = parser.register()
+    if code != DB_NO_ERROR:
         logger.log("Failed to register AMP DNS collection")
 
-    code = amp_throughput.register(db)
-    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
+    parser = AmpThroughputParser(db)
+    code = parser.register()
+    if code != DB_NO_ERROR:
         logger.log("Failed to register AMP Throughput collection")
+
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

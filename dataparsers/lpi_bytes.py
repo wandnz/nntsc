@@ -23,111 +23,108 @@
 import libnntscclient.logger as logger
 import sys, string
 from libnntsc.dberrorcodes import *
-from libnntsc.parsers.common import *
+from libnntsc.parsers.common import NNTSCParser
 
-STREAM_TABLE_NAME = "streams_lpi_bytes"
-DATA_TABLE_NAME = "data_lpi_bytes"
-COLNAME = "lpi_bytes"
+class LPIBytesParser(NNTSCParser):
 
-lpi_bytes_streams = {}
+    def __init__(self, db):
+        super(LPIBytesParser, self).__init__(db)
 
-streamcols = [ \
-        {"name":"source", "type":"varchar", "null":False},
-        {"name":"user", "type":"varchar", "null":False},
-        {"name":"dir", "type":"varchar", "null":False},
-        {"name":"freq", "type":"integer", "null":False},
-        {"name":"protocol", "type":"varchar", "null":False},
-    ]
+        self.streamtable = "streams_lpi_bytes"
+        self.datatable = "data_lpi_bytes"
+        self.colname = "lpi_bytes"
+        self.source = "lpi"
+        self.module = "bytes"
 
-datacols = [ \
-        {"name":"bytes", "type":"bigint"}
-]
+        self.streamcolumns = [
+            {"name":"source", "type":"varchar", "null":False},
+            {"name":"user", "type":"varchar", "null":False},
+            {"name":"dir", "type":"varchar", "null":False},
+            {"name":"freq", "type":"integer", "null":False},
+            {"name":"protocol", "type":"varchar", "null":False},
+        ]
 
-
-def stream_table(db):
-
-
-    uniqcols = ['source', 'user', 'dir', 'freq', 'protocol']
-
-    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
-
-    if err != DB_NO_ERROR:
-        return None
-    return STREAM_TABLE_NAME
-
-def data_table(db):
-
-    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
-    if err != DB_NO_ERROR:
-        return None
-    return DATA_TABLE_NAME
+        self.uniquecolumns = ['source', 'user', 'dir', 'freq', 'protocol']
+        self.streamindexes = []
+        self.datacolumns = [
+            {"name":"bytes", "type":"bigint"}
+        ]
+        self.dataindexes = []
 
 
-def create_existing_stream(stream_data):
-    key = (stream_data['source'], stream_data['user'], stream_data['dir'], \
-            stream_data['freq'], stream_data['protocol'])
+    def create_existing_stream(self, stream_data):
+        key = (stream_data['source'], stream_data['user'], stream_data['dir'], \
+                stream_data['freq'], stream_data['protocol'])
 
-    lpi_bytes_streams[key] = stream_data['stream_id']
+        self.streams[key] = stream_data['stream_id']
 
+    def _stream_properties(self, protocol, data):
+        props = {}
 
-def find_stream(mon, user, dir, freq, proto):
-    k = (mon, user, dir, freq, proto)
-    if lpi_bytes_streams.has_key(k):
-        return lpi_bytes_streams[k]
-    return -1
+        if 'id' not in data:
+            logger.log("Error: no source specified in %s result" % \
+                    (self.colname))
+            return None, None
+        if 'user' not in data:
+            logger.log("Error: no user specified in %s result" % \
+                    (self.colname))
+            return None, None
+        if 'dir' not in data:
+            logger.log("Error: no direction specified in %s result" % \
+                    (self.colname))
+            return None, None
+        if 'freq' not in data:
+            logger.log("Error: no frequency specified in %s result" % \
+                    (self.colname))
+            return None, None
 
-def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
-    k = (mon, user, dir, freq, proto)
+        props['source'] = data['id']
+        props['user'] = data['user']
+        props['dir'] = data['dir']
+        props['freq'] = data['freq']
+        props['protocol'] = protocol
 
-    dirstr = ""
-    if dir == "out":
-        dirstr = "outgoing"
-    if dir == "in":
-        dirstr = "incoming"
-
-    props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 
-            'protocol':proto}
+        key = (props['source'], props['user'], props['dir'], props['freq'],
+                props['protocol'])
+        return props, key
     
-    return create_new_stream(db, exp, "lpi", "bytes", streamcols,
-            props, ts, STREAM_TABLE_NAME, DATA_TABLE_NAME)
-
-
-def process_data(db, exp, protomap, data):
-
-    mon = data['id']
-    user = data['user']
-    dir = data['dir']
-    freq = data['freq']
-    done = []
-
-    for p, val in data['results'].items():
-        if p not in protomap.keys():
-            logger.log("LPI Bytes: Unknown protocol id: %u" % (p))
-            return DB_DATA_ERROR
-        stream_id = find_stream(mon, user, dir, freq, protomap[p])
-        if stream_id == -1:
-            if val == 0:
-                # Don't create a stream until we get a non-zero value
-                continue
-
-            stream_id = add_new_stream(db, exp, mon, user, dir, freq,
-                    protomap[p], data['ts'])
-
-            if stream_id < 0:
-                logger.log("LPI Bytes: Cannot create new stream")
-                logger.log("LPI Bytes: %s:%s %s %s %s\n" % (mon, user, dir, freq, protomap[p]))
-                return stream_id
-            else:
-                lpi_bytes_streams[(mon, user, dir, freq, protomap[p])] = stream_id
-
-        code = insert_data(db, exp, stream_id, data['ts'], {'bytes':val},
-                datacols, COLNAME, DATA_TABLE_NAME)
+    def _result_dict(self, val):
+        return {'bytes':val}
         
-        if code != DB_NO_ERROR:
-            return code
-        done.append(stream_id)
-   
-    return db.update_timestamp(DATA_TABLE_NAME, done, data['ts'])
-    
+    def process_data(self, protomap, data):
+        done = []
+        
+        for p, val in data['results'].items():
+            if p not in protomap:
+                logger.log("LPI Bytes: Unknown protocol id: %u" % (p))
+                return DB_DATA_ERROR
+            
+            streamparams, key = self._stream_properties(protomap[p], data)
+        
+            if key is None:
+                logger.log("Failed to determine stream for %s result" % 
+                        (self.colname))
+                return DB_DATA_ERROR
 
+            if key not in self.streams:
+                if val == 0:
+                    continue
+                streamid = self.create_new_stream(streamparams, data['ts'])
+                if streamid < 0:
+                    logger.log("Failed to create new %s stream" % \
+                            (self.colname))
+                    logger.log("%s" % (str(streamparams)))
+                    return streamid
+                self.streams[key] = streamid
+            else:
+                streamid = self.streams[key]
+
+            code = self.insert_data(streamid, data['ts'], 
+                    self._result_dict(val))
+            if code != DB_NO_ERROR:
+                return code
+            done.append(streamid)
+        
+        return self.db.update_timestamp(self.datatable, done, data['ts'])
+    
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -19,89 +19,76 @@
 #
 # $Id$
 
-import time
+from libnntsc.parsers.common import NNTSCParser
 import libnntscclient.logger as logger
-from libnntsc.dberrorcodes import *
-from libnntsc.parsers.common import create_new_stream, insert_data
 
-STREAM_TABLE_NAME = "streams_rrd_muninbytes"
-DATA_TABLE_NAME = "data_rrd_muninbytes"
-COLNAME = "rrd_muninbytes"
+class RRDMuninbytesParser(NNTSCParser):
 
-rrd_streamcols = [ \
-        {"name":"filename", "type":"varchar", "null":False},
-        {"name":"switch", "type":"varchar", "null":False},
-        {"name":"interface", "type":"varchar", "null":False},
-        {"name":"interfacelabel", "type":"varchar"},
-        {"name":"direction", "type":"varchar", "null":False},
-        {"name":"minres", "type":"integer", "null":False, "default":"300"},
-        {"name":"highrows", "type":"integer", "null":False, "default":"1008"}
-    ]
+    def __init__(self, db):
+        super(RRDMuninbytesParser, self).__init__(db)
 
-rrd_datacols = [ \
-        {"name":"bytes", "type":"bigint"}
-    ]
+        self.streamtable = "streams_rrd_muninbytes"
+        self.datatable = "data_rrd_muninbytes"
+        self.colname = "rrd_muninbytes"
+        self.source = "rrd"
+        self.module = "muninbytes"
+        
+        self.streamcolumns = [ 
+            {"name":"filename", "type":"varchar", "null":False},
+            {"name":"switch", "type":"varchar", "null":False},
+            {"name":"interface", "type":"varchar", "null":False},
+            {"name":"interfacelabel", "type":"varchar"},
+            {"name":"direction", "type":"varchar", "null":False},
+            {"name":"minres", "type":"integer", "null":False, "default":"300"},
+            {"name":"highrows", "type":"integer", "null":False, 
+                    "default":"1008"}
+        ]
 
+        self.uniquecolumns = ['filename', 'interface', 'switch', 'direction']
+        self.streamindexes = []
+        self.datacolumns = [
+            {"name":"bytes", "type":"bigint"}
+        ]
+        self.dataindexes = []
 
-def stream_table(db):
+    def insert_stream(self, streamparams):
+        if 'switch' not in streamparams:
+            logger.log("Missing 'switch' parameter for Muninbytes RRD")
+            return DB_DATA_ERROR
+        if 'interface' not in streamparams:
+            logger.log("Missing 'interface' parameter for Muninbytes RRD")
+            return DB_DATA_ERROR
+        if 'direction' not in streamparams:
+            logger.log("Missing 'direction' parameter for Muninbytes RRD")
+            return DB_DATA_ERROR
 
+        if streamparams['direction'] not in ["sent", "received"]:
+            logger.log("'direction' must be either 'sent' or 'received', not %s" % (streamparams['direction']))
+            return DB_DATA_ERROR
 
-    uniqcols = ['filename', 'interface', 'switch', 'direction']
+        streamparams['filename'] = streamparams.pop('file')
+        
+        if 'interfacelabel' not in streamparams:
+            streamparams['interfacelabel'] = None
+        
+        return self.create_new_stream(streamparams, 0)
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, rrd_streamcols, uniqcols)
+    def process_data(self, stream, ts, line):
+        assert(len(line) == 1)
 
-    if err != DB_NO_ERROR:
-        return None
-    return STREAM_TABLE_NAME
+        exportdict = {}
 
+        line_map = {0:"bytes"}
 
-def data_table(db):
+        for i in range(0, len(line)):
+            if line[i] == None:
+                val = None
+            else:
+                val = int(line[i])
 
-    err =  db.create_data_table(DATA_TABLE_NAME, rrd_datacols)
-    if err != DB_NO_ERROR:
-        return None
-    return DATA_TABLE_NAME
+            exportdict[line_map[i]] = val
 
-
-def insert_stream(db, exp, filename, switch, interface, dir, minres,
-        rows, label):
-
-    props = {"filename":filename, "switch":switch,
-            "interface":interface, "direction":dir, "minres":minres,
-            "highrows":rows, "interfacelabel":label}
-
-    return create_new_stream(db, exp, "rrd", "muninbytes", 
-            rrd_streamcols, props, 0, STREAM_TABLE_NAME, DATA_TABLE_NAME)
-
-
-def get_last_timestamp(db, stream):
-    err, lastts = db.get_last_timestamp(DATA_TABLE_NAME, stream)
-    if err != DB_NO_ERROR:
-        return time.time()
-    return lastts
-
-
-def process_data(db, exp, stream, ts, line):
-    assert(len(line) == 1)
-
-    exportdict = {}
-
-    line_map = {0:"bytes"}
-
-    for i in range(0, len(line)):
-        if line[i] == None:
-            val = None
-        else:
-            val = int(line[i])
-
-        exportdict[line_map[i]] = val
-
-    err = insert_data(db, exp, stream, ts, exportdict, rrd_datacols, COLNAME,
-            DATA_TABLE_NAME)
-    
-    return err
-
-def get_data_table_name():
-    return DATA_TABLE_NAME
+        err = self.insert_data(stream, ts, exportdict)
+        return err
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -19,138 +19,140 @@
 #
 # $Id$
 
-from libnntsc.parsers.common import create_new_stream, insert_data
+from libnntsc.parsers.common import NNTSCParser
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
-STREAM_TABLE_NAME = "streams_amp_icmp"
-DATA_TABLE_NAME = "data_amp_icmp"
-COLNAME = "amp_icmp"
+class AmpIcmpParser(NNTSCParser):
+    def __init__(self, db):
+        super(AmpIcmpParser, self).__init__(db)
 
-amp_icmp_streams = {}
-    
-icmp_streamcols = [ \
-    {"name":"source", "type":"varchar", "null":False},
-    {"name":"destination", "type":"varchar", "null":False},
-    {"name":"address", "type":"inet", "null":False},
-    {"name":"packet_size", "type":"varchar", "null":False},
-    {"name":"datastyle", "type":"varchar", "null":False}
-]
+        self.streamtable = "streams_amp_icmp"
+        self.datatable = "data_amp_icmp"
+        self.colname = "amp_icmp"
+        self.source = "amp"
+        self.module = "icmp"
 
-icmp_datacols = [ \
-    {"name":"rtt", "type":"integer", "null":True},
-    {"name":"packet_size", "type":"smallint", "null":False},
-    {"name":"ttl", "type":"smallint", "null":True},
-    {"name":"loss", "type":"smallint", "null":False},
-    {"name":"error_type", "type":"smallint", "null":True},
-    {"name":"error_code", "type":"smallint", "null":True},
-]
+        self.streamcolumns = [
+            {"name":"source", "type":"varchar", "null":False},
+            {"name":"destination", "type":"varchar", "null":False},
+            {"name":"address", "type":"inet", "null":False},
+            {"name":"packet_size", "type":"varchar", "null":False},
+            {"name":"datastyle", "type":"varchar", "null":False}
+        ]
 
-def stream_table(db):
-    """ Specify the description of an icmp stream, used to create the table """
+        self.uniquecolumns = ['source', 'destination', 'packet_size', 
+                'address']
+        self.streamindexes = [
+            {"name": "", "columns": ['source']},
+            {"name": "", "columns": ['destination']}
+        ]
 
-    uniqcols = ['source', 'destination', 'packet_size', 'address']
+        self.datacolumns = [
+            {"name":"rtt", "type":"integer", "null":True},
+            {"name":"packet_size", "type":"smallint", "null":False},
+            {"name":"ttl", "type":"smallint", "null":True},
+            {"name":"loss", "type":"smallint", "null":False},
+            {"name":"error_type", "type":"smallint", "null":True},
+            {"name":"error_code", "type":"smallint", "null":True},
+        ]
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, icmp_streamcols, uniqcols)
-    if err != DB_NO_ERROR:
-        logger.log("Failed to create streams table for amp-icmp")
-        return None
-   
-    err = db.create_index("", STREAM_TABLE_NAME, ['source'])
-    if err != DB_NO_ERROR:
-        logger.log("Failed to create source index on %s" % (STREAM_TABLE_NAME))
-        return None
-    
-    err = db.create_index("", STREAM_TABLE_NAME, ['destination'])
-    if err != DB_NO_ERROR:
-        logger.log("Failed to create dest index on %s" % (STREAM_TABLE_NAME))
-        return None
-    
-    return STREAM_TABLE_NAME
-
-def data_table(db):
-    """ Specify the description of icmp data, used to create the table """
+        self.dataindexes = [
+            {"name": "", "columns":['rtt']}
+        ] 
 
 
-    indexes = [{"columns":['rtt']}]
+    def create_existing_stream(self, stream_data):
+        """Extract the stream key from the stream data provided by NNTSC
+    when the AMP module is first instantiated"""
 
-    err = db.create_data_table(DATA_TABLE_NAME, icmp_datacols, indexes)
-    if err != DB_NO_ERROR:
-        return None
+        src = str(stream_data["source"])
+        dest = str(stream_data["destination"])
+        addr = str(stream_data["address"])
+        size = str(stream_data["packet_size"])
+        streamid = stream_data["stream_id"]
 
-    return DATA_TABLE_NAME
+        key = (src, dest, addr, size)
 
-def create_existing_stream(stream_data):
-    """Extract the stream key from the stream data provided by NNTSC
-when the AMP module is first instantiated"""
+        self.streams[key] = streamid
 
-    src = str(stream_data["source"])
-    dest = str(stream_data["destination"])
-    addr = str(stream_data["address"])
-    size = str(stream_data["packet_size"])
-    streamid = stream_data["stream_id"]
+    def _stream_properties(self, source, result):
 
-    key = (src, dest, addr, size)
+        props = {}
+        if 'target' not in result:
+            logger.log("Error: no target specified in %s result" % \
+                    (self.colname))
+            return None, None
 
-    amp_icmp_streams[key] = streamid
+        if 'address' not in result:
+            logger.log("Error: no address specified in %s result" % \
+                    (self.colname))
+            return None, None
 
-def insert_stream(db, exp, source, dest, size, address, timestamp):
-    """ Insert a new stream into the database and export to listeners """
-
-    props = {"source":source, "destination":dest,
-            "packet_size":size, "datastyle":"rtt_ms", "address":address}
-
-    return create_new_stream(db, exp, "amp", "icmp", icmp_streamcols,
-            props, timestamp, STREAM_TABLE_NAME, DATA_TABLE_NAME)
-
-
-def process_data(db, exp, timestamp, data, source):
-    """ Process a data object, which can contain 1 or more sets of results """
-    done = {}
-
-    for d in data:
-        if d["random"]:
+        if result['random']:
             sizestr = "random"
         else:
-            sizestr = str(d["packet_size"])
+            if 'packet_size' not in result:
+                logger.log("Error: no packet size specified in %s result" % \
+                        (self.colname))
+                return None, None
+            sizestr = str(result['packet_size'])
+        
+        props['source'] = source
+        props['destination'] = result['target']
+        props['address']  = result['address']
+        props['packet_size'] = sizestr
+        props['datastyle'] = "rtt_ms"
 
-        d["source"] = source
-        key = (source, d["target"], d["address"], sizestr)
+        key = (props['source'], props['destination'], props['address'], \
+                props['packet_size'])
+        return props, key
 
-        if key in amp_icmp_streams:
-            stream_id = amp_icmp_streams[key]
+    def _mangle_result(self, result):
+        # Perform any modifications to the test result structure to ensure
+        # that it matches the format expected by our database
+        #
+        # No mangling is necessary for AMP-ICMP, but it is required by
+        # amp-traceroute which will inherit from us so we need to define
+        # this function here
+        return
 
-            if stream_id in done:
-                continue
-        else:
-            stream_id = insert_stream(db, exp, source, d["target"], sizestr,
-                    d["address"], timestamp)
+    def process_data(self, timestamp, data, source):
+        """ Process a AMP ICMP message, which can contain 1 or more sets of 
+            results 
+        """
+        done = {}
 
-            if stream_id < 0:
-                logger.log("AMPModule: Cannot create stream for:")
-                logger.log("AMPModule: %s %s:%s:%s:%s\n" % (
-                        "icmp", source, d["target"], d["address"], sizestr))
-                return stream_id
+        for d in data:
+            streamparams, key = self._stream_properties(source, d)
+
+            if key is None:
+                logger.log("Failed to determine stream for %s result" % \
+                        (self.colname))
+                return DB_DATA_ERROR
+
+            if key not in self.streams:
+                streamid = self.create_new_stream(streamparams, timestamp)
+                if streamid < 0:
+                    logger.log("Failed to create new %s stream" % \
+                            (self.colname))
+                    logger.log("%s" % (str(streamparams)))
+                    return streamid
+                self.streams[key] = streamid
             else:
-                amp_icmp_streams[key] = stream_id
+                streamid = self.streams[key]
 
-        res = insert_data(db, exp, stream_id, timestamp, d, icmp_datacols, 
-                COLNAME, DATA_TABLE_NAME)
-        if res != DB_NO_ERROR:
-            return res
-        done[stream_id] = 0
-    # update the last timestamp for all streams we just got data for
-    return db.update_timestamp(DATA_TABLE_NAME, done.keys(), timestamp)
+                if streamid in done:
+                    continue
 
-def register(db):
-    """ Register the amp-icmp collection """
-    st_name = stream_table(db)
-    dt_name = data_table(db)
+            self._mangle_result(d)
+            code = self.insert_data(streamid, timestamp, d)
+            if code != DB_NO_ERROR:
+                return code
+            done[streamid] = 0
 
-    if st_name == None or dt_name == None:
-        logger.log("Error creating AMP ICMP base tables")
-        return DB_CODING_ERROR
+        # update the last timestamp for all streams we just got data for
+        return self.db.update_timestamp(self.datatable, done.keys(), timestamp)
 
-    return db.register_collection("amp", "icmp", st_name, dt_name)
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

@@ -23,104 +23,26 @@
 import libnntscclient.logger as logger
 import sys, string
 from libnntsc.dberrorcodes import *
-from libnntsc.parsers.common import *
+from libnntsc.parsers.lpi_bytes import LPIBytesParser
 
-STREAM_TABLE_NAME = "streams_lpi_packets"
-DATA_TABLE_NAME = "data_lpi_packets"
-COLNAME = "lpi_packets"
+# This is really similar to the LPI bytes parser, so we'll inherit from
+# that instead and just make a few minor changes
 
-lpi_packets_streams = {}
-streamcols = [ \
-        {"name":"source", "type":"varchar", "null":False},
-        {"name":"user", "type":"varchar", "null":False},
-        {"name":"dir", "type":"varchar", "null":False},
-        {"name":"freq", "type":"integer", "null":False},
-        {"name":"protocol", "type":"varchar", "null":False},
-    ]
+class LPIPacketsParser(LPIBytesParser):
+    def __init__(self, db):
+        super(LPIPacketsParser, self).__init__(db)    
 
-datacols = [ \
-        {"name":"packets", "type":"bigint"}
-    ]
+        self.streamtable = "streams_lpi_packets"
+        self.datatable = "data_lpi_packets"
+        self.colname = "lpi_packets"
+        self.module = "packets"
 
-def stream_table(db):
-    uniqcols = ['source', 'user', 'dir', 'freq', 'protocol']
+        self.datacolumns = [
+            {"name":"packets", "type":"bigint"}
+        ]
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, streamcols, uniqcols)
+    def _result_dict(self, val):
+        return {'packets':val}
 
-    if err != DB_NO_ERROR:
-        return None
-    return STREAM_TABLE_NAME
-
-def data_table(db):
-
-
-    err =  db.create_data_table(DATA_TABLE_NAME, datacols)
-    if err != DB_NO_ERROR:
-        return None
-    return DATA_TABLE_NAME
-
-
-def create_existing_stream(stream_data):
-    key = (stream_data['source'], stream_data['user'], stream_data['dir'], \
-            stream_data['freq'], stream_data['protocol'])
-
-    lpi_packets_streams[key] = stream_data['stream_id']
-
-
-def find_stream(mon, user, dir, freq, proto):
-    k = (mon, user, dir, freq, proto)
-    if lpi_packets_streams.has_key(k):
-        return lpi_packets_streams[k]
-    return -1
-
-def add_new_stream(db, exp, mon, user, dir, freq, proto, ts):
-    k = (mon, user, dir, freq, proto)
-
-    dirstr = ""
-    if dir == "out":
-        dirstr = "outgoing"
-    if dir == "in":
-        dirstr = "incoming"
-
-    props = {'source':mon, 'user':user, 'dir':dir, 'freq':freq, 
-            'protocol':proto}
-
-    return create_new_stream(db, exp, "lpi", "packets", streamcols,
-            props, ts, STREAM_TABLE_NAME, DATA_TABLE_NAME)
-
-def process_data(db, exp, protomap, data):
-
-    mon = data['id']
-    user = data['user']
-    dir = data['dir']
-    freq = data['freq']
-    done = []
-
-    for p, val in data['results'].items():
-        if p not in protomap.keys():
-            logger.log("LPI Packets: Unknown protocol id: %u" % (p))
-            return DB_DATA_ERROR
-        stream_id = find_stream(mon, user, dir, freq, protomap[p])
-        if stream_id == -1:
-            if val == 0:
-                # Don't create a stream until we get a non-zero value
-                continue
-
-            stream_id = add_new_stream(db, exp, mon, user, dir, freq,
-                    protomap[p], data['ts'])
-
-            if stream_id < 0:
-                logger.log("LPI Packets: Cannot create new stream")
-                logger.log("LPI Packets: %s:%s %s %s %s\n" % (mon, user, dir, freq, protomap[p]))
-                return stream_id
-            else:
-                lpi_packets_streams[(mon, user, dir, freq, protomap[p])] = stream_id
-
-        res = insert_data(db, exp, stream_id, data['ts'], {"packets":val},
-                datacols, COLNAME, DATA_TABLE_NAME)
-        if res != DB_NO_ERROR:
-            return res
-        done.append(stream_id)
-    return db.update_timestamp(DATA_TABLE_NAME, done, data['ts'])
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

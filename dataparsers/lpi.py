@@ -22,8 +22,11 @@
 
 from libnntsc.database import DBInsert
 from libnntsc.configurator import *
-from libnntsc.parsers import lpi_bytes, lpi_common, lpi_flows
-from libnntsc.parsers import lpi_users, lpi_packets
+from libnntsc.parsers import lpi_common
+from libnntsc.parsers.lpi_bytes import LPIBytesParser
+from libnntsc.parsers.lpi_flows import LPIFlowsParser
+from libnntsc.parsers.lpi_packets import LPIPacketsParser
+from libnntsc.parsers.lpi_users import LPIUsersParser
 from libnntsc.pikaqueue import initExportPublisher
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
@@ -65,18 +68,29 @@ class LPIModule:
                 dbconf["host"])
         self.db.connect_db(15)
 
+        self.bytesparser = LPIBytesParser(self.db)
+        self.packetsparser = LPIPacketsParser(self.db)
+        self.flowsparser = LPIFlowsParser(self.db)
+        self.usersparser = LPIUsersParser(self.db)
+
+
         for s in existing:
 
             if s['modsubtype'] == "bytes":
-                lpi_bytes.create_existing_stream(s)
+                self.bytesparser.create_existing_stream(s)
             if s['modsubtype'] == "flows":
-                lpi_flows.create_existing_stream(s)
+                self.flowsparser.create_existing_stream(s)
             if s['modsubtype'] == "packets":
-                lpi_packets.create_existing_stream(s)
+                self.packetsparser.create_existing_stream(s)
             if s['modsubtype'] == "users":
-                lpi_users.create_existing_stream(s)
+                self.usersparser.create_existing_stream(s)
 
         self.exporter = initExportPublisher(nntsc_conf, expqueue, exchange)
+        
+        self.bytesparser.add_exporter(self.exporter)
+        self.packetsparser.add_exporter(self.exporter)
+        self.usersparser.add_exporter(self.exporter)
+        self.flowsparser.add_exporter(self.exporter)
 
     def process_stats(self, data):
         if data == {}:
@@ -84,20 +98,16 @@ class LPIModule:
             return DB_DATA_ERROR
 
         if data['metric'] == "bytes":
-            return lpi_bytes.process_data(self.db, self.exporter, \
-                    self.protocol_map, data)
+            return self.bytesparser.process_data(self.protocol_map, data)
 
         if data['metric'] == "newflows" or data['metric'] == "peakflows":
-            return lpi_flows.process_data(self.db, self.exporter, \
-                    self.protocol_map, data)
+            return self.flowsparser.process_data(self.protocol_map, data)
 
         if data['metric'] == "packets":
-            return lpi_packets.process_data(self.db, self.exporter, \
-                    self.protocol_map, data)
+            return self.packetsparser.process_data(self.protocol_map, data)
 
         if data['metric'] == "activeusers" or data['metric'] == "observedusers":
-            return lpi_users.process_data(self.db, self.exporter, \
-                    self.protocol_map, data)
+            return self.usersparser.process_data(self.protocol_map, data)
 
         return DB_NO_ERROR
 
@@ -237,22 +247,31 @@ def run_module(existing, config, key, exchange):
 
 def tables(db):
 
-    st_name = lpi_bytes.stream_table(db)
-    dt_name = lpi_bytes.data_table(db)
-    db.register_collection("lpi", "bytes", st_name, dt_name)
+    parser = LPIBytesParser(db)
+    err = parser.register()
+    if err != DB_NO_ERROR:
+        logger.log("Failed to register lpi-bytes collection")
+        return err
+        
+    parser = LPIPacketsParser(db)
+    err = parser.register()
+    if err != DB_NO_ERROR:
+        logger.log("Failed to register lpi-packets collection")
+        return err
 
-    st_name = lpi_flows.stream_table(db)
-    dt_name = lpi_flows.data_table(db)
-    db.register_collection("lpi", "flows", st_name, dt_name)
+    parser = LPIFlowsParser(db)
+    err = parser.register()
+    if err != DB_NO_ERROR:
+        logger.log("Failed to register lpi-flows collection")
+        return err
 
-    st_name = lpi_packets.stream_table(db)
-    dt_name = lpi_packets.data_table(db)
-    db.register_collection("lpi", "packets", st_name, dt_name)
+    parser = LPIUsersParser(db)
+    err = parser.register()
+    if err != DB_NO_ERROR:
+        logger.log("Failed to register lpi-users collection")
+        return err
 
-    st_name = lpi_users.stream_table(db)
-    dt_name = lpi_users.data_table(db)
-    db.register_collection("lpi", "users", st_name, dt_name)
-
+    return DB_NO_ERROR
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
