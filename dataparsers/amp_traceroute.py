@@ -37,6 +37,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         self.module = "traceroute"
 
         self.paths = {}
+        self.aspaths = {}
 
         self.streamcolumns = [
             {"name":"source", "type":"varchar", "null":False},
@@ -54,6 +55,7 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         self.datacolumns = [
             {"name":"path_id", "type":"integer", "null":False},
+            {"name":"aspath_id", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
             {"name":"length", "type":"smallint", "null":False},
             {"name":"error_type", "type":"smallint", "null":True},
@@ -69,7 +71,18 @@ class AmpTracerouteParser(AmpIcmpParser):
             logger.log("Failed to create %s data table" % (self.colname))
             return err
 
-        # Create the paths table as well
+        # Create the paths tables as well
+        aspathcols = [ \
+            {"name":"aspath_id", "type":"serial primary key"},
+            {"name":"aspath", "type":"varchar[]", "null":False, "unique":True}
+        ]
+
+        err = self.db.create_misc_table("data_amp_traceroute_aspaths", 
+                aspathcols)
+        if err != DB_NO_ERROR:
+            logger.log("Failed to create aspath table for %s" % (self.colname))
+            return err
+
         pathcols = [ \
             {"name":"path_id", "type":"serial primary key"},
             {"name":"path", "type":"inet[]", "null":False, "unique":True}
@@ -87,7 +100,10 @@ class AmpTracerouteParser(AmpIcmpParser):
     def _mangle_result(self, result):
         result["path"] = [x["address"] for x in result["hops"]]
         result["hop_rtt"] = [x["rtt"] for x in result["hops"]]
-        
+       
+        # TODO implement code to compress AS paths using pseudo-run-length
+        # encoding
+        result["aspath"] = None 
 
     def create_new_stream(self, streamparams, timestamp):
         # Because we have the extra paths table, we can't use the generic
@@ -112,6 +128,13 @@ class AmpTracerouteParser(AmpIcmpParser):
                 continue
             if errorcode != DB_NO_ERROR:
                 return errorcode
+            
+            errorcode = self.db.clone_table("data_amp_traceroute_aspaths", 
+                    streamid)
+            if errorcode == DB_QUERY_TIMEOUT:
+                continue
+            if errorcode != DB_NO_ERROR:
+                return errorcode
 
             errorcode = self.db.clone_table("data_amp_traceroute_paths", 
                     streamid)
@@ -120,9 +143,18 @@ class AmpTracerouteParser(AmpIcmpParser):
             if errorcode != DB_NO_ERROR:
                 return errorcode
 
-            # Ensure our custom foreign key gets perpetuated
+            # Ensure our custom foreign keys gets perpetuated
             newtable = "%s_%d" % (self.datatable, streamid)
             pathtable = "data_amp_traceroute_paths_%d" % (streamid)
+            aspathtable = "data_amp_traceroute_aspaths_%d" % (streamid)
+
+            errorcode = self.db.add_foreign_key(newtable, "aspath_id", 
+                    aspathtable, "aspath_id")
+            if errorcode == DB_QUERY_TIMEOUT:
+                continue
+            if errorcode != DB_NO_ERROR:
+                return errorcode
+
             errorcode = self.db.add_foreign_key(newtable, "path_id", pathtable, 
                     "path_id")
             if errorcode == DB_QUERY_TIMEOUT:
@@ -150,6 +182,46 @@ class AmpTracerouteParser(AmpIcmpParser):
         
         return streamid
 
+    def _insert_path(self, pathtype, stream, path):
+        if pathtype == "ip":
+            pathtable = "data_amp_traceroute_paths_%d" % (stream)
+            idcolumn = "path_id"
+            pathcolumn = "path"
+            castterm = "inet[]"
+        elif pathtype == "as":
+            pathtable = "data_amp_traceroute_aspaths_%d" % (stream)
+            idcolumn = "aspath_id"
+            pathcolumn = "aspath"
+            castterm = "varchar[]"
+        else:
+            return DB_CODING_ERROR
+
+        pathinsert="WITH s AS (SELECT %s, %s FROM %s WHERE %s " % (idcolumn, \
+                pathcolumn, pathtable, pathcolumn)
+        pathinsert += "= CAST (%s as inet[])), "
+        pathinsert += "i AS (INSERT INTO %s (%s) " % (pathtable, pathcolumn)
+        pathinsert += "SELECT CAST(%s as "
+        pathinsert += "%s) WHERE NOT EXISTS " % (castterm)
+        pathinsert += "(SELECT %s FROM %s WHERE %s " % (pathcolumn, pathtable, \
+                pathcolumn)
+        pathinsert += "= CAST(%s as inet[])) "
+        pathinsert += "RETURNING %s,%s)" % (idcolumn, pathcolumn)
+        pathinsert += "SELECT %s,%s FROM i UNION ALL " % (idcolumn, \
+                pathcolumn)
+        pathinsert += "SELECT %s,%s FROM s" % (idcolumn, pathcolumn)
+
+        params = (path, path, path)
+        err, queryret = self.db.custom_insert(pathinsert, params)
+         
+        if err != DB_NO_ERROR:
+            return err
+
+        if queryret == None:
+            return DB_DATA_ERROR
+            
+        return int(queryret[0])
+
+
     def insert_data(self, stream, ts, result):
         """ Insert data for a single traceroute test into the database """
         # Again, we have to provide our own version of insert_data as we have
@@ -162,27 +234,27 @@ class AmpTracerouteParser(AmpIcmpParser):
         if keystr in self.paths:
             result['path_id'] = self.paths[keystr]
         else:
-            pathtable = "data_amp_traceroute_paths_%d" % (stream)
-            pathinsert="WITH s AS (SELECT path_id, path FROM %s " % (pathtable)
-            pathinsert += "WHERE path = CAST (%s as inet[])), "
-            pathinsert += "i AS (INSERT INTO %s (path) " % (pathtable)
-            pathinsert += "SELECT CAST(%s as inet[]) WHERE NOT EXISTS "
-            pathinsert += "(SELECT path FROM %s " % (pathtable)
-            pathinsert += "WHERE path = CAST(%s as inet[])) RETURNING path_id,path)"
-            pathinsert += "SELECT path_id, path FROM i UNION ALL "
-            pathinsert += "SELECT path_id, path FROM s"
-
-            params = (result['path'], result['path'], result["path"])
-            err, queryret = self.db.custom_insert(pathinsert, params)
-             
-            if err != DB_NO_ERROR:
+            pathid = self._insert_path("ip", stream, result['path'])
+            if pathid < 0:
                 return err
+            
+            result['path_id'] = pathid
+            self.paths[keystr] = pathid
+       
+        if result['aspath'] != None:
+            keystr = "%s" % (stream)
+            for p in result['aspath']:
+                keystr += "_%s" % (p)
 
-            if queryret == None:
-                return DB_DATA_ERROR
-                    
-            result['path_id'] = queryret[0]
-            self.paths[keystr] = queryret[0]
+            if keystr in self.aspaths:
+                result['aspath_id'] = self.aspaths[keystr]
+            else:
+                pathid = self._insert_path("as", stream, result['aspath'])
+                if pathid < 0:
+                    return err
+                
+                result['aspath_id'] = pathid
+                self.aspaths[keystr] = pathid
        
         # XXX Could almost just call parent insert_data here, except for the
         # line where we have to add an entry for "path" before exporting live
@@ -201,6 +273,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             return err
 
         filtered['path'] = result['path']
+        filtered['aspath'] = result['aspath']
         if self.exporter != None:
             self.exporter.publishLiveData(self.colname, stream, ts, filtered)
 
@@ -240,7 +313,8 @@ def sanitise_columns(columns):
 
     for c in columns:
         if c in ['path', 'path_id', 'stream_id', 'timestamp', 'hop_rtt', 
-                'packet_size', 'length', 'error_type', 'error_code']:
+                'packet_size', 'length', 'error_type', 'error_code',
+                'aspath', 'aspath_id']:
             sanitised.append(c)
 
     return sanitised 
