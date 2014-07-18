@@ -74,11 +74,14 @@ class AmpTracerouteParser(AmpIcmpParser):
             {"name":"aspath", "type":"varchar[]", "null":False, "unique":True}
         ]
 
-        err = self.db.create_misc_table("data_amp_traceroute_aspaths", 
-                aspathcols)
-        if err != DB_NO_ERROR:
-            logger.log("Failed to create aspath table for %s" % (self.colname))
-            return err
+        try:
+            self.db.create_misc_table("data_amp_traceroute_aspaths", 
+                    aspathcols)
+        except DBQueryException as e:
+            logger.log("Failed to create aspaths table for %s" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
         pathcols = [ \
             {"name":"path_id", "type":"serial primary key"},
@@ -103,10 +106,30 @@ class AmpTracerouteParser(AmpIcmpParser):
     def _mangle_result(self, result):
         result["path"] = [x["address"] for x in result["hops"]]
         result["hop_rtt"] = [x["rtt"] for x in result["hops"]]
+      
+        aspath = []
+        currentas = None
+        count = 0
+
+        for x in result['hops']:
+            if 'asn' not in x:
+                continue
+
+            if currentas != x['asn']:
+                if currentas != None:
+                    assert(count != 0)
+                    aspath.append("%d.%d" % (count, currentas))
+                currentas = x['asn']
+                count = 1
+
+        if currentas != None:
+            assert(count != 0)
+            aspath.append("%d.%d" % (count, currentas))
        
-        # TODO implement code to compress AS paths using pseudo-run-length
-        # encoding
-        result["aspath"] = None 
+        if len(aspath) == 0:
+            result["aspath"] = None 
+        else:
+            result["aspath"] = aspath
 
     def create_new_stream(self, streamparams, timestamp):
         # Because we have the extra paths table, we can't use the generic
@@ -282,7 +305,10 @@ class AmpTracerouteParser(AmpIcmpParser):
 
 
 # Helper functions for dbselect module which deal with complications
-# arising from the dual data tables.
+# arising from the extra data tables that need to be joined.
+
+# This is a bit of nasty join -- are we going to run into problems with
+# joining and unioning so many tables?
 def generate_union(qb, table, streams):
 
     unionparams = []
@@ -304,8 +330,17 @@ def generate_union(qb, table, streams):
         if i != len(streams) - 1:
             sql += " UNION ALL "
 
-    sql += ") AS paths ON (allstreams.path_id = paths.path_id)) AS dataunion"
-    qb.add_clause("union", sql, unionparams + unionparams)
+    sql += ") AS paths ON (allstreams.path_id = paths.path_id) LEFT JOIN ("
+    
+    for i in range(0, len(streams)):
+        sql += "SELECT * from data_amp_traceroute_aspaths_"
+        sql += "%s"
+        if i != len(streams) - 1:
+            sql += " UNION ALL "
+    
+    sql += ") AS aspaths ON (allstreams.aspath_id = aspaths.aspath_id)) AS "
+    sql += "dataunion"
+    qb.add_clause("union", sql, unionparams + unionparams + unionparams)
 
 
 def sanitise_columns(columns):
