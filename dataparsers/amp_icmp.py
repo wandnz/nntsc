@@ -137,7 +137,7 @@ class AmpIcmpParser(NNTSCParser):
                     logger.log("Failed to create new %s stream" % \
                             (self.colname))
                     logger.log("%s" % (str(streamparams)))
-                    return streamid
+                    return
                 self.streams[key] = streamid
             else:
                 streamid = self.streams[key]
@@ -146,13 +146,11 @@ class AmpIcmpParser(NNTSCParser):
                     continue
 
             self._mangle_result(d)
-            code = self.insert_data(streamid, timestamp, d)
-            if code != DB_NO_ERROR:
-                return code
+            self.insert_data(streamid, timestamp, d)
             done[streamid] = 0
 
         # update the last timestamp for all streams we just got data for
-        return self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

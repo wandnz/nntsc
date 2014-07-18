@@ -93,7 +93,7 @@ class RRDSmokepingParser(NNTSCParser):
             kwargs['pings'].append(val)
 
         casts = {"pings":"double precision[]"}
-        return self.insert_data(stream, ts, kwargs, casts)
+        self.insert_data(stream, ts, kwargs, casts)
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

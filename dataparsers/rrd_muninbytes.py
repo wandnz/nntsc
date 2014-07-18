@@ -88,7 +88,6 @@ class RRDMuninbytesParser(NNTSCParser):
 
             exportdict[line_map[i]] = val
 
-        err = self.insert_data(stream, ts, exportdict)
-        return err
+        self.insert_data(stream, ts, exportdict)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -138,47 +138,48 @@ class AmpModule:
         # we exit this function without acknowledging the message then we
         # will stop getting messages (including the unacked one!)
         while 1:
-            if hasattr(properties, "user_id"):
-                test = properties.headers["x-amp-test-type"]
-                if test in self.amp_modules:
-                    data = self.amp_modules[test].get_data(body)
-                    source = properties.user_id
-
-                    if test in self.parsers:
-                        code = self.parsers[test].process_data(
-                                properties.timestamp, data, source)
-                    elif test == "http":
-                        channel.basic_ack(delivery_tag=method.delivery_tag)
-                        break
-                    else:
-                        code = DB_DATA_ERROR
-                else:
-                    logger.log("unknown test: '%s'" % (
-                            properties.headers["x-amp-test-type"]))
-                    code = DB_DATA_ERROR
-
-                # Inserts were successful, commit data and update error code
-                if code == DB_NO_ERROR:
-                    self.processed += 1
-                    if self.processed >= self.commitfreq:
-                        code = self.db.commit_data()
-
-                if code == DB_NO_ERROR:
-                    if test in self.collections:
-                        self.exporter.publishPush(self.collections[test], \
-                                properties.timestamp)
-                    if self.processed >= self.commitfreq:
-                        channel.basic_ack(method.delivery_tag, True)
-                        self.processed = 0
-                    break
+            if not hasattr(properties, "user_id"):
+                # ignore any messages that don't have user_id set
+                channel.basic_ack(delivery_tag = method.delivery_tag)
+                break
                 
-                if code == DB_OPERATIONAL_ERROR:
+            test = properties.headers["x-amp-test-type"]
+
+            if test not in self.amp_modules:
+                logger.log("unknown test: '%s'" % (
+                        properties.headers["x-amp-test-type"]))
+                logger.log("AMP -- Data error, acknowledging and moving on")
+                channel.basic_ack(delivery_tag = method.delivery_tag)
+                break
+               
+            if test not in self.parsers:
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                break
+
+
+            data = self.amp_modules[test].get_data(body)
+            source = properties.user_id
+
+            try:
+                self.parsers[test].process_data(properties.timestamp, data, 
+                        source)
+                self.processed += 1
+                if self.processed >= self.commitfreq:
+                    self.db.commit_data()
+                    channel.basic_ack(method.delivery_tag, True)
+                    self.processed = 0
+                
+                if test in self.collections:
+                    self.exporter.publishPush(self.collections[test], \
+                            properties.timestamp)
+            except DBQueryException as e:
+                if e.code == DB_OPERATIONAL_ERROR:
                     # Disconnect while inserting data, need to reprocess the
                     # entire set of messages
                     logger.log("Database disconnect while processing AMP data")
                     raise PikaNNTSCException(True)
 
-                elif code == DB_DATA_ERROR:
+                elif e.code == DB_DATA_ERROR:
                     # Data was bad so we couldn't insert into the database.
                     # Acknowledge the message so we can dump it from the queue
                     # and move on but don't try to export it to clients.
@@ -186,32 +187,29 @@ class AmpModule:
                     channel.basic_ack(delivery_tag = method.delivery_tag)
                     break
 
-                elif code == DB_INTERRUPTED:
+                elif e.code == DB_INTERRUPTED:
                     logger.log("Interrupt while processing AMP data")
                     raise PikaNNTSCException(False)
-                
-                elif code == DB_GENERIC_ERROR:
+            
+                elif e.code == DB_GENERIC_ERROR:
                     logger.log("Database error while processing AMP data")
                     raise PikaNNTSCException(False)
-                elif code == DB_QUERY_TIMEOUT:
+                elif e.code == DB_QUERY_TIMEOUT:
                     logger.log("Database timeout while processing AMP data")
                     continue
-                elif code == DB_CODING_ERROR:
+                elif e.code == DB_CODING_ERROR:
                     logger.log("Bad database code encountered while processing AMP data")
                     raise PikaNNTSCException(False)
-                elif code == DB_DUPLICATE_KEY:
+                elif e.code == DB_DUPLICATE_KEY:
                     logger.log("Duplicate key error while processing AMP data")
                     raise PikaNNTSCException(False)
-            
+        
                 else:
-                    logger.log("Unknown error code returned by database: %d" % (code))
+                    logger.log("Unknown error code returned by database: %d" \
+                            % (code))
                     logger.log("Shutting down AMP module")
                     raise PikaNNTSCException(False)
-
-            else:
-                # ignore any messages that don't have user_id set
-                channel.basic_ack(delivery_tag = method.delivery_tag)
-                break
+            break
 
     def run(self):
         """ Run forever, calling the process_data callback for each message """
@@ -243,23 +241,15 @@ def run_module(tests, config, key, exchange):
 def tables(db):
 
     parser = AmpIcmpParser(db)
-    code = parser.register()
-    if code != DB_NO_ERROR:
-        logger.log("Failed to register AMP ICMP collection")
+    parser.register()
         
     parser = AmpTracerouteParser(db)
-    code = parser.register()
-    if code != DB_NO_ERROR:
-        logger.log("Failed to register AMP Traceroute collection")
+    parser.register()
 
     parser = AmpDnsParser(db)
-    code = parser.register()
-    if code != DB_NO_ERROR:
-        logger.log("Failed to register AMP DNS collection")
+    parser.register()
 
     parser = AmpThroughputParser(db)
-    code = parser.register()
-    if code != DB_NO_ERROR:
-        logger.log("Failed to register AMP Throughput collection")
+    parser.register()
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
