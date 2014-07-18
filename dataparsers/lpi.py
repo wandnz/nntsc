@@ -95,21 +95,19 @@ class LPIModule:
     def process_stats(self, data):
         if data == {}:
             logger.log("LPIModule: Empty Stats Dict")
-            return DB_DATA_ERROR
+            raise DBQueryException(DB_DATA_ERROR)
 
         if data['metric'] == "bytes":
-            return self.bytesparser.process_data(self.protocol_map, data)
+            self.bytesparser.process_data(self.protocol_map, data)
 
         if data['metric'] == "newflows" or data['metric'] == "peakflows":
-            return self.flowsparser.process_data(self.protocol_map, data)
+            self.flowsparser.process_data(self.protocol_map, data)
 
         if data['metric'] == "packets":
-            return self.packetsparser.process_data(self.protocol_map, data)
+            self.packetsparser.process_data(self.protocol_map, data)
 
         if data['metric'] == "activeusers" or data['metric'] == "observedusers":
-            return self.usersparser.process_data(self.protocol_map, data)
-
-        return DB_NO_ERROR
+            self.usersparser.process_data(self.protocol_map, data)
 
     def reset_seen(self):
         assert(self.protocol_map != {})
@@ -156,7 +154,7 @@ class LPIModule:
             data['results'][k] = 0
 
 
-        return self.process_stats(data)
+        self.process_stats(data)
 
     def run(self):
         while self.enabled:
@@ -181,16 +179,15 @@ class LPIModule:
 
                 if rec_type == 3:
                     while 1:
-                        if self.insert_zeroes() == DB_NO_ERROR:
-                            err = self.db.commit_data()
-
-                            if err not in [DB_NO_ERROR]:
-                                logger.log("Failed to commit LPI zeroes")
-                                break
-                            if err == DB_OPERATIONAL_ERROR:
+                        try:
+                            self.insert_zeroes()
+                            self.db.commit_data()
+                        except DBQueryException as e:
+                            if e.code == DB_OPERATIONAL_ERROR:
                                 logger.log("Retrying insert of zero values")
                                 continue
-                            break
+                            logger.log("Failed to commit LPI zero values")
+                        break
 
                     self.reset_seen()
 
@@ -200,40 +197,41 @@ class LPIModule:
 
                 if rec_type == 0:
                     self.update_seen(data)
-                    code = self.process_stats(data)
-                    # TODO Store results locally so that we don't lose data 
-                    # when we lose the database
-                    if code == DB_OPERATIONAL_ERROR:
-                        logger.log("DB disappeared while inserting LPI data")
-                        logger.log("LPI data potentially lost")
-                        continue
+                    try:
+                        self.process_stats(data)
+                    except DBQueryException as e:
+                        # TODO Store results locally so that we don't lose data 
+                        # when we lose the database
+                        if e.code == DB_OPERATIONAL_ERROR:
+                            logger.log("DB disappeared while inserting LPI data")
+                            logger.log("LPI data potentially lost")
+                            continue
                    
-                    if code == DB_INTERRUPTED:
-                        logger.log("Interrupt while processing LPI data")
-                        break
+                        if e.code == DB_INTERRUPTED:
+                            logger.log("Interrupt while processing LPI data")
+                            break
                         
-                    if code == DB_GENERIC_ERROR:
-                        logger.log("Database error while processing LPI data")
-                        break
+                        if e.code == DB_GENERIC_ERROR:
+                            logger.log("Database error while processing LPI data")
+                            break
                          
-                    if code == DB_DATA_ERROR:
-                        # Bad data -- reconnect to server  
-                        logger.log("LPIModule: Invalid Statistics Data")
-                        break
+                        if e.code == DB_DATA_ERROR:
+                            # Bad data -- reconnect to server  
+                            logger.log("LPIModule: Invalid Statistics Data")
+                            break
 
-                    if code == DB_CODING_ERROR:
-                        logger.log("Bad database code encountered while processing LPI data -- skipping data")
-                        continue
+                        if e.code == DB_CODING_ERROR:
+                            logger.log("Bad database code encountered while processing LPI data -- skipping data")
+                            continue
 
-                    if code == DB_DUPLICATE_KEY:
-                        logger.log("Duplicate key error while processing LPI data")
-                        break
+                        if e.code == DB_DUPLICATE_KEY:
+                            logger.log("Duplicate key error while processing LPI data")
+                            break
 
-                    if code == DB_QUERY_TIMEOUT:
-                        logger.log("Query timeout while inserting LPI data -- should this really be happening?")
-                        break
+                        if e.code == DB_QUERY_TIMEOUT:
+                            logger.log("Query timeout while inserting LPI data -- should this really be happening?")
+                            break
 
-                    assert(code != DB_OPERATIONAL_ERROR)
 
                 if rec_type == -1:
                     break
@@ -248,30 +246,16 @@ def run_module(existing, config, key, exchange):
 def tables(db):
 
     parser = LPIBytesParser(db)
-    err = parser.register()
-    if err != DB_NO_ERROR:
-        logger.log("Failed to register lpi-bytes collection")
-        return err
+    parser.register()
         
     parser = LPIPacketsParser(db)
-    err = parser.register()
-    if err != DB_NO_ERROR:
-        logger.log("Failed to register lpi-packets collection")
-        return err
+    parser.register()
 
     parser = LPIFlowsParser(db)
-    err = parser.register()
-    if err != DB_NO_ERROR:
-        logger.log("Failed to register lpi-flows collection")
-        return err
+    parser.register()
 
     parser = LPIUsersParser(db)
-    err = parser.register()
-    if err != DB_NO_ERROR:
-        logger.log("Failed to register lpi-users collection")
-        return err
-
-    return DB_NO_ERROR
+    parser.register()
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -175,9 +175,12 @@ class DBWorker(threading.Thread):
 
         aggs = self._merge_aggregators(aggcols, aggfunc)
 
-        err, labels = self.db.filter_active_streams(name, labels, start, 
-                stoppoint)
-        if err != DB_NO_ERROR:
+        try:
+            labels = self.db.filter_active_streams(name, labels, start, 
+                    stoppoint)
+        except DBQueryException as e:
+            logger.log("Failed to filter active streams for collection %s" \
+                    % (name))
             return DBWORKER_ERROR
 
         while start < stoppoint:
@@ -214,8 +217,9 @@ class DBWorker(threading.Thread):
             if end == None:
                 stoppoint = int(time.time())
 
-        error = self.db.release_data()
-        if error != DB_NO_ERROR:
+        try:
+            self.db.release_data()
+        except DBQueryException as e:
             return DBWORKER_ERROR
 
         return DBWORKER_SUCCESS
@@ -262,9 +266,10 @@ class DBWorker(threading.Thread):
 
         # Only query for historical data for streams that were active
         # during that time period
-        err, labels = self.db.filter_active_streams(name, labels, start, 
-                stoppoint)
-        if err != DB_NO_ERROR:
+        try:
+            labels = self.db.filter_active_streams(name, labels, start, 
+                    stoppoint)
+        except DBQueryException as e:
             return DBWORKER_ERROR
 
         while start <= stoppoint:
@@ -313,8 +318,9 @@ class DBWorker(threading.Thread):
 
             start = queryend + 1
 
-        error = self.db.release_data()
-        if error != DB_NO_ERROR:
+        try:
+            self.db.release_data()
+        except DBQueryException as e:
             return DBWORKER_ERROR
 
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))

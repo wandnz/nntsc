@@ -97,9 +97,7 @@ class AmpThroughputParser(NNTSCParser):
             else:
                 self.streams[key] = stream_id
 
-        err = self.insert_data(stream_id, timestamp, resdict) 
-        if err != DB_NO_ERROR:
-            return err
+        self.insert_data(stream_id, timestamp, resdict) 
         return stream_id
 
 
@@ -121,10 +119,10 @@ class AmpThroughputParser(NNTSCParser):
 
             streamid = self._process_single_result(timestamp, resdict)
             if streamid < 0:
-                return streamid
+                return
             done[streamid] = 0
 
-        return self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

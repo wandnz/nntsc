@@ -66,10 +66,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         self.dataindexes = []
 
     def data_table(self):
-        err = super(AmpTracerouteParser, self).data_table()
-        if err != DB_NO_ERROR:
-            logger.log("Failed to create %s data table" % (self.colname))
-            return err
+        super(AmpTracerouteParser, self).data_table()
 
         # Create the paths tables as well
         aspathcols = [ \
@@ -88,7 +85,13 @@ class AmpTracerouteParser(AmpIcmpParser):
             {"name":"path", "type":"inet[]", "null":False, "unique":True}
         ]
 
-        return self.db.create_misc_table("data_amp_traceroute_paths", pathcols)
+        try:
+            self.db.create_misc_table("data_amp_traceroute_paths", pathcols)
+        except DBQueryException as e:
+            logger.log("Failed to create paths table for %s" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
             
 
     def create_existing_stream(self, stream_data):
@@ -113,69 +116,60 @@ class AmpTracerouteParser(AmpIcmpParser):
         if 'datastyle' in streamparams:
             streamparams.pop('datastyle')
 
-        while 1:
-            errorcode = DB_NO_ERROR
-            colid, streamid = self.db.insert_stream(self.streamtable,
+        try:
+           streamid = self.db.insert_stream(self.streamtable,
                     self.datatable, timestamp, streamparams)
+        except DBQueryException as e:
+            logger.log("Failed to insert new stream for %s" % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
             
-            if colid < 0:
-                errorcode = streamid
-
-            if streamid < 0:
-                errorcode = streamid
-
-            if errorcode == DB_QUERY_TIMEOUT:
-                continue
-            if errorcode != DB_NO_ERROR:
-                return errorcode
-            
-            errorcode = self.db.clone_table("data_amp_traceroute_aspaths", 
+        try:
+            self.db.clone_table("data_amp_traceroute_aspaths", 
                     streamid)
-            if errorcode == DB_QUERY_TIMEOUT:
-                continue
-            if errorcode != DB_NO_ERROR:
-                return errorcode
+        except DBQueryException as e:
+            logger.log("Failed to clone aspaths table for new %s stream" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
-            errorcode = self.db.clone_table("data_amp_traceroute_paths", 
+        try:
+            self.db.clone_table("data_amp_traceroute_paths", 
                     streamid)
-            if errorcode == DB_QUERY_TIMEOUT:
-                continue
-            if errorcode != DB_NO_ERROR:
-                return errorcode
+        except DBQueryException as e:
+            logger.log("Failed to clone paths table for new %s stream" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
+        try:
             # Ensure our custom foreign keys gets perpetuated
             newtable = "%s_%d" % (self.datatable, streamid)
             pathtable = "data_amp_traceroute_paths_%d" % (streamid)
             aspathtable = "data_amp_traceroute_aspaths_%d" % (streamid)
 
-            errorcode = self.db.add_foreign_key(newtable, "aspath_id", 
-                    aspathtable, "aspath_id")
-            if errorcode == DB_QUERY_TIMEOUT:
-                continue
-            if errorcode != DB_NO_ERROR:
-                return errorcode
-
-            errorcode = self.db.add_foreign_key(newtable, "path_id", pathtable, 
+            self.db.add_foreign_key(newtable, "aspath_id", aspathtable, 
+                    "aspath_id")
+            self.db.add_foreign_key(newtable, "path_id", pathtable, 
                     "path_id")
-            if errorcode == DB_QUERY_TIMEOUT:
-                continue
-            if errorcode != DB_NO_ERROR:
-                return errorcode
-            
-            err = self.db.commit_streams()
-            if err == DB_QUERY_TIMEOUT:
-                continue
-            if err != DB_NO_ERROR:
-                return err
-            break
+        except DBQueryException as e:
+            logger.log("Failed to add foreign key to paths tables for %s" \
+                    % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
+
+        try:
+            self.db.commit_streams()
+        except DBQueryException as e:
+            logger.log("Failed to commit new stream for %s" % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
         if self.exporter == None:
             return streamid
-
-        err, colid = self.db.get_collection_id(self.source, self.module)
-        if err != DB_NO_ERROR:
-            return err
-        if colid == 0:
+    
+        colid = self._get_collection_id()
+        if colid <= 0:
             return streamid
 
         self.exporter.publishStream(colid, self.colname, streamid, streamparams)
@@ -211,14 +205,20 @@ class AmpTracerouteParser(AmpIcmpParser):
         pathinsert += "SELECT %s,%s FROM s" % (idcolumn, pathcolumn)
 
         params = (path, path, path)
-        err, queryret = self.db.custom_insert(pathinsert, params)
-         
-        if err != DB_NO_ERROR:
-            return err
 
+        try:
+            queryret = self.db.custom_insert(pathinsert, params)
+        except DBQueryException as e:
+            logger.log("Failed to get path_id for %s test result (stream %d)" \
+                    % (self.colname, stream))
+            logger.log("Error was: %s" % (str(e)))
+            raise
+         
         if queryret == None:
-            return DB_DATA_ERROR
-            
+            logger.log("No query result when getting path_id for %s (stream %d)" % \
+                    (self.colname, stream))
+            raise DBQueryException(DB_DATA_ERROR)
+     
         return int(queryret[0])
 
 
@@ -266,18 +266,19 @@ class AmpTracerouteParser(AmpIcmpParser):
             else:
                 filtered[col["name"]] = None
 
-        err = self.db.insert_data(self.datatable, self.colname, stream,
+        try:
+            self.db.insert_data(self.datatable, self.colname, stream,
                 ts, filtered, {'hop_rtt':'integer[]'})
-
-        if err != DB_NO_ERROR:
-            return err
+        except DBQueryException as e:
+            logger.log("Failed to insert new data for %s stream %d" % \
+                    (self.colname, stream))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
         filtered['path'] = result['path']
         filtered['aspath'] = result['aspath']
         if self.exporter != None:
             self.exporter.publishLiveData(self.colname, stream, ts, filtered)
-
-        return DB_NO_ERROR
 
 
 # Helper functions for dbselect module which deal with complications
