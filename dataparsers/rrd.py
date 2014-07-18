@@ -130,69 +130,46 @@ class RRDModule:
 
             code = DB_DATA_ERROR
             if r['modsubtype'] == "smokeping":
-                code = self.smokeparser.process_data(r['stream_id'], current, 
-                        line)
-                if datatable is None:
-                    datatable = self.smokeparser.get_data_table_name()
-
-            if r['modsubtype'] == "muninbytes":
-                code = self.muninparser.process_data(r['stream_id'], current, 
-                        line)
-                if datatable is None:
-                    datatable = self.muninparser.get_data_table_name()
-
-            if code == DB_NO_ERROR:
-                if current > r['lasttimestamp']:
-                    r['lasttimestamp'] = current
-                    update_needed = True
-
-            if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:
-                return code
+                parser = self.smokeparser
+            elif r['modsubtype'] == "muninbytes":
+                parser = self.muninparser
+            else:
+                break
                 
-            if code == DB_INTERRUPTED:
-                logger.log("Interrupt in RRD module")
-                return code
-
-            if code != DB_NO_ERROR:
-                logger.log("Error while inserting RRD data")
-
+            parser.process_data(r['stream_id'], current, line)
+            if datatable is None:
+                datatable = parser.get_data_table_name()
+            
+            if current > r['lasttimestamp']:
+                r['lasttimestamp'] = current
+                update_needed = True
+                
             current += step
 
         if not update_needed:
-            return DB_NO_ERROR
+            return
         
-        
-        err = self.db.commit_data()
-        if err != DB_NO_ERROR:
-            return err
+        self.db.commit_data()
 
         if datatable is not None:
-            code = self.db.update_timestamp(datatable, [r['stream_id']],
+            self.db.update_timestamp(datatable, [r['stream_id']],
                 r['lasttimestamp'])
-
-        if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:
-            return code
-        if code == DB_INTERRUPTED:
-            logger.log("Interrupt in RRD module")
-            return code
-
-        if code != DB_NO_ERROR:
-            logger.log("Error while updating last timestamp for RRD stream")
-            return code
-
-        return DB_NO_ERROR
 
     def rrdloop(self):
         for fname,rrds in self.rrds.items():
             for r in rrds:
-                err = self.read_from_rrd(r, fname)
-
-                if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
-                    return RRD_RETRY
-                if err == DB_INTERRUPTED:
-                    return RRD_HALT
-                # Ignore other DB errors as they represent bad data or 
-                # database code. Try to carry on to the next RRD instead.
+                try:
+                    self.read_from_rrd(r, fname)
+                except DBQueryException as e:
+                    if e.code == DB_QUERY_TIMEOUT:
+                        return RRD_RETRY
+                    if e.code == DB_OPERATIONAL_ERROR:
+                        return RRD_RETRY
+                    if e.code == DB_INTERRUPTED:
+                        return RRD_HALT
+                    # Ignore other DB errors as they represent bad data or 
+                    # database code. Try to carry on to the next RRD instead.
+                    continue
         return RRD_CONTINUE
 
 
@@ -238,23 +215,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing, parser):
     params['highrows'] = info['rra[0].rows']
     logger.log("Creating stream for RRD-%s: %s" % (rrdtype, params['file']))
 
-    code = parser.insert_stream(params)
-    if code == DB_GENERIC_ERROR:
-        logger.log("Database error while creating RRD stream")
-    if code == DB_DATA_ERROR:
-        logger.log("Invalid RRD stream description")
-    if code == DB_INTERRUPTED:
-        logger.log("RRD stream processing interrupted")
-    if code == DB_DUPLICATE_KEY:
-        # Note, we should not see this error as we should get
-        # back the id of the duplicate stream instead
-        logger.log("Duplicate key error while inserting RRD stream")
-    if code == DB_CODING_ERROR:
-        logger.log("Programming error while inserting RRD stream")
-    if code == DB_QUERY_TIMEOUT:
-        logger.log("Timeout while inserting RRD stream")
-
-    return code
+    parser.insert_stream(params)
 
 def insert_rrd_streams(db, conf):
     smoke = RRDSmokepingParser(db)
@@ -304,11 +265,13 @@ def insert_rrd_streams(db, conf):
                     parser = munin
                 else:
                     parser = None
-    
-                code = create_rrd_stream(db, subtype, parameters, index, 
+                
+                try: 
+                    create_rrd_stream(db, subtype, parameters, index, 
                        files, parser)
-                if code < 0:
-                    return code
+                except DBQueryException as e:
+                    logger.log("Exception while creating RRD streams, aborting")
+                    return
                     
             parameters = {}
             subtype = x[1]
@@ -324,12 +287,15 @@ def insert_rrd_streams(db, conf):
             parser = munin
         else:
             parser = None
-        code = create_rrd_stream(db, subtype, parameters, index, files, parser)
-        if code < 0:
-            return code
+        
+        try: 
+            create_rrd_stream(db, subtype, parameters, index, 
+               files, parser)
+        except DBQueryException as e:
+            logger.log("Exception while creating RRD streams, aborting")
+            return
 
     f.close()
-    return DB_NO_ERROR
 
 
 def run_module(rrds, config, key, exchange):
@@ -342,11 +308,8 @@ def tables(db):
     smoke = RRDSmokepingParser(db)
     munin = RRDMuninbytesParser(db)
 
-    err = smoke.register()
-    if err != DB_NO_ERROR:
-        return err
-
-    return munin.register()
+    smoke.register()
+    munin.register()
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

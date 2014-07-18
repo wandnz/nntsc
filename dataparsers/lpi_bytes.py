@@ -114,17 +114,14 @@ class LPIBytesParser(NNTSCParser):
                     logger.log("Failed to create new %s stream" % \
                             (self.colname))
                     logger.log("%s" % (str(streamparams)))
-                    return streamid
+                    return
                 self.streams[key] = streamid
             else:
                 streamid = self.streams[key]
 
-            code = self.insert_data(streamid, data['ts'], 
-                    self._result_dict(val))
-            if code != DB_NO_ERROR:
-                return code
+            self.insert_data(streamid, data['ts'], self._result_dict(val))
             done.append(streamid)
         
-        return self.db.update_timestamp(self.datatable, done, data['ts'])
+        self.db.update_timestamp(self.datatable, done, data['ts'])
     
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -55,25 +55,26 @@ class DBSelector(DatabaseCore):
     def _dataquery(self, query, params=None):
 
         while 1:
-            err = self.data.closecursor()
-            if err == DB_OPERATIONAL_ERROR:
-                continue
-            if err != DB_NO_ERROR:
-                break
+            try:
+                self.data.closecursor()
+            except DBQueryException as e:
+                if e.code == DB_OPERATIONAL_ERROR:
+                    continue
+                else:
+                    raise
 
-            err = self.data.executequery(query, params)
-            if err == DB_OPERATIONAL_ERROR:
-                # Retry the query, as we just reconnected
-                continue
-            if err != DB_NO_ERROR:
-                self.data.cursor = None
+            try:
+                self.data.executequery(query, params)
+            except DBQueryException as e:
+                if e.code == DB_OPERATIONAL_ERROR:
+                    continue
+                else:
+                    raise
+            
             break
 
-        return err           
-
     def release_data(self):
-        err = self.data.closecursor()
-        return err
+        self.data.closecursor()
  
     def get_collection_schema(self, colid):
         """ Fetches the column names for both the stream and data tables
@@ -84,37 +85,24 @@ class DBSelector(DatabaseCore):
             of column names from the data table.
         """
 
-        err = self._basicquery(
+        self._basicquery(
                 "SELECT streamtable, datatable from collections WHERE id=%s",
                 (colid,))
-        if err != DB_NO_ERROR:
-            log("Error selecting table names from collections")
-            raise DBQueryException(err)
 
         tables = self.basic.cursor.fetchone()
 
         # Parameterised queries don't work on the FROM clause -- our table
         # names *shouldn't* be an SQL injection risk, right?? XXX
-        err = self._basicquery(
+        self._basicquery(
                     "SELECT * from %s LIMIT 1" % (tables['streamtable']))
-        if err != DB_NO_ERROR:
-            log("Error selecting single row from stream table")
-            raise DBQueryException(err)
 
         streamcolnames = [cn[0] for cn in self.basic.cursor.description]
 
-        err = self._basicquery(
+        self._basicquery(
                     "SELECT * from %s LIMIT 1" % (tables['datatable']))
-        if err != DB_NO_ERROR:
-            log("Error selecting single row from data table")
-            raise DBQueryException(err)
 
         datacolnames = [cn[0] for cn in self.basic.cursor.description]
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Error while tidying up after querying column names")
-            raise DBQueryException(err)
-
+        self._releasebasic()
         return streamcolnames, datacolnames
 
     def select_streams_by_collection(self, coll, minid):
@@ -130,13 +118,9 @@ class DBSelector(DatabaseCore):
             Returns a list of streams, where each stream is a dictionary
             describing all of the stream parameters.
         """
-        err = self._basicquery(
+        self._basicquery(
                     "SELECT * from collections where id=%s", (coll,))
 
-        if err != DB_NO_ERROR:
-            log("Failed to query database for collection id %d" % (coll))
-            raise DBQueryException(err)
-       
         assert(self.basic.cursor.rowcount == 1)
 
         coldata = self.basic.cursor.fetchone()
@@ -145,11 +129,7 @@ class DBSelector(DatabaseCore):
         sql = """SELECT * FROM %s WHERE stream_id > %s""" \
                  % (tname, "%s")
       
-        err = self._basicquery(sql, (minid,))
-        if err != DB_NO_ERROR:
-            log("Failed to query streams for collection id %d" % (coll))
-            raise DBQueryException(err)
-              
+        self._basicquery(sql, (minid,))
         selected = []
         while True:
             row = self.basic.cursor.fetchone()
@@ -162,10 +142,7 @@ class DBSelector(DatabaseCore):
                 stream_dict[k] = v
             selected.append(stream_dict)
         
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Error while tidying up after querying streams by collection")
-            raise DBQueryException(err)
+        self._releasebasic()
         return selected
 
     def select_aggregated_data(self, col, labels, aggcols,
@@ -311,18 +288,17 @@ class DBSelector(DatabaseCore):
                 yield(None, label, None, None, None)
                 continue
 
-            err = self._generate_from(table, label, streams, streamtable)
-            if err != DB_NO_ERROR:
-                yield(None, label, None, None, DBQueryException(err))
+            self._generate_from(table, label, streams, streamtable)
 
             order = ["outsel", "innersel", "activestreams", "activejoin", 
                     "union", "joincondition", "wheretime", "outselend",
                     "outgroup"]
             query, params = self.qb.create_query(order)
   
-            err = self._dataquery(query, params)
-            if err != DB_NO_ERROR:
-                yield(None, label, None, None, DBQueryException(err))
+            try:
+                self._dataquery(query, params)
+            except DBQueryException as e:
+                yield(None, label, None, None, e)
  
             fetched = self._query_data_generator()
             for row, errcode in fetched:
@@ -421,17 +397,17 @@ class DBSelector(DatabaseCore):
             if len(streams) == 0:
                 yield(None, label, None, None, None)
                 continue
-            err = self._generate_from(table, label, streams, streamtable)
-            if err != DB_NO_ERROR:
-                yield(None, label, None, None, DBQueryException(err))
+                
+            self._generate_from(table, label, streams, streamtable)
             
             order = ["select", "activestreams", "activejoin", "union",
                     "joincondition", "wheretime", "order"]
             sql, params = self.qb.create_query(order)
 
-            err = self._dataquery(sql, params)
-            if err != DB_NO_ERROR:
-                yield(None, label, None, None, DBQueryException(err))
+            try:
+                self._dataquery(sql, params)
+            except DBQueryException as e:
+                yield(None, label, None, None, e)
 
             fetched = self._query_data_generator()
             for row, errcode in fetched:
@@ -479,14 +455,12 @@ class DBSelector(DatabaseCore):
     def _query_timestamp(self, datatable, sid, agg):
         query = "SELECT %s(timestamp) FROM %s_" % (agg, datatable)
         query += "%s"   # stream id goes in here
-       
-        err = self._basicquery(query, (sid,))
-        if err != DB_NO_ERROR:
-            return err, 0
+
+        self._basicquery(query, (sid,))
 
         if self.basic.cursor.rowcount != 1:
             log("Unexpected number of results when querying for %s timestamp: %d" % (agg, self.basic.cursor.rowcount))
-            return DB_CODING_ERROR, 0
+            raise DBQueryException(DB_CODING_ERROR)
 
         row = self.basic.cursor.fetchone()
         
@@ -495,21 +469,14 @@ class DBSelector(DatabaseCore):
         else:
             ts = int(row[0])
         
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            return err, 0
-
+        self._releasebasic()
         self.dbqueries += 1
-        return DB_NO_ERROR, ts
+        return ts
 
     def filter_active_streams(self, collection, labels, start, end):
         filteredlabels = {}
 
-        try:
-            table, columns, streamtable = self._get_data_table(collection)
-        except DBQueryException as e:
-            return e.code
-
+        table, columns, streamtable = self._get_data_table(collection)
         tsdict = self.streamcache.fetch_timestamp_dict(table)
 
         for lab, streams in labels.iteritems():
@@ -522,10 +489,8 @@ class DBSelector(DatabaseCore):
                     tsdict[sid] = (None, None)
 
                 if tsdict[sid][0] == None:
-                    err, firstts = self._query_timestamp(table, sid, "min")
+                    firstts = self._query_timestamp(table, sid, "min")
                 
-                    if err != DB_NO_ERROR:
-                        return err, {}
                     # Not ideal, because this will re-fetch the dictionary
                     # but means that we won't overwrite any recent updates
                     # for other streams either (which is what would happen
@@ -537,9 +502,7 @@ class DBSelector(DatabaseCore):
                     firstts = tsdict[sid][0]
 
                 if tsdict[sid][1] == None:
-                    err, lastts = self._query_timestamp(table, sid, "max")
-                    if err != DB_NO_ERROR:
-                        return err, {}
+                    lastts = self._query_timestamp(table, sid, "max")
                     # See firstts above for explanation why we store just
                     # this stream rather than the whole tsdict
                     self.streamcache.store_timestamps(table, sid, lastts)
@@ -554,7 +517,7 @@ class DBSelector(DatabaseCore):
             filteredlabels[lab] = filtered
             #print len(streams), len(filtered), self.cachehits, self.dbqueries
 
-        return DB_NO_ERROR, filteredlabels
+        return filteredlabels
 
     # It looks like restricting the number of stream ids that are checked for
     # in the data table helps significantly with performance, so if we can
@@ -608,8 +571,6 @@ class DBSelector(DatabaseCore):
         else:
             self._generate_union(table, uniquestreams)
 
-        return DB_NO_ERROR
-
     def _generate_where(self, start, end):
         """ Forms a WHERE clause for an SQL query based on a time period """
        
@@ -625,11 +586,8 @@ class DBSelector(DatabaseCore):
              2. a list of columns present in the table
 
         """
-        err = self._basicquery(
+        self._basicquery(
                     "SELECT * from collections where id=%s", (col,))
-        if err != DB_NO_ERROR:
-            log("Failed to query for collection id %d" % (col))
-            raise DBQueryException(err)
 
         assert(self.basic.cursor.rowcount == 1)
 
@@ -644,13 +602,9 @@ class DBSelector(DatabaseCore):
         # This is the quickest way to get the column names -- don't
         # try querying the data table itself because that could be slow
         # if the table is, for example, a complicated view.
-        err = self._basicquery(
+        self._basicquery(
                 "SELECT * from information_schema.columns WHERE table_name=%s",
                 (tname,))
-
-        if err != DB_NO_ERROR:
-            log("Failed to query for data table column names")
-            raise DBQueryException(err)
 
         columns = []
         while True:
@@ -659,10 +613,7 @@ class DBSelector(DatabaseCore):
                 break
 
             columns.append(row['column_name'])
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Error while tidying up after querying data table properties")
-            raise DBQueryException(err)
+        self._releasebasic()
         return table, columns, streamtname
 
     def _sanitise_columns(self, columns, selcols):

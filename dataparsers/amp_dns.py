@@ -120,12 +120,10 @@ class AmpDnsParser(NNTSCParser):
                     return stream_id
                 self.streams[key] = stream_id
 
-            res = self.insert_data(stream_id, timestamp, dataresult)
-            if res != DB_NO_ERROR:
-                return res
+            self.insert_data(stream_id, timestamp, dataresult)
             done[stream_id] = 0
 
-        return self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
 
 
     def _split_result(self, alldata, result):

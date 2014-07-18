@@ -76,10 +76,11 @@ if dbconf["name"] == "":
 
 db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"], dbconf["host"])
 db.connect_db(15)
-result = db.build_databases(modules, new=clean_db)
 
-if result != DB_NO_ERROR:
-    logger.log("Failed to create core database tables -- exiting")
+try:
+    db.build_databases(modules, new=clean_db)
+except DBQueryException as e:
+    logger.log("Failed to create tables for nntsc database")
     sys.exit(1)
 
 if 'rrd' in enabled_modules:
@@ -87,13 +88,17 @@ if 'rrd' in enabled_modules:
     rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
     if rrd_conf == "NNTSCConfigError" or rrd_conf == "NNTSCConfigMissing":
         sys.exit(0)
-    res = insert_rrd_streams(db, rrd_conf) 
-    if res == DB_DATA_ERROR:
-        logger.log("Failed to create RRD streams -- check RRD List for invalid content")
-        sys.exit(1)        
-    if res == DB_GENERIC_ERROR:
-        logger.log("Database error while creating RRD streams -- may need to manually check database")
-        sys.exit(1)
+    
+    try:
+        insert_rrd_streams(db, rrd_conf) 
+    except DBQueryException as e:
+        if e.code == DB_DATA_ERROR:
+            logger.log("Failed to create RRD streams -- check RRD List for invalid content")
+            sys.exit(1)        
+
+        if e.code == DB_GENERIC_ERROR:
+            logger.log("Database error while creating RRD streams -- may need to manually check database")
+            sys.exit(1)
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -19,6 +19,8 @@ class NNTSCParser(object):
         self.dataindexes = []
         self.exporter = None
 
+        self.collectionid = None
+
     def add_exporter(self, exp):
         self.exporter = exp
 
@@ -29,9 +31,7 @@ class NNTSCParser(object):
         return self.streamtable
 
     def get_last_timestamp(self, stream):
-        err, lastts = self.db.get_last_timestamp(self.datatable, stream)
-        if err != DB_NO_ERROR:
-            return time.time()
+        lastts = self.db.get_last_timestamp(self.datatable, stream)
         return lastts
 
     def _create_indexes(self, table, indexes):
@@ -45,58 +45,65 @@ class NNTSCParser(object):
             else:
                 indname = ind["name"]
 
-            err = self.db.create_index(indname, table, ind["columns"])
-            if err != DB_NO_ERROR:
+            try:
+                self.db.create_index(indname, table, ind["columns"])
+            except DBQueryException as e:
                 logger.log("Failed to create index for %s" % (table))
-                return err
-
-        return DB_NO_ERROR
+                logger.log("Error was: %s" % (str(e)))
+                raise
 
     def stream_table(self):
-        err = self.db.create_streams_table(self.streamtable, 
+        self.db.create_streams_table(self.streamtable, 
                 self.streamcolumns, self.uniquecolumns)
         
-        if err != DB_NO_ERROR:
-            logger.log("Failed to create streams table for %s" % (self.colname))
-            return err
-        
-        err = self._create_indexes(self.streamtable, self.streamindexes)
-        if err != DB_NO_ERROR:
-            return err
-
-        err = self.db.commit_streams()
-        if err != DB_NO_ERROR:
-            return err
-
-        return DB_NO_ERROR
+        self._create_indexes(self.streamtable, self.streamindexes)
+        self.db.commit_streams()
 
     def data_table(self):
-        err = self.db.create_data_table(self.datatable, self.datacolumns)
-        if err != DB_NO_ERROR:
-            logger.log("Failed to create data table for %s" % (self.colname))
-            return err
-
-        err = self._create_indexes(self.datatable, self.dataindexes)
-        if err != DB_NO_ERROR:
-            return err
-
-        err = self.db.commit_streams()
-        if err != DB_NO_ERROR:
-            return err
-        return DB_NO_ERROR
-
+        self.db.create_data_table(self.datatable, self.datacolumns)
+        self._create_indexes(self.datatable, self.dataindexes)
+        self.db.commit_streams()
 
     def register(self):
-        err = self.stream_table()
-        if err != DB_NO_ERROR:
-            return err
+        try:
+            self.stream_table()
+        except DBQueryException as e:
+            logger.log("Failed to create streams table for %s" % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
-        err = self.data_table()
-        if err != DB_NO_ERROR:
-            return err
+        try:
+            self.data_table()
+        except DBQueryException as e:
+            logger.log("Failed to create data table for %s" % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
-        return self.db.register_collection(self.source, self.module, 
+        try:
+            self.db.register_collection(self.source, self.module, 
                 self.streamtable, self.datatable)
+        except DBQueryException as e:
+            logger.log("Failed to register new collection %s in database" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
+
+    def _get_collection_id(self):
+        if self.collectionid == None:
+            try:
+                colid = self.db.get_collection_id(self.source, self.module)
+            except DBQueryException as e:
+                logger.log("Failed to get collection id for %s" % \
+                        (self.colname))
+                logger.log("Error was: %s" % (str(e)))
+                raise
+
+            if colid > 0:
+                self.collectionid = colid
+            else:
+                return -1
+
+        return self.collectionid
 
     def create_new_stream(self, result, timestamp):
 
@@ -107,41 +114,35 @@ class NNTSCParser(object):
             else:
                 streamprops[col['name']] = None
 
-        while 1:
-            errorcode = DB_NO_ERROR
-            colid, streamid = self.db.insert_stream(self.streamtable, 
-                self.datatable, timestamp, streamprops)
+        try:
+            streamid = self.db.insert_stream(self.streamtable, 
+                    self.datatable, timestamp, streamprops)
+        except DBQueryException as e:
+            logger.log("Failed to insert new stream into database for %s" \
+                    % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
-            if colid < 0:
-                errorcode = streamid
-
-            if streamid < 0:
-                errorcode = streamid
-    
-            if errorcode == DB_QUERY_TIMEOUT:
-                continue
-            if errorcode != DB_NO_ERROR:
-                return errorcode
-        
-            err = self.db.commit_streams()
-            if err == DB_QUERY_TIMEOUT:
-                continue
-            if err != DB_NO_ERROR:
-                return err
-            break
+        try:
+            self.db.commit_streams()
+        except DBQueryException as e:
+            logger.log("Failed to commit new stream for %s" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
         
         if self.exporter == None:
             return streamid
 
+        colid = self._get_collection_id()
+        if colid <= 0:
+                # Not sure what we should do if we get a bad collection id,
+                # but for now I'm going to go with not exporting the new
+                # stream
+                return streamid
 
-        # TODO get this once rather than every time we add a stream
-        err, colid = self.db.get_collection_id(self.source, self.module)
-        if err != DB_NO_ERROR:
-            return err
-        if colid == 0:
-            return streamid
-
-        self.exporter.publishStream(colid, self.colname, streamid, streamprops)
+        self.exporter.publishStream(colid, self.colname, streamid, 
+                streamprops)
         return streamid
 
     def insert_data(self, stream, ts, result, casts = {}):
@@ -152,10 +153,14 @@ class NNTSCParser(object):
             else:
                 filtered[col["name"]] = None
 
-        err = self.db.insert_data(self.datatable, self.colname, stream, ts, 
-                filtered, casts)
-        if err != DB_NO_ERROR:
-            return err
+        try:
+            self.db.insert_data(self.datatable, self.colname, stream, ts, 
+                    filtered, casts)
+        except DBQueryException as e:
+            logger.log("Failed to insert new data for %s stream %d" % \
+                    (self.colname, stream))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
         # NOTE colname is actually unused by the exporter, so don't panic
         # that we export a collection id number for streams and a string
@@ -163,9 +168,6 @@ class NNTSCParser(object):
         # TODO get rid of this to avoid confusion
         if self.exporter != None:
             self.exporter.publishLiveData(self.colname, stream, ts, filtered)
-
-        return DB_NO_ERROR
-
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
