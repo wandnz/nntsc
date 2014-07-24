@@ -526,10 +526,10 @@ class DBInsert(DatabaseCore):
             -- This particular error triggers sequence creation further down.
 
             RAISE EXCEPTION 'Object >>%<< of type "%" already exists.'
-               ,_fullname
+               ,_fullname 
                ,(SELECT c.relkind FROM pg_class c
                  WHERE  c.oid = _fullname::regclass    -- error if non-existent
-                );
+                ) USING ERRCODE = '23505';
 
             EXCEPTION WHEN undefined_table THEN -- SQLSTATE '42P01'
                 EXECUTE 'CREATE SEQUENCE ' || _fullname;
@@ -556,7 +556,14 @@ class DBInsert(DatabaseCore):
         self._basicquery(coltable)       
 
         createseq = """SELECT create_seq('streams_id_seq');"""
-        self._basicquery(createseq)       
+        try:
+            self._basicquery(createseq)       
+        except DBQueryException as e:
+            # Not the best error handling, but should stop us from falling
+            # over if the sequence already exists
+            if e.code != DB_DATA_ERROR:
+                raise
+
 
         self._releasebasic()
 
