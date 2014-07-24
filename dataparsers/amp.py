@@ -32,6 +32,7 @@ from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
 from libnntsc.parsers.amp_dns import AmpDnsParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
+from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.dberrorcodes import *
 import time
 import logging
@@ -73,7 +74,8 @@ class AmpModule:
             "icmp":AmpIcmpParser(self.db),
             "traceroute":AmpTracerouteParser(self.db),
             "throughput":AmpThroughputParser(self.db),
-            "dns":AmpDnsParser(self.db)
+            "dns":AmpDnsParser(self.db),
+            "tcpping":AmpTcppingParser(self.db)
         }
 
         # set all the streams that we already know about for easy lookup of
@@ -250,6 +252,9 @@ def tables(db):
     parser.register()
 
     parser = AmpThroughputParser(db)
+    parser.register()
+    
+    parser = AmpTcppingParser(db)
     parser.register()
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
