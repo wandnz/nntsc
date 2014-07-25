@@ -1135,6 +1135,7 @@ class NNTSCExporter:
         self.clientlock = threading.Lock()
         self.sublock = threading.Lock()
 
+        self.newstreams = {}
 
     def deregister_client(self, sock):
 
@@ -1261,6 +1262,12 @@ class NNTSCExporter:
 
         #log("Exporting new stream %d to interested clients" % (stream_id))
 
+        self.newstreams[stream_id] = {
+            "sockets":[],
+            "collection":coll_id,
+            "tosend":1
+        }
+
         active = {}
         
         self.clientlock.acquire()
@@ -1277,8 +1284,10 @@ class NNTSCExporter:
                 sock.close()
                 #self.deregister_client(sock)
                 continue
-            
+         
+            self.newstreams[stream_id]["sockets"].append(sock)   
             active[sock] = subbed
+
         self.clientlock.release()
         self.collections[coll_id] = active
         self.sublock.release()
@@ -1332,6 +1341,27 @@ class NNTSCExporter:
                     if results != {}:
                         active.append((sock, columns, start, end, col))
             self.subscribers[stream_id] = active
+
+        elif stream_id in self.newstreams:
+            ns = self.newstreams[stream_id]
+            values['label'] = stream_id
+            values['timestamp'] = timestamp
+            for s in ns['sockets']:
+                contents = pickle.dumps((ns['collection'], stream_id, values))
+                header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE,
+                        len(contents))
+
+                if s in self.clients.keys():
+                    try:
+                        self.clients[s]['queue'].put((header, contents, timestamp), True, 10)
+                    except StdQueue.Full:
+                        sock.close()
+                        continue
+            
+            ns['tosend'] -= 1
+            if ns['tosend'] == 0:
+                del self.newstreams[stream_id]
+
         self.clientlock.release()
         self.sublock.release()
 
