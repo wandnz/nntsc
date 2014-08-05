@@ -665,6 +665,8 @@ class DBSelector(DatabaseCore):
                 colclause = "string_to_array(" + \
                     "most(array_to_string(%s,',')),',') AS %s" % (
                         colname, labelstr)
+            elif func == "arraysize":
+                colclause = "array_length(%s, 1) AS %s" % (colname, labelstr)
             else:
                 colclause = "%s(%s) AS %s" % (
                         func, colname, labelstr)

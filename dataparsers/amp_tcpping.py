@@ -38,11 +38,11 @@ class AmpTcppingParser(AmpIcmpParser):
             {"name":"source", "type":"varchar", "null":False},
             {"name":"destination", "type":"varchar", "null":False},
             {"name":"port", "type":"integer", "null":False},
-            {"name":"address", "type":"inet", "null":False},
+            {"name":"family", "type":"varchar", "null":False},
             {"name":"packet_size", "type":"varchar", "null":False},
         ]
         
-        self.uniquecolumns = ['source', 'destination', 'port', 'address',
+        self.uniquecolumns = ['source', 'destination', 'port', 'family',
                 'packet_size']
         self.streamindexes = [
             {"name": "", "columns": ['source']},
@@ -51,24 +51,26 @@ class AmpTcppingParser(AmpIcmpParser):
         ]
 
         self.datacolumns = [
-            {"name":"rtt", "type":"integer", "null":True},
+            {"name":"median", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
             {"name":"loss", "type":"smallint", "null":False},
-            {"name":"replyflags", "type":"smallint", "null":True},
-            {"name":"icmptype", "type":"smallint", "null":True},
-            {"name":"icmpcode", "type":"smallint", "null":True},
+            {"name":"icmperrors", "type":"smallint", "null":False},
+            {"name":"rtts", "type":"integer[]", "null":True},
+            #{"name":"replyflags", "type":"smallint", "null":True},
+            #{"name":"icmptype", "type":"smallint", "null":True},
+            #{"name":"icmpcode", "type":"smallint", "null":True},
         ]
 
-        self.dataindexes = []
+        #self.dataindexes = []
 
     def create_existing_stream(self, stream_data):
         src = str(stream_data['source'])
         dest = str(stream_data['destination'])
-        addr = str(stream_data['address'])
+        family = str(stream_data['family'])
         port = str(stream_data['port'])
         size = str(stream_data['packet_size'])
 
-        key = (src, dest, port, addr, size)
+        key = (src, dest, port, family, size)
         self.streams[key] = stream_data['stream_id']
 
     def _stream_properties(self, source, result):
@@ -89,6 +91,11 @@ class AmpTcppingParser(AmpIcmpParser):
                     (self.colname))
             return None, None
         
+        if '.' in result['address']:
+            family = "ipv4"
+        else:
+            family = "ipv6"
+
         if result['random']:
             sizestr = "random"
         else:
@@ -101,14 +108,38 @@ class AmpTcppingParser(AmpIcmpParser):
         props['source'] = source
         props['destination'] = result['target']
         props['port'] = str(result['port'])
-        props['address'] = result['address']
+        props['family'] = family
         props['packet_size'] = sizestr
 
         key = (props['source'], props['destination'], props['port'], \
-                props['address'], props['packet_size'])
+                props['family'], props['packet_size'])
         return props, key
 
 
+    def _update_stream(self, observed, streamid, datapoint):
+        if streamid not in observed:
+            observed[streamid] = { "loss":0, "rtts":[], "icmperrors":0,
+                    "median":None, "packet_size":datapoint["packet_size"] }
+
+        if 'reply' in datapoint and datapoint['reply'] == 2:
+            observed[streamid]["icmperrors"] += 1
+
+        if 'loss' in datapoint:
+            observed[streamid]["loss"] += datapoint['loss']
+
+        if 'rtt' in datapoint and datapoint['rtt'] is not None:
+            observed[streamid]["rtts"].append(datapoint['rtt'])
+
+    def _aggregate_streamdata(self, streamdata):
+        streamdata["rtts"].sort()
+        streamdata["median"] = self._find_median(streamdata["rtts"])
+
+        # Add None entries to our array for lost measurements -- we
+        # have to wait until now to add them otherwise they'll mess
+        # with our median calculation
+        nulls = [None] * (streamdata['loss'] + streamdata['icmperrors'])
+        streamdata["rtts"] += nulls
+ 
         
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

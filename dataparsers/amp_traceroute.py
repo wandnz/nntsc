@@ -22,11 +22,9 @@
 
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
-from libnntsc.parsers.amp_icmp import AmpIcmpParser
+from libnntsc.parsers.common import NNTSCParser
 
-# Inherit from AmpIcmp -- the stream structures are virtually identical so
-# we can reuse a lot of code from there.
-class AmpTracerouteParser(AmpIcmpParser):
+class AmpTracerouteParser(NNTSCParser):
     def __init__(self, db):
         super(AmpTracerouteParser, self).__init__(db)
 
@@ -97,6 +95,38 @@ class AmpTracerouteParser(AmpIcmpParser):
             raise
             
 
+    def _stream_properties(self, source, result):
+
+        props = {}
+        if 'target' not in result:
+            logger.log("Error: no target specified in %s result" % \
+                    (self.colname))
+            return None, None
+
+        if 'address' not in result:
+            logger.log("Error: no address specified in %s result" % \
+                    (self.colname))
+            return None, None
+
+        if result['random']:
+            sizestr = "random"
+        else:
+            if 'packet_size' not in result:
+                logger.log("Error: no packet size specified in %s result" % \
+                        (self.colname))
+                return None, None
+            sizestr = str(result['packet_size'])
+
+        props['source'] = source
+        props['destination'] = result['target']
+        props['address']  = result['address']
+        props['packet_size'] = sizestr
+
+        key = (props['source'], props['destination'], props['address'], \
+                props['packet_size'])
+        return props, key
+ 
+
     def create_existing_stream(self, stream_data):
         key = (str(stream_data["source"]), str(stream_data["destination"]),
             str(stream_data["address"]), str(stream_data["packet_size"]))
@@ -135,9 +165,6 @@ class AmpTracerouteParser(AmpIcmpParser):
         # Because we have the extra paths table, we can't use the generic
         # create_new_stream provided by the NNTSCParser class.
         """ Insert a new traceroute stream into the streams table """
-
-        if 'datastyle' in streamparams:
-            streamparams.pop('datastyle')
 
         try:
            streamid = self.db.insert_stream(self.streamtable,
@@ -302,6 +329,42 @@ class AmpTracerouteParser(AmpIcmpParser):
         filtered['aspath'] = result['aspath']
         if self.exporter != None:
             self.exporter.publishLiveData(self.colname, stream, ts, filtered)
+
+    def process_data(self, timestamp, data, source):
+        """ Process a AMP traceroute message, which can contain 1 or more 
+            sets of results 
+        """
+        done = {}
+
+        for d in data:
+            streamparams, key = self._stream_properties(source, d)
+
+            if key is None:
+                logger.log("Failed to determine stream for %s result" % \
+                        (self.colname))
+                return DB_DATA_ERROR
+
+            if key not in self.streams:
+                streamid = self.create_new_stream(streamparams, timestamp)
+                if streamid < 0:
+                    logger.log("Failed to create new %s stream" % \
+                            (self.colname))
+                    logger.log("%s" % (str(streamparams)))
+                    return
+                self.streams[key] = streamid
+            else:
+                streamid = self.streams[key]
+
+                if streamid in done:
+                    continue
+
+            self._mangle_result(d)
+            self.insert_data(streamid, timestamp, d)
+            done[streamid] = 0
+
+        # update the last timestamp for all streams we just got data for
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+
 
 
 # Helper functions for dbselect module which deal with complications
