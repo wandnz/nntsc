@@ -371,7 +371,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         
             if aspath_id not in observed[streamid]['paths']:
                 observed[streamid]['paths'][aspath_id] = \
-                        (1, len(datapoint['aspath'])
+                        (1, len(datapoint['aspath']))
             else:
                 prev = observed[streamid]['paths'][aspath_id]
                 observed[streamid]['paths'][aspath_id] = (prev[0] + 1, prev[1])
@@ -461,9 +461,9 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         for x in result['hops']:
             if 'address' in x:
-                ippath.append(x['address']
+                ippath.append(x['address'])
 
-            if 'hop_rtt' in x:
+            if 'rtt' in x:
                 rtts.append(x['rtt'])
 
             if 'asn' not in x:
