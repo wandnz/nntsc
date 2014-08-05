@@ -644,10 +644,12 @@ class DBInsert(DatabaseCore):
         self._basicquery("""DROP SEQUENCE IF EXISTS "streams_id_seq" """)
         self._releasebasic()
  
-    def update_timestamp(self, datatable, stream_ids, lasttimestamp):
+    def update_timestamp(self, datatable, stream_ids, lasttimestamp, 
+            first=None):
         
         for sid in stream_ids:
-            self.streamcache.store_timestamps(datatable, sid, lasttimestamp)
+            self.streamcache.store_timestamps(datatable, sid, lasttimestamp,
+                    first)
             #log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
         
         return
