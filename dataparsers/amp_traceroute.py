@@ -22,14 +22,15 @@
 
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
-from libnntsc.parsers.common import NNTSCParser
+from libnntsc.parsers.amp_icmp import AmpIcmpParser
 
-class AmpTracerouteParser(NNTSCParser):
+class AmpTracerouteParser(AmpIcmpParser):
     def __init__(self, db):
         super(AmpTracerouteParser, self).__init__(db)
 
         self.streamtable = "streams_amp_traceroute"
-        self.datatable = "data_amp_traceroute"
+        self.ipdatatable = "data_amp_traceroute"
+        self.asdatatable = "data_amp_astraceroute"
         self.colname = "amp_traceroute"
         self.source = "amp"
         self.module = "traceroute"
@@ -37,21 +38,7 @@ class AmpTracerouteParser(NNTSCParser):
         self.paths = {}
         self.aspaths = {}
 
-        self.streamcolumns = [
-            {"name":"source", "type":"varchar", "null":False},
-            {"name":"destination", "type":"varchar", "null":False},
-            {"name":"address", "type":"inet", "null":False},
-            {"name":"packet_size", "type":"varchar", "null":False},
-        ]
-
-        self.uniquecolumns = ['source', 'destination', 'packet_size', 'address']
-
-        self.streamindexes = [
-            {"name": "", "columns": ['source']},
-            {"name": "", "columns": ['destination']}
-        ]
-
-        self.datacolumns = [
+        self.ipdatacolumns = [
             {"name":"path_id", "type":"integer", "null":False},
             {"name":"aspath_id", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
@@ -60,11 +47,24 @@ class AmpTracerouteParser(NNTSCParser):
             {"name":"error_code", "type":"smallint", "null":True},
             {"name":"hop_rtt", "type":"integer[]", "null":False},
         ]
-            
-        self.dataindexes = []
+
+        self.asdatacolumns = [
+            {"name":"aspath_id", "type":"integer", "null":True},
+            {"name":"packet_size", "type":"smallint", "null":False},
+            {"name":"length", "type":"smallint", "null":False},
+            {"name":"errors", "type":"smallint", "null":False},
+        ]
+
+    
 
     def data_table(self):
-        super(AmpTracerouteParser, self).data_table()
+        self.db.create_data_table(self.asdatatable, self.asdatacolumns)
+        self._create_indexes(self.asdatatable, [])
+
+        self.db.create_data_table(self.ipdatatable, self.ipdatacolumns)
+        self._create_indexes(self.ipdatatable, [])
+
+        self.db.commit_streams()
 
         # Create the paths tables as well
         aspathcols = [ \
@@ -94,86 +94,70 @@ class AmpTracerouteParser(NNTSCParser):
             logger.log("Error was: %s" % (str(e)))
             raise
             
+    def register(self):
+        # Very similar to the parent class, but we have to register two
+        # collections instead of just one.
+        try:
+            self.stream_table()
+        except DBQueryException as e:
+            logger.log("Failed to create streams table for %s" % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
-    def _stream_properties(self, source, result):
+        try:
+            self.data_table()
+        except DBQueryException as e:
+            logger.log("Failed to create data table for %s" % (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
 
-        props = {}
-        if 'target' not in result:
-            logger.log("Error: no target specified in %s result" % \
-                    (self.colname))
-            return None, None
+        try:
+            self.db.register_collection(self.source, "astraceroute",
+                self.streamtable, self.asdatatable)
+        except DBQueryException as e:
+            logger.log("Failed to register new collection %s in database" % \
+                    ("astraceroute"))
+            logger.log("Error was: %s" % (str(e)))
+            raise 
+            
+        try:
+            self.db.register_collection(self.source, "traceroute",
+                self.streamtable, self.ipdatatable)
+        except DBQueryException as e:
+            logger.log("Failed to register new collection %s in database" % \
+                    ("traceroute"))
+            logger.log("Error was: %s" % (str(e)))
+            raise 
 
-        if 'address' not in result:
-            logger.log("Error: no address specified in %s result" % \
-                    (self.colname))
-            return None, None
-
-        if result['random']:
-            sizestr = "random"
-        else:
-            if 'packet_size' not in result:
-                logger.log("Error: no packet size specified in %s result" % \
-                        (self.colname))
-                return None, None
-            sizestr = str(result['packet_size'])
-
-        props['source'] = source
-        props['destination'] = result['target']
-        props['address']  = result['address']
-        props['packet_size'] = sizestr
-
-        key = (props['source'], props['destination'], props['address'], \
-                props['packet_size'])
-        return props, key
- 
-
-    def create_existing_stream(self, stream_data):
-        key = (str(stream_data["source"]), str(stream_data["destination"]),
-            str(stream_data["address"]), str(stream_data["packet_size"]))
-
-        self.streams[key] = stream_data["stream_id"]
-
-    def _mangle_result(self, result):
-        result["path"] = [x["address"] for x in result["hops"]]
-        result["hop_rtt"] = [x["rtt"] for x in result["hops"]]
-      
-        aspath = []
-        currentas = None
-        count = 0
-
-        for x in result['hops']:
-            if 'asn' not in x:
-                continue
-
-            if currentas != x['asn']:
-                if currentas != None:
-                    assert(count != 0)
-                    aspath.append("%d.%d" % (count, currentas))
-                currentas = x['asn']
-                count = 1
-
-        if currentas != None:
-            assert(count != 0)
-            aspath.append("%d.%d" % (count, currentas))
-       
-        if len(aspath) == 0:
-            result["aspath"] = None 
-        else:
-            result["aspath"] = aspath
 
     def create_new_stream(self, streamparams, timestamp):
         # Because we have the extra paths table, we can't use the generic
         # create_new_stream provided by the NNTSCParser class.
         """ Insert a new traceroute stream into the streams table """
 
+        # This will automatically clone the ipdatatable
         try:
            streamid = self.db.insert_stream(self.streamtable,
-                    self.datatable, timestamp, streamparams)
+                    self.ipdatatable, timestamp, streamparams)
         except DBQueryException as e:
             logger.log("Failed to insert new stream for %s" % (self.colname))
             logger.log("Error was: %s" % (str(e)))
             raise
-            
+      
+        # Manually clone the AS data table 
+        try:
+            self.db.clone_table("data_amp_astraceroute", streamid)
+        except DBQueryException as e:
+            logger.log("Failed to clone AS data table for new %s stream" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
+        
+        # Don't forget to set the 'first' timestamp (just like insert_stream
+        # does).
+        self.db.update_timestamp("data_amp_astraceroute", [streamid], 
+                timestamp, timestamp) 
+
         try:
             self.db.clone_table("data_amp_traceroute_aspaths", 
                     streamid)
@@ -194,13 +178,16 @@ class AmpTracerouteParser(NNTSCParser):
 
         try:
             # Ensure our custom foreign keys gets perpetuated
-            newtable = "%s_%d" % (self.datatable, streamid)
+            ipdatatable = "%s_%d" % (self.ipdatatable, streamid)
+            asdatatable = "%s_%d" % (self.asdatatable, streamid)
             pathtable = "data_amp_traceroute_paths_%d" % (streamid)
             aspathtable = "data_amp_traceroute_aspaths_%d" % (streamid)
 
-            self.db.add_foreign_key(newtable, "aspath_id", aspathtable, 
+            self.db.add_foreign_key(asdatatable, "aspath_id", aspathtable, 
                     "aspath_id")
-            self.db.add_foreign_key(newtable, "path_id", pathtable, 
+            self.db.add_foreign_key(ipdatatable, "aspath_id", aspathtable, 
+                    "aspath_id")
+            self.db.add_foreign_key(ipdatatable, "path_id", pathtable, 
                     "path_id")
         except DBQueryException as e:
             logger.log("Failed to add foreign key to paths tables for %s" \
@@ -218,13 +205,39 @@ class AmpTracerouteParser(NNTSCParser):
         if self.exporter == None:
             return streamid
     
-        colid = self._get_collection_id()
+        colid = self._get_collection_id("traceroute")
         if colid <= 0:
             return streamid
 
-        self.exporter.publishStream(colid, self.colname, streamid, streamparams)
+        self.exporter.publishStream(colid, "amp-traceroute", streamid, 
+                streamparams)
+        
+        colid = self._get_collection_id("astraceroute")
+        if colid <= 0:
+            return streamid
+
+        self.exporter.publishStream(colid, "amp-astraceroute", streamid, 
+                streamparams)
         
         return streamid
+
+    def _get_collection_id(self, module):
+        if self.collectionid == None:
+            try:
+                colid = self.db.get_collection_id(self.source, module)
+            except DBQueryException as e:
+                logger.log("Failed to get collection id for %s %s" % \
+                        (self.colname))
+                logger.log("Error was: %s" % (str(e)))
+                raise
+
+            if colid > 0:
+                self.collectionid = colid
+            else:
+                return -1
+
+        return self.collectionid
+
 
     def _insert_path(self, pathtype, stream, path):
         if pathtype == "ip":
@@ -272,10 +285,8 @@ class AmpTracerouteParser(NNTSCParser):
         return int(queryret[0])
 
 
-    def insert_data(self, stream, ts, result):
-        """ Insert data for a single traceroute test into the database """
-        # Again, we have to provide our own version of insert_data as we have
-        # the extra paths table to deal with
+    def insert_ippath(self, stream, ts, result):
+        """ Insert data for a single traceroute path into the database """
 
         keystr = "%s" % (stream)
         for p in result['path']:
@@ -310,14 +321,14 @@ class AmpTracerouteParser(NNTSCParser):
         # line where we have to add an entry for "path" before exporting live
         # data :/
         filtered = {}
-        for col in self.datacolumns:
+        for col in self.ipdatacolumns:
             if col["name"] in result:
                 filtered[col["name"]] = result[col["name"]]
             else:
                 filtered[col["name"]] = None
 
         try:
-            self.db.insert_data(self.datatable, self.colname, stream,
+            self.db.insert_data(self.ipdatatable, self.colname, stream,
                 ts, filtered, {'hop_rtt':'integer[]'})
         except DBQueryException as e:
             logger.log("Failed to insert new data for %s stream %d" % \
@@ -328,13 +339,56 @@ class AmpTracerouteParser(NNTSCParser):
         filtered['path'] = result['path']
         filtered['aspath'] = result['aspath']
         if self.exporter != None:
-            self.exporter.publishLiveData(self.colname, stream, ts, filtered)
+            self.exporter.publishLiveData("amp-traceroute", stream, ts, \
+                    filtered)
+
+    def _update_as_stream(self, observed, streamid, datapoint):
+        if streamid not in observed:
+            observed[streamid] = {"packet_size":datapoint["packet_size"],
+                    "icmperrors":0, "paths":{}}
+        
+        if datapoint['error_type'] != None or datapoint['error_code'] != None:
+            observed[streamid]["icmperrors"] += 1
+
+        if datapoint['aspath'] != None:
+            keystr = "%s" % (streamid)
+            for p in datapoint['aspath']:
+                keystr += "_%s" % (p)
+
+            # XXX This is going to insert all observed AS paths, even
+            # if they aren't going to appear in the AS-traceroute data
+            # table. This may be a tad inefficient, but I imagine we are
+            # not going to have many AS paths anyway.
+            if keystr in self.aspaths:
+                aspath_id = self.aspaths[keystr]
+            else:
+                pathid = self._insert_path("as", stream, datapoint['aspath'])
+                if pathid < 0:
+                    return
+                
+                aspath_id = pathid
+                self.aspaths[keystr] = pathid
+        
+            if aspath_id not in observed[streamid]['paths']:
+                observed[streamid]['paths'][aspath_id] = \
+                        (1, len(datapoint['aspath'])
+            else:
+                prev = observed[streamid]['paths'][aspath_id]
+                observed[streamid]['paths'][aspath_id] = (prev[0] + 1, prev[1])
+
+    def _aggregate_streamdata(self, streamdata):
+        # Find the most common AS path
+        commonpath = max(streamdata['paths'].iteritems(), \
+                key = operator.itemgetter(1))
+        streamdata['aspath_id'] = commonpath[0]
+        streamdata['length'] = commonpath[1]
 
     def process_data(self, timestamp, data, source):
         """ Process a AMP traceroute message, which can contain 1 or more 
             sets of results 
         """
-        done = {}
+        asobserved = {}
+        ipobserved = {}
 
         for d in data:
             streamparams, key = self._stream_properties(source, d)
@@ -355,16 +409,91 @@ class AmpTracerouteParser(NNTSCParser):
             else:
                 streamid = self.streams[key]
 
-                if streamid in done:
-                    continue
+            self._extract_paths(d)
 
-            self._mangle_result(d)
-            self.insert_data(streamid, timestamp, d)
-            done[streamid] = 0
+            # IP flag tells us if this is intended as an IP traceroute.
+            # If the flag isn't present, we're running an old ampsave 
+            # that pre-dates AS path support so assume an IP traceroute in
+            # that case
+            if 'ip' not in d or d['ip'] != 0:
+                self.insert_ippath(streamid, timestamp, d)
+                ipobserved[streamid] = 1
+            else:
+                # Just insert the AS path
+                self.update_as_stream(asobserved, streamid, d) 
+            
+        for sid, streamdata in asobserved.iteritems():
+            self._aggregate_streamdata(streamdata)
+            self.insert_aspath(sid, timestamp, streamdata)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.ipdatatable, ipobserved.keys(), timestamp)
+        self.db.update_timestamp(self.asdatatable, asobserved.keys(), timestamp)
 
+    def insert_aspath(self, stream, ts, result):
+        filtered = {}
+        for col in self.asdatacolumns:
+            if col["name"] in result:
+                filtered[col["name"]] = result[col["name"]]
+            else:
+                filtered[col["name"]] = None
+
+        try:
+            self.db.insert_data(self.asdatatable, "amp-astraceroute", stream, 
+                    ts, filtered, casts)
+        except DBQueryException as e:
+            logger.log("Failed to insert new data for %s stream %d" % \
+                    ("amp-astraceroute", stream))
+            logger.log("Error was: %s" % (str(e)))
+            raise
+
+        if self.exporter != None:
+            self.exporter.publishLiveData("amp-astraceroute", stream, ts, \
+                    filtered)
+
+
+    def _extract_paths(self, result):
+        aspath = []
+        ippath = []
+        rtts = []
+        currentas = None
+        count = 0
+
+        for x in result['hops']:
+            if 'address' in x:
+                ippath.append(x['address']
+
+            if 'hop_rtt' in x:
+                rtts.append(x['rtt'])
+
+            if 'asn' not in x:
+                continue
+
+            if currentas != x['asn']:
+                if currentas != None:
+                    assert(count != 0)
+                    aspath.append("%d.%d" % (count, currentas))
+                currentas = x['asn']
+                count = 1
+
+        if currentas != None:
+            assert(count != 0)
+            aspath.append("%d.%d" % (count, currentas))
+        
+        if len(rtts) == 0:
+            result["hop_rtt"] = None
+        else:
+            result['hop_rtt'] = rtts
+       
+        if len(aspath) == 0:
+            result["aspath"] = None 
+        else:
+            result["aspath"] = aspath
+
+        if len(ippath) == 0:
+            result["path"] = None
+        else:
+            result['path'] = ippath
 
 
 # Helper functions for dbselect module which deal with complications
@@ -385,15 +514,16 @@ def generate_union(qb, table, streams):
         if i != len(streams) - 1:
             sql += " UNION ALL "
 
-    sql += ") AS allstreams JOIN ("
+    sql += ") AS allstreams LEFT JOIN ("
     
-    for i in range(0, len(streams)):
-        sql += "SELECT * from data_amp_traceroute_paths_"
-        sql += "%s"
-        if i != len(streams) - 1:
-            sql += " UNION ALL "
+    if "astraceroute" not in table:
+        for i in range(0, len(streams)):
+            sql += "SELECT * from data_amp_traceroute_paths_"
+            sql += "%s"
+            if i != len(streams) - 1:
+                sql += " UNION ALL "
 
-    sql += ") AS paths ON (allstreams.path_id = paths.path_id) LEFT JOIN ("
+        sql += ") AS paths ON (allstreams.path_id = paths.path_id) LEFT JOIN ("
     
     for i in range(0, len(streams)):
         sql += "SELECT * from data_amp_traceroute_aspaths_"
@@ -410,10 +540,14 @@ def sanitise_columns(columns):
 
     sanitised = []
 
+    # TODO Take 'amp-traceroute' or 'amp-astraceroute' as a parameter
+    # and limit the query to just the appropriate columns for that
+    # collection
+
     for c in columns:
         if c in ['path', 'path_id', 'stream_id', 'timestamp', 'hop_rtt', 
                 'packet_size', 'length', 'error_type', 'error_code',
-                'aspath', 'aspath_id']:
+                'aspath', 'aspath_id', 'icmperrors']:
             sanitised.append(c)
 
     return sanitised 
