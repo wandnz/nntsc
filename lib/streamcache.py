@@ -15,15 +15,36 @@ class StreamCache(object):
         self.nntscid = nntscid
         self.cachetime = int(cachetime)
 
+        self.collections = {}
+
     def __del__(self):
         self.mcpool.relinquish()
 
-    def store_timestamps(self, collection, streamid, last, first=None):
+    def update_timestamps(self, collection, streamid, last, first=None):
         if first == None and last == None:
             return
         
-        coldict = self._fetch_dict(collection)
+        if collection not in self.collections:
+            coldict = self._fetch_dict(collection)
+            self.collections[collection] = {"streams":coldict}
+        else:
+            coldict = self.collections[collection]['streams']
 
+        self._store_timestamps(coldict, streamid, last, first)
+
+        if last is None:
+            return
+
+        if 'laststore' not in self.collections[collection]:
+            self.collections[collection]['laststore'] = last
+
+        # Write timestamps back to the cache every 5 mins rather than 
+        # every time we update a stream, otherwise this gets very slow
+        if last - self.collections[collection]['laststore'] >= 300:
+            self.set_timestamps(collection, coldict)
+            self.collections[collection]['laststore'] = last
+
+    def _store_timestamps(self, coldict, streamid, last, first=None):
         if streamid not in coldict:
             coldict[streamid] = (first, last)
         else:
@@ -41,36 +62,40 @@ class StreamCache(object):
                 stamps = (first, last)
             coldict[streamid] = stamps
 
-        self._store_dict(collection, coldict)
-
-    def store_timestamp_dict(self, collection, tsdict):
-        self._store_dict(collection, tsdict)
-
     def fetch_timestamp_dict(self, collection):
-        return self._fetch_dict(collection)
+        fetched = self._fetch_dict(collection)
+        return fetched
 
     def fetch_timestamps(self, collection, streamid):
+        if collection not in self.collections:
+            coldict = self._fetch_dict(collection)
+            self.collections[collection] = {"streams":coldict}
+        else:
+            coldict = self.collections[collection]['streams']
 
-        coldict = self._fetch_dict(collection)
+        #coldict = self._fetch_dict(collection)
         if streamid not in coldict:
             return (None, None)
         
         return coldict[streamid]
         
     def _fetch_dict(self, collection):
+
         key = self._dict_cache_key(collection)
        
         #print "Fetching using key", key 
+        coldict = {}
         with self.mcpool.reserve() as mc:
             try:
                 if key in mc:
-                    return mc.get(key)
+                    coldict = mc.get(key)
             except pylibmc.SomeErrors as e:
                 log("Warning: pylibmc error while fetching collection timestamps")
                 log(e)
-        return {}
 
-    def _store_dict(self, collection, coldict):
+        return coldict
+
+    def set_timestamps(self, collection, coldict):
         key = self._dict_cache_key(collection)
         
         #print "Storing using key", key 

@@ -647,7 +647,7 @@ class DBInsert(DatabaseCore):
     def update_timestamp(self, datatable, stream_ids, lasttimestamp):
         
         for sid in stream_ids:
-            self.streamcache.store_timestamps(datatable, sid, lasttimestamp)
+            self.streamcache.update_timestamps(datatable, sid, lasttimestamp)
             #log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
         
         return
@@ -673,7 +673,7 @@ class DBInsert(DatabaseCore):
                 return 0
 
             lastts = int(row[0])
-            self.streamcache.store_timestamps(table, streamid, lastts)
+            self.streamcache.update_timestamps(table, streamid, lastts)
             
             self._releasebasic()
     
@@ -739,7 +739,7 @@ class DBInsert(DatabaseCore):
 
         # Cache the observed timestamp as the first timestamp
         if timestamp != 0:        
-            self.streamcache.store_timestamps(datatable, newid, timestamp, 
+            self.streamcache.update_timestamps(datatable, newid, timestamp, 
                     timestamp)
 
         # Create a new data table for this stream, using the "base" data

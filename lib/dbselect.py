@@ -475,6 +475,7 @@ class DBSelector(DatabaseCore):
 
     def filter_active_streams(self, collection, labels, start, end):
         filteredlabels = {}
+        storerequired = False
 
         table, columns, streamtable = self._get_data_table(collection)
         tsdict = self.streamcache.fetch_timestamp_dict(table)
@@ -490,22 +491,14 @@ class DBSelector(DatabaseCore):
 
                 if tsdict[sid][0] == None:
                     firstts = self._query_timestamp(table, sid, "min")
-                
-                    # Not ideal, because this will re-fetch the dictionary
-                    # but means that we won't overwrite any recent updates
-                    # for other streams either (which is what would happen
-                    # if we just stored the whole tsdict at the end)
-                    self.streamcache.store_timestamps(table, sid, None, firstts)
-                    
+                    storerequired = True
                 else:
                     self.cachehits += 1
                     firstts = tsdict[sid][0]
 
                 if tsdict[sid][1] == None:
                     lastts = self._query_timestamp(table, sid, "max")
-                    # See firstts above for explanation why we store just
-                    # this stream rather than the whole tsdict
-                    self.streamcache.store_timestamps(table, sid, lastts)
+                    storerequired = True
                 else:
                     self.cachehits += 1
                     lastts = tsdict[sid][1]
@@ -516,6 +509,8 @@ class DBSelector(DatabaseCore):
                     filtered.append(sid)
             filteredlabels[lab] = filtered
             #print len(streams), len(filtered), self.cachehits, self.dbqueries
+        if storerequired:
+            self.streamcache.set_timestamps(table, tsdict)
 
         return filteredlabels
 
