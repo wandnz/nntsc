@@ -475,10 +475,12 @@ class DBSelector(DatabaseCore):
 
     def filter_active_streams(self, collection, labels, start, end):
         filteredlabels = {}
-        storerequired = False
+        storerequiredlast = False
+        storerequiredfirst = False
 
         table, columns, streamtable = self._get_data_table(collection)
-        tsdict = self.streamcache.fetch_timestamp_dict(table)
+        firstdict = self.streamcache.fetch_all_first_timestamps(table)
+        lastdict = self.streamcache.fetch_all_last_timestamps(table)
 
         for lab, streams in labels.iteritems():
             self.cachehits = 0
@@ -486,31 +488,37 @@ class DBSelector(DatabaseCore):
         
             filtered = []
             for sid in streams:
-                if sid not in tsdict:
-                    tsdict[sid] = (None, None)
+                if sid not in firstdict:
+                    firstdict[sid] = None
 
-                if tsdict[sid][0] == None:
+                if firstdict[sid] == None:
                     firstts = self._query_timestamp(table, sid, "min")
-                    storerequired = True
+                    firstdict[sid] = firstts
+                    storerequiredfirst = True
                 else:
                     self.cachehits += 1
-                    firstts = tsdict[sid][0]
+                    firstts = firstdict[sid]
 
-                if tsdict[sid][1] == None:
+                if sid not in lastdict:
+                    lastdict[sid] = None
+
+                if lastdict[sid] == None:
                     lastts = self._query_timestamp(table, sid, "max")
-                    storerequired = True
+                    storerequiredlast = True
+                    lastdict[sid] = lastts
                 else:
                     self.cachehits += 1
-                    lastts = tsdict[sid][1]
-
-                tsdict[sid] = (firstts, lastts)
+                    lastts = lastdict[sid]
 
                 if firstts <= end and lastts >= start:
                     filtered.append(sid)
             filteredlabels[lab] = filtered
-            #print len(streams), len(filtered), self.cachehits, self.dbqueries
-        if storerequired:
-            self.streamcache.set_timestamps(table, tsdict)
+            print len(streams), len(filtered), self.cachehits, self.dbqueries
+        
+        if storerequiredfirst:
+            self.streamcache.set_first_timestamps(table, firstdict)
+        if storerequiredlast:
+            self.streamcache.set_last_timestamps(table, lastdict)
 
         return filteredlabels
 

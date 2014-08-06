@@ -653,9 +653,9 @@ class DBInsert(DatabaseCore):
         return
 
     def get_last_timestamp(self, table, streamid):
-        firstts, lastts = self.streamcache.fetch_timestamps(table, streamid)
+        lastdict = self.streamcache.fetch_all_last_timestamps(table)
 
-        if lastts is None:
+        if streamid not in lastdict:
             # Nothing useful in cache, query data table for max timestamp
             # Warning, this isn't going to be fast so try to avoid doing
             # this wherever possible!
@@ -673,10 +673,13 @@ class DBInsert(DatabaseCore):
                 return 0
 
             lastts = int(row[0])
-            self.streamcache.update_timestamps(table, streamid, lastts)
+            lastdict[streamid] = lastts
+            self.streamcache.set_last_timestamps(table, lastdict)
             
             self._releasebasic()
-    
+        else:
+            lastts = lastdict[streamid]
+
         return lastts
 
 
@@ -738,7 +741,7 @@ class DBInsert(DatabaseCore):
         newid = self.streams.cursor.fetchone()[0]
 
         # Cache the observed timestamp as the first timestamp
-        if timestamp != 0:        
+        if timestamp != 0:   
             self.streamcache.update_timestamps(datatable, newid, timestamp, 
                     timestamp)
 
