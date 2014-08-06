@@ -50,14 +50,15 @@ class StreamCache(object):
         if streamid not in coldict or last > coldict[streamid]:
             coldict[streamid] = last
 
+        now = time.time()
         if 'laststore' not in self.collections[collection]:
-            self.collections[collection]['laststore'] = last
+            self.collections[collection]['laststore'] = time.time()
 
         # Write timestamps back to the cache every 5 mins rather than 
         # every time we update a stream, otherwise this gets very slow
-        if last - self.collections[collection]['laststore'] >= 300:
+        if now - self.collections[collection]['laststore'] >= 300:
             self.set_last_timestamps(collection, coldict)
-            self.collections[collection]['laststore'] = last
+            self.collections[collection]['laststore'] = now
 
     def fetch_all_last_timestamps(self, collection):
         fetched = self._fetch_dict(collection, "last")
@@ -71,7 +72,7 @@ class StreamCache(object):
 
         key = self._dict_cache_key(collection, style)
        
-        #print "Fetching using key", key 
+        #print "Fetching using key", key, time.time() 
         coldict = {}
         with self.mcpool.reserve() as mc:
             try:
@@ -92,7 +93,7 @@ class StreamCache(object):
     def _set_timestamps(self, collection, coldict, style):
         key = self._dict_cache_key(collection, style)
         
-        #print "Storing using key", key 
+        #print "Storing using key", key, time.time() 
         with self.mcpool.reserve() as mc:
             try:
                 mc.set(key, coldict, self.cachetime)
