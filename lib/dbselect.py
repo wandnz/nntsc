@@ -513,7 +513,7 @@ class DBSelector(DatabaseCore):
                 if firstts <= end and lastts >= start:
                     filtered.append(sid)
             filteredlabels[lab] = filtered
-            print len(streams), len(filtered), self.cachehits, self.dbqueries
+            #print len(streams), len(filtered), self.cachehits, self.dbqueries
         
         if storerequiredfirst:
             self.streamcache.set_first_timestamps(table, firstdict)

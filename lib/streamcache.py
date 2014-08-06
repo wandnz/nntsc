@@ -71,7 +71,7 @@ class StreamCache(object):
 
         key = self._dict_cache_key(collection, style)
        
-        print "Fetching using key", key 
+        #print "Fetching using key", key 
         coldict = {}
         with self.mcpool.reserve() as mc:
             try:
@@ -92,7 +92,7 @@ class StreamCache(object):
     def _set_timestamps(self, collection, coldict, style):
         key = self._dict_cache_key(collection, style)
         
-        print "Storing using key", key 
+        #print "Storing using key", key 
         with self.mcpool.reserve() as mc:
             try:
                 mc.set(key, coldict, self.cachetime)
