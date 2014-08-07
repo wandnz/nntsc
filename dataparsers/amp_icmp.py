@@ -115,7 +115,7 @@ class AmpIcmpParser(NNTSCParser):
         # No mangling is necessary for AMP-ICMP, but it is required by
         # amp-traceroute which will inherit from us so we need to define
         # this function here
-        return
+        return 1
 
     def process_data(self, timestamp, data, source):
         """ Process a AMP ICMP message, which can contain 1 or more sets of 
@@ -145,9 +145,9 @@ class AmpIcmpParser(NNTSCParser):
                 if streamid in done:
                     continue
 
-            self._mangle_result(d)
-            self.insert_data(streamid, timestamp, d)
-            done[streamid] = 0
+            if self._mangle_result(d):
+                self.insert_data(streamid, timestamp, d)
+                done[streamid] = 0
 
         # update the last timestamp for all streams we just got data for
         self.db.update_timestamp(self.datatable, done.keys(), timestamp)

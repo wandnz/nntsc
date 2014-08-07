@@ -88,9 +88,13 @@ class AmpTracerouteParser(AmpIcmpParser):
         self.streams[key] = stream_data["stream_id"]
 
     def _mangle_result(self, result):
-        result["path"] = [x["address"] for x in result["hops"]]
-        result["hop_rtt"] = [x["rtt"] for x in result["hops"]]
+        if 'ip' not in result or result['ip'] == 1:
+            result["path"] = [x["address"] for x in result["hops"]]
+            result["hop_rtt"] = [x["rtt"] for x in result["hops"]]
+            return 1
         
+        # This is an AS path result, which we don't support
+        return 0 
 
     def create_new_stream(self, streamparams, timestamp):
         # Because we have the extra paths table, we can't use the generic
