@@ -51,6 +51,7 @@ class AmpIcmpParser(NNTSCParser):
             {"name":"median", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
             {"name":"loss", "type":"smallint", "null":False},
+            {"name":"results", "type":"smallint", "null":False},
             {"name":"rtts", "type":"integer[]", "null":True},
         ]
 
@@ -120,7 +121,10 @@ class AmpIcmpParser(NNTSCParser):
     def _update_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
             observed[streamid] = { "loss":0, "rtts":[], 
-                    "median":None, "packet_size":datapoint["packet_size"] }
+                    "median":None, "packet_size":datapoint["packet_size"],
+                    "results":0 }
+
+        observed[streamid]["results"] += 1
 
         if 'loss' in datapoint:
             observed[streamid]["loss"] += datapoint['loss']
