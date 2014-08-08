@@ -225,11 +225,12 @@ class DBSelector(DatabaseCore):
             groupcols = self._sanitise_columns(columns, groupcols)
 
         aggcols = self._filter_aggregation_columns(table, aggcols)
+        uniquecols = list(set([k[0] for k in aggcols] + groupcols))
 
         self.qb.reset()
 
         # Convert our column and aggregator lists into useful bits of SQL
-        labeled_aggcols = self._apply_aggregation(aggcols)
+        labeled_aggcols = self._apply_aggregation(aggcols, groupcols)
         labeled_groupcols = list(groupcols)
 
         # Add a column for the maximum timestamp in the bin
@@ -253,7 +254,6 @@ class DBSelector(DatabaseCore):
         # each measurement
         innselclause = " SELECT nntsclabel, timestamp "
 
-        uniquecols = list(set([k[0] for k in aggcols]))
         for col in uniquecols:
             innselclause += ", " + col
 
@@ -294,7 +294,7 @@ class DBSelector(DatabaseCore):
                     "union", "joincondition", "wheretime", "outselend",
                     "outgroup"]
             query, params = self.qb.create_query(order)
-  
+ 
             try:
                 self._dataquery(query, params)
             except DBQueryException as e:
@@ -645,7 +645,7 @@ class DBSelector(DatabaseCore):
                 sanitised.append(cn)
         return sanitised
 
-    def _apply_aggregation(self, aggregators):
+    def _apply_aggregation(self, aggregators, groupcols):
 
         rename = False
         aggcols = []
@@ -660,7 +660,7 @@ class DBSelector(DatabaseCore):
 
         for colname, func in aggregators:
             labelstr = colname
-            if rename:
+            if rename or colname in groupcols:
                 labelstr += "_" + func
 
             # this isn't the greatest, but we have to treat this one different
