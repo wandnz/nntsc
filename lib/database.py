@@ -410,9 +410,9 @@ class DBInsert(DatabaseCore):
  
         smokefunc = """
             CREATE OR REPLACE FUNCTION _final_smoke(anyarray)
-                RETURNS anyarray AS
+                RETURNS double_precision[] AS
             $BODY$
-                SELECT array_agg(avg) FROM (
+                SELECT array_agg(avg)::double_precision[] FROM (
                     SELECT avg(foo), ntile FROM (
                         SELECT foo, ntile(20) OVER (PARTITION BY one ORDER BY foo) FROM (
                             SELECT 1 as one, unnest($1) as foo
