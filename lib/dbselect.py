@@ -198,7 +198,6 @@ class DBSelector(DatabaseCore):
         if type(binsize) is not int:
             return
 
-
         # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())

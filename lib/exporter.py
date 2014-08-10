@@ -184,7 +184,12 @@ class DBWorker(threading.Thread):
             return DBWORKER_ERROR
 
         while start < stoppoint:
-            queryend = start + MAX_HISTORY_QUERY
+            # Temporary fix to allow heavy aggregation over long time
+            # periods. TODO get rid of need for MAX_HISTORY_QUERY
+            if binsize > MAX_HISTORY_QUERY:
+                queryend = stoppoint
+            else:
+                queryend = start + MAX_HISTORY_QUERY
 
             if queryend >= stoppoint:
                 queryend = stoppoint
