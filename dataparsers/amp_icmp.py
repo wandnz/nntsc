@@ -116,7 +116,7 @@ class AmpIcmpParser(NNTSCParser):
         # No mangling is necessary for AMP-ICMP, but it is required by
         # amp-traceroute which will inherit from us so we need to define
         # this function here
-        return
+        return 1
 
     def _update_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
@@ -173,9 +173,6 @@ class AmpIcmpParser(NNTSCParser):
 
             casts = {"rtts":"integer[]"}
             self.insert_data(sid, timestamp, streamdata, casts)
-
-            #self._mangle_result(d)
-            #done[streamid] = 0
 
         # update the last timestamp for all streams we just got data for
         self.db.update_timestamp(self.datatable, observed.keys(), timestamp)

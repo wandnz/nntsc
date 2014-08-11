@@ -129,7 +129,6 @@ class AmpTracerouteParser(AmpIcmpParser):
             logger.log("Error was: %s" % (str(e)))
             raise 
 
-
     def create_new_stream(self, streamparams, timestamp):
         # Because we have the extra paths table, we can't use the generic
         # create_new_stream provided by the NNTSCParser class.
@@ -418,7 +417,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             if 'ip' not in d or d['ip'] != 0:
                 self.insert_ippath(streamid, timestamp, d)
                 ipobserved[streamid] = 1
-            else:
+            else if 'as' in d and d['as'] != 0:
                 # Just insert the AS path
                 self.update_as_stream(asobserved, streamid, d) 
             
