@@ -88,6 +88,12 @@ class AmpTracerouteParser(AmpIcmpParser):
         self.streams[key] = stream_data["stream_id"]
 
     def _mangle_result(self, result):
+        # Both flags are set to zero, shouldn't really happen but we'll
+        # ignore these results just to be safe
+        if 'ip' in result and result['ip'] == 0 and 'as' in result and \
+                result['as'] == 0:
+            return 0
+        
         if 'ip' not in result or result['ip'] == 1:
             result["path"] = [x["address"] for x in result["hops"]]
             result["hop_rtt"] = [x["rtt"] for x in result["hops"]]

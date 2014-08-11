@@ -158,8 +158,12 @@ class AmpModule:
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 break
 
-
             data = self.amp_modules[test].get_data(body)
+
+            if data is None:
+                channel.basic_ack(delivery_tag = method.delivery_tag)
+                break
+
             source = properties.user_id
 
             try:
