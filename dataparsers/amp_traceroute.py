@@ -23,6 +23,7 @@
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
+import operator
 
 class AmpTracerouteParser(AmpIcmpParser):
     def __init__(self, db):
@@ -254,14 +255,15 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         pathinsert="WITH s AS (SELECT %s, %s FROM %s WHERE %s " % (idcolumn, \
                 pathcolumn, pathtable, pathcolumn)
-        pathinsert += "= CAST (%s as inet[])), "
-        pathinsert += "i AS (INSERT INTO %s (%s) " % (pathtable, pathcolumn)
+        pathinsert += "= CAST (%s as "
+        pathinsert += "%s)), i AS (INSERT INTO %s (%s) " % (castterm, \
+                pathtable, pathcolumn)
         pathinsert += "SELECT CAST(%s as "
         pathinsert += "%s) WHERE NOT EXISTS " % (castterm)
         pathinsert += "(SELECT %s FROM %s WHERE %s " % (pathcolumn, pathtable, \
                 pathcolumn)
-        pathinsert += "= CAST(%s as inet[])) "
-        pathinsert += "RETURNING %s,%s)" % (idcolumn, pathcolumn)
+        pathinsert += "= CAST(%s as "
+        pathinsert += "%s)) RETURNING %s,%s)" % (castterm, idcolumn, pathcolumn)
         pathinsert += "SELECT %s,%s FROM i UNION ALL " % (idcolumn, \
                 pathcolumn)
         pathinsert += "SELECT %s,%s FROM s" % (idcolumn, pathcolumn)
@@ -344,10 +346,10 @@ class AmpTracerouteParser(AmpIcmpParser):
     def _update_as_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
             observed[streamid] = {"packet_size":datapoint["packet_size"],
-                    "icmperrors":0, "paths":{}}
+                    "errors":0, "paths":{}}
         
         if datapoint['error_type'] != None or datapoint['error_code'] != None:
-            observed[streamid]["icmperrors"] += 1
+            observed[streamid]["errors"] += 1
 
         if datapoint['aspath'] != None:
             keystr = "%s" % (streamid)
@@ -361,7 +363,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             if keystr in self.aspaths:
                 aspath_id = self.aspaths[keystr]
             else:
-                pathid = self._insert_path("as", stream, datapoint['aspath'])
+                pathid = self._insert_path("as", streamid, datapoint['aspath'])
                 if pathid < 0:
                     return
                 
@@ -370,7 +372,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         
             if aspath_id not in observed[streamid]['paths']:
                 observed[streamid]['paths'][aspath_id] = \
-                        (1, len(datapoint['aspath']))
+                        (1, datapoint['aspathlen'])
             else:
                 prev = observed[streamid]['paths'][aspath_id]
                 observed[streamid]['paths'][aspath_id] = (prev[0] + 1, prev[1])
@@ -380,7 +382,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         commonpath = max(streamdata['paths'].iteritems(), \
                 key = operator.itemgetter(1))
         streamdata['aspath_id'] = commonpath[0]
-        streamdata['length'] = commonpath[1]
+        streamdata['length'] = commonpath[1][1]
 
     def process_data(self, timestamp, data, source):
         """ Process a AMP traceroute message, which can contain 1 or more 
@@ -410,6 +412,7 @@ class AmpTracerouteParser(AmpIcmpParser):
 
             self._extract_paths(d)
 
+            print d
             # IP flag tells us if this is intended as an IP traceroute.
             # If the flag isn't present, we're running an old ampsave 
             # that pre-dates AS path support so assume an IP traceroute in
@@ -419,10 +422,12 @@ class AmpTracerouteParser(AmpIcmpParser):
                 ipobserved[streamid] = 1
             elif 'as' in d and d['as'] != 0:
                 # Just insert the AS path
-                self.update_as_stream(asobserved, streamid, d) 
+                self._update_as_stream(asobserved, streamid, d) 
+                print asobserved
             
         for sid, streamdata in asobserved.iteritems():
             self._aggregate_streamdata(streamdata)
+            print streamdata
             self.insert_aspath(sid, timestamp, streamdata)
 
         # update the last timestamp for all streams we just got data for
@@ -439,7 +444,7 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         try:
             self.db.insert_data(self.asdatatable, "amp-astraceroute", stream, 
-                    ts, filtered, casts)
+                    ts, filtered, {'aspath':'varchar[]'})
         except DBQueryException as e:
             logger.log("Failed to insert new data for %s stream %d" % \
                     ("amp-astraceroute", stream))
@@ -457,6 +462,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         rtts = []
         currentas = None
         count = 0
+        aspathlen = 0
 
         for x in result['hops']:
             if 'address' in x:
@@ -465,15 +471,18 @@ class AmpTracerouteParser(AmpIcmpParser):
             if 'rtt' in x:
                 rtts.append(x['rtt'])
 
-            if 'asn' not in x:
+            if 'as' not in x:
                 continue
 
-            if currentas != x['asn']:
+            if currentas != x['as']:
                 if currentas != None:
                     assert(count != 0)
                     aspath.append("%d.%d" % (count, currentas))
-                currentas = x['asn']
+                currentas = x['as']
                 count = 1
+            else:
+                count += 1
+            aspathlen += 1
 
         if currentas != None:
             assert(count != 0)
@@ -486,8 +495,10 @@ class AmpTracerouteParser(AmpIcmpParser):
        
         if len(aspath) == 0:
             result["aspath"] = None 
+            result["aspathlen"] = None
         else:
             result["aspath"] = aspath
+            result["aspathlen"] = aspathlen
 
         if len(ippath) == 0:
             result["path"] = None
@@ -546,7 +557,7 @@ def sanitise_columns(columns):
     for c in columns:
         if c in ['path', 'path_id', 'stream_id', 'timestamp', 'hop_rtt', 
                 'packet_size', 'length', 'error_type', 'error_code',
-                'aspath', 'aspath_id', 'icmperrors']:
+                'aspath', 'aspath_id', 'errors']:
             sanitised.append(c)
 
     return sanitised 
