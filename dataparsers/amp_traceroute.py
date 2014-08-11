@@ -417,7 +417,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             if 'ip' not in d or d['ip'] != 0:
                 self.insert_ippath(streamid, timestamp, d)
                 ipobserved[streamid] = 1
-            else if 'as' in d and d['as'] != 0:
+            elif 'as' in d and d['as'] != 0:
                 # Just insert the AS path
                 self.update_as_stream(asobserved, streamid, d) 
             
