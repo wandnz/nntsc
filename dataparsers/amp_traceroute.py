@@ -43,7 +43,6 @@ class AmpTracerouteParser(AmpIcmpParser):
             {"name":"path_id", "type":"integer", "null":False},
             {"name":"aspath_id", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
-            {"name":"length", "type":"smallint", "null":False},
             {"name":"error_type", "type":"smallint", "null":True},
             {"name":"error_code", "type":"smallint", "null":True},
             {"name":"hop_rtt", "type":"integer[]", "null":False},
@@ -52,8 +51,8 @@ class AmpTracerouteParser(AmpIcmpParser):
         self.asdatacolumns = [
             {"name":"aspath_id", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
-            {"name":"length", "type":"smallint", "null":False},
             {"name":"errors", "type":"smallint", "null":False},
+            {"name":"addresses", "type":"smallint", "null":False},
         ]
 
     
@@ -70,7 +69,10 @@ class AmpTracerouteParser(AmpIcmpParser):
         # Create the paths tables as well
         aspathcols = [ \
             {"name":"aspath_id", "type":"serial primary key"},
-            {"name":"aspath", "type":"varchar[]", "null":False, "unique":True}
+            {"name":"aspath", "type":"varchar[]", "null":False, "unique":True},
+            {"name":"aspath_length", "type":"smallint", "null":False},
+            {"name":"uniqueas", "type":"smallint", "null":False},
+            {"name":"responses", "type":"smallint", "null":False},
         ]
 
         try:
@@ -84,7 +86,8 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         pathcols = [ \
             {"name":"path_id", "type":"serial primary key"},
-            {"name":"path", "type":"inet[]", "null":False, "unique":True}
+            {"name":"path", "type":"inet[]", "null":False, "unique":True},
+            {"name":"length", "type":"smallint", "null":False},
         ]
 
         try:
@@ -239,36 +242,53 @@ class AmpTracerouteParser(AmpIcmpParser):
         return self.collectionid
 
 
+    def _ippath_insertion_sql(self, stream, pathdata):
+        pathtable = "data_amp_traceroute_paths_%d" % (stream)
+
+        pathinsert="WITH s AS (SELECT path_id, path FROM %s " % (pathtable)
+        pathinsert += "WHERE path = CAST (%s as inet[])), "
+        pathinsert += "i AS (INSERT INTO %s (path, length) " % (pathtable)
+        pathinsert += "SELECT CAST(%s as inet[]), %s "
+        pathinsert += "WHERE NOT EXISTS "
+        pathinsert += "(SELECT path FROM %s WHERE path " % (pathtable)
+        pathinsert += "= CAST(%s as inet[])) RETURNING path_id, path) "
+        pathinsert += "SELECT path_id,path FROM i UNION ALL "
+        pathinsert += "SELECT path_id,path FROM s"
+
+        path = pathdata['path']
+        params = (path, path, pathdata['length'], path)
+
+        return pathinsert, params
+
+    def _aspath_insertion_sql(self, stream, pathdata):
+        pathtable = "data_amp_traceroute_aspaths_%d" % (stream)
+        
+        pathinsert="WITH s AS (SELECT aspath_id, aspath FROM %s " % (pathtable)
+        pathinsert += "WHERE aspath = CAST (%s as varchar[])), "
+        pathinsert += "i AS (INSERT INTO %s " % (pathtable)
+        pathinsert += "(aspath, aspath_length, uniqueas, responses) "
+        pathinsert += "SELECT CAST(%s as varchar[]), %s, %s, %s "
+        pathinsert += "WHERE NOT EXISTS "
+        pathinsert += "(SELECT aspath FROM %s WHERE aspath " % (pathtable)
+        pathinsert += "= CAST(%s as varchar[])) RETURNING aspath_id, aspath) "
+        pathinsert += "SELECT aspath_id,aspath FROM i UNION ALL "
+        pathinsert += "SELECT aspath_id,aspath FROM s"
+        
+        path = pathdata['aspath']
+        params = (path, path, pathdata['aspathlen'], pathdata['uniqueas'], \
+                pathdata['responses'], path)
+
+        return pathinsert, params
+
     def _insert_path(self, pathtype, stream, path):
         if pathtype == "ip":
-            pathtable = "data_amp_traceroute_paths_%d" % (stream)
-            idcolumn = "path_id"
-            pathcolumn = "path"
-            castterm = "inet[]"
+            pathinsert, params = self._ippath_insertion_sql(stream, path)
+
         elif pathtype == "as":
-            pathtable = "data_amp_traceroute_aspaths_%d" % (stream)
-            idcolumn = "aspath_id"
-            pathcolumn = "aspath"
-            castterm = "varchar[]"
+            pathinsert, params = self._aspath_insertion_sql(stream, path)
         else:
             return DB_CODING_ERROR
 
-        pathinsert="WITH s AS (SELECT %s, %s FROM %s WHERE %s " % (idcolumn, \
-                pathcolumn, pathtable, pathcolumn)
-        pathinsert += "= CAST (%s as "
-        pathinsert += "%s)), i AS (INSERT INTO %s (%s) " % (castterm, \
-                pathtable, pathcolumn)
-        pathinsert += "SELECT CAST(%s as "
-        pathinsert += "%s) WHERE NOT EXISTS " % (castterm)
-        pathinsert += "(SELECT %s FROM %s WHERE %s " % (pathcolumn, pathtable, \
-                pathcolumn)
-        pathinsert += "= CAST(%s as "
-        pathinsert += "%s)) RETURNING %s,%s)" % (castterm, idcolumn, pathcolumn)
-        pathinsert += "SELECT %s,%s FROM i UNION ALL " % (idcolumn, \
-                pathcolumn)
-        pathinsert += "SELECT %s,%s FROM s" % (idcolumn, pathcolumn)
-
-        params = (path, path, path)
 
         try:
             queryret = self.db.custom_insert(pathinsert, params)
@@ -296,7 +316,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         if keystr in self.paths:
             result['path_id'] = self.paths[keystr]
         else:
-            pathid = self._insert_path("ip", stream, result['path'])
+            pathid = self._insert_path("ip", stream, result)
             if pathid < 0:
                 return err
             
@@ -311,7 +331,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             if keystr in self.aspaths:
                 result['aspath_id'] = self.aspaths[keystr]
             else:
-                pathid = self._insert_path("as", stream, result['aspath'])
+                pathid = self._insert_path("as", stream, result)
                 if pathid < 0:
                     return err
                 
@@ -346,7 +366,9 @@ class AmpTracerouteParser(AmpIcmpParser):
     def _update_as_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
             observed[streamid] = {"packet_size":datapoint["packet_size"],
-                    "errors":0, "paths":{}}
+                    "errors":0, "paths":{}, "addresses":0}
+       
+        observed[streamid]['addresses'] += 1
         
         if datapoint['error_type'] != None or datapoint['error_code'] != None:
             observed[streamid]["errors"] += 1
@@ -363,7 +385,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             if keystr in self.aspaths:
                 aspath_id = self.aspaths[keystr]
             else:
-                pathid = self._insert_path("as", streamid, datapoint['aspath'])
+                pathid = self._insert_path("as", streamid, datapoint)
                 if pathid < 0:
                     return
                 
@@ -382,7 +404,6 @@ class AmpTracerouteParser(AmpIcmpParser):
         commonpath = max(streamdata['paths'].iteritems(), \
                 key = operator.itemgetter(1))
         streamdata['aspath_id'] = commonpath[0]
-        streamdata['length'] = commonpath[1][1]
 
     def process_data(self, timestamp, data, source):
         """ Process a AMP traceroute message, which can contain 1 or more 
@@ -412,7 +433,6 @@ class AmpTracerouteParser(AmpIcmpParser):
 
             self._extract_paths(d)
 
-            print d
             # IP flag tells us if this is intended as an IP traceroute.
             # If the flag isn't present, we're running an old ampsave 
             # that pre-dates AS path support so assume an IP traceroute in
@@ -423,11 +443,9 @@ class AmpTracerouteParser(AmpIcmpParser):
             elif 'as' in d and d['as'] != 0:
                 # Just insert the AS path
                 self._update_as_stream(asobserved, streamid, d) 
-                print asobserved
             
         for sid, streamdata in asobserved.iteritems():
             self._aggregate_streamdata(streamdata)
-            print streamdata
             self.insert_aspath(sid, timestamp, streamdata)
 
         # update the last timestamp for all streams we just got data for
@@ -461,8 +479,11 @@ class AmpTracerouteParser(AmpIcmpParser):
         ippath = []
         rtts = []
         currentas = None
+        responses = 0
         count = 0
         aspathlen = 0
+
+        seenas = []
 
         for x in result['hops']:
             if 'address' in x:
@@ -482,11 +503,24 @@ class AmpTracerouteParser(AmpIcmpParser):
                 count = 1
             else:
                 count += 1
+
+            # Keep track of unique AS numbers in the path, not counting
+            # null hops, RFC 1918 addresses or failed lookups
+            if x['as'] not in seenas and x['as'] >= 0:
+                seenas.append(x['as'])
+
             aspathlen += 1
+            responses += 1
 
         if currentas != None:
             assert(count != 0)
+            assert(responses >= count)
+
             aspath.append("%d.%d" % (count, currentas))
+
+            # Remove tailing "null hops" from our responses count
+            if currentas == -1:
+                responses -= count
         
         if len(rtts) == 0:
             result["hop_rtt"] = None
@@ -496,9 +530,13 @@ class AmpTracerouteParser(AmpIcmpParser):
         if len(aspath) == 0:
             result["aspath"] = None 
             result["aspathlen"] = None
+            result["uniqueas"] = None
+            result["responses"] = None
         else:
             result["aspath"] = aspath
             result["aspathlen"] = aspathlen
+            result["uniqueas"] = len(seenas)
+            result["responses"] = responses
 
         if len(ippath) == 0:
             result["path"] = None
@@ -513,17 +551,19 @@ class AmpTracerouteParser(AmpIcmpParser):
 # joining and unioning so many tables?
 def generate_union(qb, table, streams):
 
+    allstreams = []
     unionparams = []
     sql = "(("
 
     for i in range(0, len(streams)):
-        unionparams.append(streams[i])
+        allstreams.append(streams[i])
         sql += "SELECT * FROM %s_" % (table)
         sql += "%s"     # stream id will go here
 
         if i != len(streams) - 1:
             sql += " UNION ALL "
 
+    unionparams = list(allstreams)
     sql += ") AS allstreams LEFT JOIN ("
     
     if "astraceroute" not in table:
@@ -534,16 +574,18 @@ def generate_union(qb, table, streams):
                 sql += " UNION ALL "
 
         sql += ") AS paths ON (allstreams.path_id = paths.path_id) LEFT JOIN ("
+        unionparams += allstreams
     
     for i in range(0, len(streams)):
         sql += "SELECT * from data_amp_traceroute_aspaths_"
         sql += "%s"
         if i != len(streams) - 1:
             sql += " UNION ALL "
+        unionparams += allstreams
     
     sql += ") AS aspaths ON (allstreams.aspath_id = aspaths.aspath_id)) AS "
     sql += "dataunion"
-    qb.add_clause("union", sql, unionparams + unionparams + unionparams)
+    qb.add_clause("union", sql, unionparams)
 
 
 def sanitise_columns(columns):
@@ -557,7 +599,8 @@ def sanitise_columns(columns):
     for c in columns:
         if c in ['path', 'path_id', 'stream_id', 'timestamp', 'hop_rtt', 
                 'packet_size', 'length', 'error_type', 'error_code',
-                'aspath', 'aspath_id', 'errors']:
+                'aspath', 'aspath_id', 'errors', 'aspath_length', 'responses',
+                'uniqueas', 'addresses']:
             sanitised.append(c)
 
     return sanitised 
