@@ -218,7 +218,7 @@ class DBSelector(DatabaseCore):
             del groupcols[groupcols.index("stream_id")]
 
         # Make sure we only query for columns that exist in the data table
-        if table == "data_amp_traceroute":
+        if table == "data_amp_traceroute" or table == "data_amp_astraceroute":
             groupcols = amp_traceroute.sanitise_columns(groupcols)
         else:
             groupcols = self._sanitise_columns(columns, groupcols)
@@ -293,7 +293,7 @@ class DBSelector(DatabaseCore):
                     "union", "joincondition", "wheretime", "outselend",
                     "outgroup"]
             query, params = self.qb.create_query(order)
- 
+
             try:
                 self._dataquery(query, params)
             except DBQueryException as e:
@@ -356,7 +356,7 @@ class DBSelector(DatabaseCore):
             yield(None, None, None, None, e)
 
         # Make sure we only query for columns that are in the data table
-        if table == "data_amp_traceroute":
+        if table == "data_amp_traceroute" or table == "data_amp_astraceroute":
             selectcols = amp_traceroute.sanitise_columns(selectcols)
         else:
             selectcols = self._sanitise_columns(columns, selectcols)
@@ -568,7 +568,7 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("joincondition", joincond, [])
 
 
-        if table == "data_amp_traceroute":
+        if table == "data_amp_traceroute" or table == "data_amp_astraceroute":
             amp_traceroute.generate_union(self.qb, table, uniquestreams)
         else:
             self._generate_union(table, uniquestreams)
@@ -679,7 +679,7 @@ class DBSelector(DatabaseCore):
     def _filter_aggregation_columns(self, table, aggcols):
         keys = [k[0] for k in aggcols]
         
-        if table == "data_amp_traceroute":
+        if table == "data_amp_traceroute" or table == "data_amp_astraceroute":
             keys = amp_traceroute.sanitise_columns(keys)
 
         filtered = []
