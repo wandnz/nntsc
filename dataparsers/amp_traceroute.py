@@ -553,7 +553,8 @@ def generate_union(qb, table, streams):
 
     allstreams = []
     unionparams = []
-    sql = "(("
+    sql = "(SELECT allstreams.*, paths.path, paths.length, aspaths.aspath, "
+    sql += "aspaths.responses, aspaths.aspath_length, aspaths.uniqueas FROM ("
 
     for i in range(0, len(streams)):
         allstreams.append(streams[i])
@@ -577,7 +578,8 @@ def generate_union(qb, table, streams):
         unionparams += allstreams
     
     for i in range(0, len(streams)):
-        sql += "SELECT * from data_amp_traceroute_aspaths_"
+        sql += "SELECT * "
+        sql += "FROM data_amp_traceroute_aspaths_"
         sql += "%s"
         if i != len(streams) - 1:
             sql += " UNION ALL "
@@ -588,22 +590,22 @@ def generate_union(qb, table, streams):
     qb.add_clause("union", sql, unionparams)
 
 
-def sanitise_columns(columns):
-
-    sanitised = []
+def sanitise_column(column):
 
     # TODO Take 'amp-traceroute' or 'amp-astraceroute' as a parameter
     # and limit the query to just the appropriate columns for that
     # collection
 
-    for c in columns:
-        if c in ['path', 'path_id', 'stream_id', 'timestamp', 'hop_rtt', 
-                'packet_size', 'length', 'error_type', 'error_code',
-                'aspath', 'aspath_id', 'errors', 'aspath_length', 'responses',
-                'uniqueas', 'addresses']:
-            sanitised.append(c)
+    if column in ['path_id', 'aspath_id']:
+        return column
 
-    return sanitised 
+    if column in ['path', 'stream_id', 'timestamp', 'hop_rtt', 
+                'packet_size', 'length', 'error_type', 'error_code',
+                'aspath', 'errors', 'aspath_length', 'responses',
+                'uniqueas', 'addresses']:
+        return column
+
+    return None
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
