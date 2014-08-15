@@ -553,7 +553,10 @@ def generate_union(qb, table, streams):
 
     allstreams = []
     unionparams = []
-    sql = "(SELECT allstreams.*, paths.path, paths.length, aspaths.aspath, "
+    sql = "(SELECT allstreams.*, "
+    if "astraceroute" not in table:
+        sql += "paths.path, paths.length, "
+    sql += "aspaths.aspath, "
     sql += "aspaths.responses, aspaths.aspath_length, aspaths.uniqueas FROM ("
 
     for i in range(0, len(streams)):
