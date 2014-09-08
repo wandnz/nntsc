@@ -175,6 +175,14 @@ class DBWorker(threading.Thread):
 
         aggs = self._merge_aggregators(aggcols, aggfunc)
 
+        try:
+            labels = self.db.filter_active_streams(name, labels, start, 
+                    stoppoint)
+        except DBQueryException as e:
+            logger.log("Failed to filter active streams for collection %s" \
+                    % (name))
+            return DBWORKER_ERROR
+
         while start < stoppoint:
             queryend = start + MAX_HISTORY_QUERY
 
@@ -209,8 +217,9 @@ class DBWorker(threading.Thread):
             if end == None:
                 stoppoint = int(time.time())
 
-        error = self.db.release_data()
-        if error != DB_NO_ERROR:
+        try:
+            self.db.release_data()
+        except DBQueryException as e:
             return DBWORKER_ERROR
 
         return DBWORKER_SUCCESS
@@ -254,6 +263,14 @@ class DBWorker(threading.Thread):
             err = self._subscribe_streams(streams, start, end, cols, name, lab)
             if err != DBWORKER_SUCCESS:
                 return err
+
+        # Only query for historical data for streams that were active
+        # during that time period
+        try:
+            labels = self.db.filter_active_streams(name, labels, start, 
+                    stoppoint)
+        except DBQueryException as e:
+            return DBWORKER_ERROR
 
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY
@@ -301,8 +318,9 @@ class DBWorker(threading.Thread):
 
             start = queryend + 1
 
-        error = self.db.release_data()
-        if error != DB_NO_ERROR:
+        try:
+            self.db.release_data()
+        except DBQueryException as e:
             return DBWORKER_ERROR
 
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
@@ -570,41 +588,22 @@ class DBWorker(threading.Thread):
             return DBWORKER_FULLQUEUE
         return DBWORKER_SUCCESS
 
-    def _request_streams(self, col, bound, request):
+    def _request_streams(self, col, bound):
         
-        if request == NNTSC_STREAMS:
-            try:
-                streams = self.db.select_streams_by_collection(col, bound)
-            except DBQueryException as e:
-                if e.code == DB_QUERY_TIMEOUT:
-                    log("Query timed out while fetching streams for collection %s" % (col))
-                    err = self._enqueue_cancel(NNTSC_STREAMS, (col, bound))
-                    if err != DBWORKER_SUCCESS:
-                        log("Failed to enqueue CANCELLED message")
-                        return err
-                    return DBWORKER_SUCCESS
-                else:
-                    log("Exception while fetching streams: %s" % (e))
-                    return DBWORKER_ERROR
+        try:
+            streams = self.db.select_streams_by_collection(col, bound)
+        except DBQueryException as e:
+            if e.code == DB_QUERY_TIMEOUT:
+                log("Query timed out while fetching streams for collection %s" % (col))
+                err = self._enqueue_cancel(NNTSC_STREAMS, (col, bound))
+                if err != DBWORKER_SUCCESS:
+                    log("Failed to enqueue CANCELLED message")
+                    return err
+                return DBWORKER_SUCCESS
+            else:
+                log("Exception while fetching streams: %s" % (e))
+                return DBWORKER_ERROR
                 
-        elif request == NNTSC_ACTIVE_STREAMS:
-            try:
-                streams = self.db.select_active_streams_by_collection(col, bound)
-            except DBQueryException as e:
-                if e.code == DB_QUERY_TIMEOUT:
-                    log("Query timed out while fetching active streams for collection %s" % (col))
-                    err = self._enqueue_cancel(NNTSC_ACTIVE_STREAMS, (col, bound))
-                    if err != DBWORKER_SUCCESS:
-                        log("Failed to enqueue CANCELLED message")
-                        return err
-                    return DBWORKER_SUCCESS
-                else:
-                    log("Exception while fetching active streams: %s" % (e))
-                    return DBWORKER_ERROR
-        else:
-            log("Got into request streams with bad request: %d" % request)
-            return DBWORKER_BADJOB
-       
         try:
             self.queue.put((NNTSC_REGISTER_COLLECTION, col), False)
         except StdQueue.Full:
@@ -612,7 +611,7 @@ class DBWorker(threading.Thread):
             return DBWORKER_FULLQUEUE
         
         if len(streams) == 0:
-            return self._enqueue_streams(request, col, False, [])
+            return self._enqueue_streams(NNTSC_STREAMS, col, False, [])
 
         i = 0
         while (i < len(streams)):
@@ -624,7 +623,8 @@ class DBWorker(threading.Thread):
                 end = i + 1000
                 more = True
 
-            err = self._enqueue_streams(request, col, more, streams[start:end])
+            err = self._enqueue_streams(NNTSC_STREAMS, col, more, 
+                        streams[start:end])
             if err != DBWORKER_SUCCESS:
                 log("Failed on streams %d:%d (out of %d))" % (start, end, len(streams)))
                 return err
@@ -659,17 +659,15 @@ class DBWorker(threading.Thread):
             return self._request_schemas(req_hdr[1])
         
         if req_hdr[0] == NNTSC_REQ_STREAMS:
-            return self._request_streams(req_hdr[1], req_hdr[2], NNTSC_STREAMS)
-
-        if req_hdr[0] == NNTSC_REQ_ACTIVE_STREAMS:
-            return self._request_streams(req_hdr[1], req_hdr[2], NNTSC_ACTIVE_STREAMS)
+            return self._request_streams(req_hdr[1], req_hdr[2])
 
         return 0
 
     def _connect_database(self):
         self.db = DBSelector(self.threadid, self.dbconf["name"], 
                 self.dbconf["user"],
-                self.dbconf["pass"], self.dbconf["host"], self.timeout)
+                self.dbconf["pass"], self.dbconf["host"], self.timeout,
+                cachetime = self.dbconf["cachetime"])
         self.db.connect_db(30)
 
     def run(self):
@@ -1032,8 +1030,7 @@ class NNTSCClient(threading.Thread):
             # A worker has completed a job, let's form up a response to
             # send to our client
             if response in [NNTSC_COLLECTIONS, NNTSC_SCHEMAS, NNTSC_STREAMS, \
-                        NNTSC_HISTORY, NNTSC_ACTIVE_STREAMS, \
-                        NNTSC_QUERY_CANCELLED]:
+                        NNTSC_HISTORY,  NNTSC_QUERY_CANCELLED]:
                 return self.transmit_client(result)
 
             elif response == NNTSC_REGISTER_COLLECTION:
@@ -1138,6 +1135,7 @@ class NNTSCExporter:
         self.clientlock = threading.Lock()
         self.sublock = threading.Lock()
 
+        self.newstreams = {}
 
     def deregister_client(self, sock):
 
@@ -1264,6 +1262,12 @@ class NNTSCExporter:
 
         #log("Exporting new stream %d to interested clients" % (stream_id))
 
+        self.newstreams[stream_id] = {
+            "sockets":[],
+            "collection":coll_id,
+            "tosend":1
+        }
+
         active = {}
         
         self.clientlock.acquire()
@@ -1280,8 +1284,10 @@ class NNTSCExporter:
                 sock.close()
                 #self.deregister_client(sock)
                 continue
-            
+         
+            self.newstreams[stream_id]["sockets"].append(sock)   
             active[sock] = subbed
+
         self.clientlock.release()
         self.collections[coll_id] = active
         self.sublock.release()
@@ -1335,6 +1341,27 @@ class NNTSCExporter:
                     if results != {}:
                         active.append((sock, columns, start, end, col))
             self.subscribers[stream_id] = active
+
+        elif stream_id in self.newstreams:
+            ns = self.newstreams[stream_id]
+            values['label'] = stream_id
+            values['timestamp'] = timestamp
+            for s in ns['sockets']:
+                contents = pickle.dumps((ns['collection'], stream_id, values))
+                header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE,
+                        len(contents))
+
+                if s in self.clients.keys():
+                    try:
+                        self.clients[s]['queue'].put((header, contents, timestamp), True, 10)
+                    except StdQueue.Full:
+                        sock.close()
+                        continue
+            
+            ns['tosend'] -= 1
+            if ns['tosend'] == 0:
+                del self.newstreams[stream_id]
+
         self.clientlock.release()
         self.sublock.release()
 

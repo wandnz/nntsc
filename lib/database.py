@@ -25,6 +25,7 @@ import psycopg2
 import psycopg2.extras
 from libnntscclient.logger import *
 from libnntsc.dberrorcodes import *
+from libnntsc.streamcache import StreamCache
 
 class NNTSCCursor(object):
     def __init__(self, connstr, autocommit=False, name=None):
@@ -83,19 +84,15 @@ class NNTSCCursor(object):
         except psycopg2.OperationalError as e:
             log("Database disconnect while resetting cursor")
             self.cursor = None
-            return DB_OPERATIONAL_ERROR
+            raise DBQueryException(DB_OPERATIONAL_ERROR)
         except psycopg2.DatabaseError as e:
             log("Failed to create cursor: %s" % e)
             self.cursor = None
-            return DB_CODING_ERROR
-
-        return DB_NO_ERROR
+            raise DBQueryException(DB_CODING_ERROR)
 
     def executequery(self, query, params):
         if self.cursor is None:
-            err = self.createcursor()
-            if err != DB_NO_ERROR:
-                return err
+            self.createcursor()
 
         try:
             if params is not None:
@@ -105,50 +102,49 @@ class NNTSCCursor(object):
 
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return DB_QUERY_TIMEOUT        
+            raise DBQueryException(DB_QUERY_TIMEOUT)
         except psycopg2.OperationalError:
             log("Database appears to have disappeared -- reconnecting")
             self.reconnect()
-            return DB_OPERATIONAL_ERROR
+            raise DBQueryException(DB_OPERATIONAL_ERROR)
         except psycopg2.ProgrammingError as e:
             log(e)
             self.conn.rollback()
-            return DB_CODING_ERROR
+            raise DBQueryException(DB_CODING_ERROR)
         except psycopg2.IntegrityError as e:
             log(e)
             self.conn.rollback()
             if " duplicate " in str(e):
-                return DB_DUPLICATE_KEY
-            return DB_DATA_ERROR
+                raise DBQueryException(DB_DUPLICATE_KEY)
+            raise DBQueryException(DB_DATA_ERROR)
         except psycopg2.DataError as e:
             log(e)
             self.conn.rollback()
-            return DB_DATA_ERROR
+            raise DBQueryException(DB_DATA_ERROR)
         except KeyboardInterrupt:
-            return DB_INTERRUPTED
+            raise DBQueryException(DB_INTERRUPTED)
         except psycopg2.Error as e:
             # Some disconnect cases seem to end up here :/
-            if "server closed the connection unexpectedly" in e.str():
+            if "server closed the connection unexpectedly" in str(e):
                 log("Database appears to have disappeared, fell through to catch-all error case -- reconnecting")
                 self.reconnect()
-                return DB_OPERATIONAL_ERROR
+                raise DBQueryException(DB_OPERATIONAL_ERROR)
 
             log(e.pgerror)
             try:
                 self.conn.rollback()
             except InterfaceError as e:
                 log(e)
-            return DB_GENERIC_ERROR
+            raise DBQueryException(DB_GENERIC_ERROR)
     
-        return DB_NO_ERROR
-
     def closecursor(self):
         if self.cursor is None:
-            return DB_NO_ERROR
+            return
 
         if self.conn is None:
             self.cursor = None
-            return DB_NO_ERROR
+            return
+        err = DB_NO_ERROR
 
         try:
             self.cursor.close()
@@ -179,49 +175,55 @@ class NNTSCCursor(object):
             log(e.pgerror)
             err = DB_GENERIC_ERROR
 
+        if err != DB_NO_ERROR:
+            log("Error while closing database cursor")
+            raise DBQueryException(err)
+
         self.cursor = None    
-        return err
 
 
     def commit(self):
         if self.conn is None:
-            return DB_NO_CURSOR
+            raise DBQueryException(DB_NO_CURSOR)
 
+        err = DB_NO_ERROR
         try:
             self.conn.commit()
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            return DB_QUERY_TIMEOUT        
+            err = DB_QUERY_TIMEOUT        
         except psycopg2.OperationalError:
             log("Database appears to have disappeared during commit -- reconnecting")
             self.reconnect()
-            return DB_OPERATIONAL_ERROR
+            err = DB_OPERATIONAL_ERROR
         except psycopg2.ProgrammingError as e:
             log(e)
-            return DB_CODING_ERROR
+            err = DB_CODING_ERROR
         except psycopg2.IntegrityError as e:
             log(e)
-            return DB_DATA_ERROR
+            err = DB_DATA_ERROR
         except psycopg2.DataError as e:
             log(e)
-            return DB_DATA_ERROR
+            err = DB_DATA_ERROR
         except KeyboardInterrupt:
-            return DB_INTERRUPTED
+            err = DB_INTERRUPTED
         except psycopg2.Error as e:
             # Some disconnect cases seem to end up here :/
             if "server closed the connection unexpectedly" in e.str():
                 log("Database appears to have disappeared, fell through to catch-all error case -- reconnecting")
                 self.reconnect()
-                return DB_OPERATIONAL_ERROR
+                err = DB_OPERATIONAL_ERROR
             log(e.pgerror)
-            return DB_GENERIC_ERROR
+            err = DB_GENERIC_ERROR
     
-        return DB_NO_ERROR
+        if err != DB_NO_ERROR:
+            log("Error while committing to database")
+            raise DBQueryException(err)
             
 
 class DatabaseCore(object):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False, timeout=0):
+            new=False, debug=False, timeout=0, cachetime=0):
 
         #no host means use the unix socket
         if dbhost == "":
@@ -249,6 +251,8 @@ class DatabaseCore(object):
 
         self.basic = NNTSCCursor(self.connstr, False, None)
 
+        self.streamcache = StreamCache(dbname, cachetime)
+
     def connect_db(self, retrywait):
         return self.basic.connect(retrywait)
 
@@ -256,35 +260,33 @@ class DatabaseCore(object):
         self.basic.destroy()
         
     def __del__(self):
-        self.basic.commit()
-        self.basic.destroy()
+        try:
+            self.basic.commit()
+            self.basic.destroy()
+        except DBQueryException as e:
+            pass
 
     def _basicquery(self, query, params=None):
         while 1:
-            err = self.basic.executequery(query, params)
-            if err == DB_OPERATIONAL_ERROR:
-                # Retry the query, as we just reconnected
-                continue
+            try:
+                self.basic.executequery(query, params)
+            except DBQueryException as e:
+                if e.code == DB_OPERATIONAL_ERROR:
+                    # Retry the query, as we just reconnected
+                    continue
+                else:
+                    raise
 
-            err = self.basic.commit()
+            self.basic.commit()
             break
-
-        return err
     
     def _releasebasic(self):
-        return self.basic.closecursor()
+        self.basic.closecursor()
 
     def list_collections(self):
         collections = []
 
-        err = self._basicquery("SELECT * from collections")
-        if err == DB_NO_CURSOR:
-            return []
-
-        if err != DB_NO_ERROR:
-            log("Failed to query for all collections")
-            raise DBQueryException(err)
-
+        self._basicquery("SELECT * from collections")
         while True:
             row = self.basic.cursor.fetchone()
 
@@ -294,11 +296,7 @@ class DatabaseCore(object):
             for k, v in row.items():
                 col[k] = v
             collections.append(col)
-        err = self._releasebasic()
-
-        if err != DB_NO_ERROR:
-            log("Error while tidying up after collections query")
-            raise DBQueryException(err)
+        self._releasebasic()
         return collections
 
     def select_streams_by_module(self, mod):
@@ -325,36 +323,21 @@ class DatabaseCore(object):
 
         # Find the collections matching this module
 
-        err = self._basicquery("SELECT * from collections where module=%s", 
+        self._basicquery("SELECT * from collections where module=%s", 
                     (mod,))
-        if err != DB_NO_ERROR:
-            log("Failed to query collections that belong to parent module %s" \
-                    % (mod))
-            raise DBQueryException(err)
-
         streamtables = {}
 
         cols = self.basic.cursor.fetchall()
         for c in cols:
             streamtables[c["id"]] = (c["streamtable"], c["modsubtype"])
 
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after querying collections for module %s" \
-                    % (mod))
-            raise DBQueryException(err)
-            
+        self._releasebasic()
 
         streams = []
         for cid, (tname, sub) in streamtables.items():
-            sql = """ SELECT * FROM streams, %s WHERE streams.collection=%s
-                      AND streams.id = %s.stream_id """ % (tname, "%s", tname)
+            sql = """ SELECT * FROM %s """ % (tname)
             
-            err = self._basicquery(sql, (cid,))
-            if err != DB_NO_ERROR:
-                log("Failed to query streams that belong to module %s-%s" \
-                        % (mod, sub))
-                raise DBQueryException(err)
+            self._basicquery(sql, (cid,))
 
             while True:
                 row = self.basic.cursor.fetchone()
@@ -367,11 +350,7 @@ class DatabaseCore(object):
                     row_dict[k] = v
                 streams.append(row_dict)
         
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after querying streams for module %s" \
-                    % (mod))
-            raise DBQueryException(err)
+        self._releasebasic()
         return streams
     
     
@@ -379,10 +358,10 @@ class DatabaseCore(object):
 
 class DBInsert(DatabaseCore):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False):
+            new=False, debug=False, cachetime=0):
 
         super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost, \
-                new, debug)
+                new, debug, cachetime=cachetime)
 
         self.streams = NNTSCCursor(self.connstr, False, None)
         self.data = NNTSCCursor(self.connstr, False, None)
@@ -400,26 +379,18 @@ class DBInsert(DatabaseCore):
         super(DBInsert, self).disconnect()
 
     def _streamsquery(self, query, params=None):
-        err = self.streams.executequery(query, params)
-        return err
+        self.streams.executequery(query, params)
     
     def _dataquery(self, query, params=None):
-        err = self.data.executequery(query, params)
-        return err
+        self.data.executequery(query, params)
 
     def commit_streams(self):
-        err = self.streams.commit()
-
-        if err == DB_NO_ERROR:
-            err = self.streams.closecursor()
-
-        return err
+        self.streams.commit()
+        self.streams.closecursor()
 
     def commit_data(self):
-        err = self.data.commit()
-        if err == DB_NO_ERROR:
-            err = self.data.closecursor()
-        return err
+        self.data.commit()
+        self.data.closecursor()
 
     def create_aggregators(self):
         # Create a useful function to select a mode from any data
@@ -435,9 +406,7 @@ class DBInsert(DatabaseCore):
             $BODY$
                 LANGUAGE 'sql' IMMUTABLE;"""
        
-        err = self._basicquery(mostfunc)
-        if err != DB_NO_ERROR:
-            return err
+        self._basicquery(mostfunc)
  
         smokefunc = """
             CREATE OR REPLACE FUNCTION _final_smoke(anyarray)
@@ -453,15 +422,10 @@ class DBInsert(DatabaseCore):
             $BODY$
                 LANGUAGE 'sql' IMMUTABLE;"""
         
-        err = self._basicquery(smokefunc)
-        if err != DB_NO_ERROR:
-            return err
+        self._basicquery(smokefunc)
         
         # we can't check IF EXISTS or use CREATE OR REPLACE, so just query it
-        err = self._basicquery("""SELECT * from pg_proc WHERE proname='most';""")
-        if err != DB_NO_ERROR:
-            return err
-
+        self._basicquery("""SELECT * from pg_proc WHERE proname='most';""")
         assert(self.basic.cursor.rowcount <= 1)
 
         # if it doesn't exist, create the aggregate function that applies
@@ -474,14 +438,10 @@ class DBInsert(DatabaseCore):
                     FINALFUNC=_final_most,
                     INITCOND='{}'
                 );"""
-            err = self._basicquery(aggfunc)
-            if err != DB_NO_ERROR:
-                return err
+            self._basicquery(aggfunc)
 
-        err = self._basicquery(        
+        self._basicquery(
                 """SELECT * from pg_proc WHERE proname='smokearray';""")
-        if err != DB_NO_ERROR:
-            return err
 
         if self.basic.cursor.rowcount == 0:
             aggfunc = """
@@ -491,14 +451,10 @@ class DBInsert(DatabaseCore):
                 FINALFUNC=_final_smoke,
                 INITCOND='{}'
             );"""
-            err = self._basicquery(aggfunc)
-            if err != DB_NO_ERROR:
-                return err
+            self._basicquery(aggfunc)
         
-        err = self._basicquery(
+        self._basicquery(
                 """SELECT * from pg_proc WHERE proname='smoke';""")
-        if err != DB_NO_ERROR:
-            return err
         
         if self.basic.cursor.rowcount == 0:
             aggfunc = """
@@ -508,16 +464,9 @@ class DBInsert(DatabaseCore):
                 FINALFUNC=_final_smoke,
                 INITCOND='{}'
             );"""
-            err = self._basicquery(aggfunc)
-            if err != DB_NO_ERROR:
-                return err
+            self._basicquery(aggfunc)
         
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after creating aggregate functions")
-            return err
-        
-        return DB_NO_ERROR
+        self._releasebasic()
 
     def create_index(self, name, table, columns):
         if len(columns) == 0:
@@ -536,18 +485,13 @@ class DBInsert(DatabaseCore):
                     c.relname = %s AND
                     n.nspname = 'public'"""
 
-        err = self._basicquery(indexcheck, (name,))
-        if err != DB_NO_ERROR:
-            return err
+        self._basicquery(indexcheck, (name,))
         
         if self.basic.cursor.rowcount != 0:
             # Already exists, no need to create
-            return DB_NO_ERROR
+            return
 
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after checking for index existence")
-            return err
+        self._releasebasic()
         
         index = "CREATE INDEX %s ON %s" 
         index += "(%s)" % (",".join(["%s"] * len(columns)))
@@ -555,18 +499,52 @@ class DBInsert(DatabaseCore):
         params = tuple([name] + [table] + columns)
         
         # Annoying that I can't parameterise this SQL nicely
-        err = self._streamsquery(index % params)
-        return err        
+        self._streamsquery(index % params)
  
 
     def build_databases(self, modules, new=False):
         if new:
-            err = self.__delete_everything()
-            if err != DB_NO_ERROR:
-                return err
+            self.__delete_everything()
 
         self.create_aggregators()
         
+        # Function to create a sequence if it doesn't already exist
+        # Borrowed from an answer on stack overflow:
+        # http://stackoverflow.com/questions/11905868/check-if-sequence-exists-postgres-plpgsql
+        seqfunc = """
+            CREATE OR REPLACE FUNCTION create_seq(_seq text, 
+                    _schema text = 'public') RETURNS void AS
+            $func$
+            DECLARE
+               _fullname text := quote_ident(_seq);
+
+            BEGIN
+            -- If an object of the name exists, the first RAISE EXCEPTION 
+            -- raises a meaningful message immediately.
+            -- Else, the failed cast to regclass raises its own exception 
+            -- "undefined_table".
+            -- This particular error triggers sequence creation further down.
+
+            RAISE EXCEPTION 'Object >>%<< of type "%" already exists.'
+               ,_fullname 
+               ,(SELECT c.relkind FROM pg_class c
+                 WHERE  c.oid = _fullname::regclass    -- error if non-existent
+                ) USING ERRCODE = '23505';
+
+            EXCEPTION WHEN undefined_table THEN -- SQLSTATE '42P01'
+                EXECUTE 'CREATE SEQUENCE ' || _fullname;
+                RAISE NOTICE 'New sequence >>%<< created.', _fullname;
+
+            END
+            $func$  LANGUAGE plpgsql STRICT;
+
+            COMMENT ON FUNCTION create_seq(text, text) IS 
+                'Create new seq if name is free.
+                 $1 _seq  .. name of sequence
+                 $2 _name .. name of schema (optional; default is "public")';       
+        """
+        self._basicquery(seqfunc)       
+
         coltable = """CREATE TABLE IF NOT EXISTS collections (
                 id SERIAL PRIMARY KEY,
                 module varchar NOT NULL,
@@ -575,117 +553,60 @@ class DBInsert(DatabaseCore):
                 datatable character varying NOT NULL,
                 UNIQUE (module, modsubtype))"""
         
-        err = self._basicquery(coltable)       
-        if err != DB_NO_ERROR:
-            return err
-        
-        streamtable = """CREATE TABLE IF NOT EXISTS streams (
-                id SERIAL PRIMARY KEY,
-                collection integer NOT NULL 
-                    REFERENCES collections (id) ON DELETE CASCADE,
-                name character varying NOT NULL,
-                lasttimestamp integer NOT NULL,
-                firsttimestamp integer)"""
+        self._basicquery(coltable)       
 
-        err = self._basicquery(streamtable)
-        if err != DB_NO_ERROR:
-            return err
-        
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after creating core tables")
-            return err
-       
-        err = self.create_index("index_streams_collection", "streams", 
-                    ["collection"])
-        if err != DB_NO_ERROR:
-            return err
+        createseq = """SELECT create_seq('streams_id_seq');"""
+        try:
+            self._basicquery(createseq)       
+        except DBQueryException as e:
+            # Not the best error handling, but should stop us from falling
+            # over if the sequence already exists
+            if e.code != DB_DATA_ERROR:
+                raise
 
-        err = self.create_index("index_streams_first", "streams", 
-                    ["firsttimestamp"])
-        if err != DB_NO_ERROR:
-            return err
-        
-        err = self.create_index("index_streams_last", "streams", 
-                    ["lasttimestamp"])
-        if err != DB_NO_ERROR:
-            return err
 
-        err = self.streams.commit()
-        if err != DB_NO_ERROR:
-            return err
+        self._releasebasic()
 
         for base,mod in modules.items():
             mod.tables(self)
 
-        return DB_NO_ERROR
-
-    def register_collection(self, mod, subtype, stable, dtable):
-       
-        colcheck = """SELECT * FROM collections WHERE module=%s 
-                    AND modsubtype=%s"""
-       
-        err = self._basicquery(colcheck, (mod, subtype))
-        if err != DB_NO_ERROR:
-            return err
-
-        if self.basic.cursor.rowcount > 0:
-            return DB_NO_ERROR
-
-        insert = """INSERT INTO collections (module, modsubtype, 
-                streamtable, datatable) VALUES (%s, %s, %s, %s)"""
-
-        err = self._basicquery(insert, (mod, subtype, stable, dtable))
-        if err != DB_NO_ERROR:
-            return err
-
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after registering collection")
-            return err
-        return DB_NO_ERROR
-
-    def register_new_stream(self, mod, subtype, name, ts, basedata):
-
+    def get_collection_id(self, mod, subtype):
+        
         # Find the appropriate collection id
         colcheck = """SELECT * FROM collections WHERE module=%s 
                     AND modsubtype=%s"""
                 
-        err = self._basicquery(colcheck, (mod, subtype))
-        if err != DB_NO_ERROR:
-            return err, -1
-
-        if self.basic.cursor.rowcount == 0:
-            log("Database Error: no collection for %s:%s" % (mod, subtype))
-            return DB_DATA_ERROR, -1
+        self._basicquery(colcheck, (mod, subtype))
 
         if self.basic.cursor.rowcount > 1:
             log("Database Error: duplicate collections for %s:%s" % (mod, subtype))
-            return DB_DATA_ERROR, -1
-
-        col = self.basic.cursor.fetchone()
-        col_id = col['id']
+            self._releasebasic()
+            return -1
         
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after finding collection for new stream")
-            return err
-
-        insert = """INSERT INTO streams (collection, name, lasttimestamp,
-                    firsttimestamp) VALUES (%s, %s, %s, %s) RETURNING id
-                """
-        err = self._streamsquery(insert, (col_id, name, 0, ts))
+        if self.basic.cursor.rowcount == 0:
+            col_id = 0
+        else:
+            col = self.basic.cursor.fetchone()
+            col_id = col['id']
         
-        if err == DB_DUPLICATE_KEY:
-            log("Attempted to register duplicate stream for %s:%s, name was %s" % (mod, subtype, name))
+        self._releasebasic()
+        return col_id
 
-        if err != DB_NO_ERROR:
-            return err, -1
+    def register_collection(self, mod, subtype, stable, dtable):
 
-        # Return the new stream id
-        newid = self.streams.cursor.fetchone()[0]
+        # Check if the collection already exists
+        colid = self.get_collection_id(mod, subtype)
+        
+        if colid != 0: 
+            # Collection already exists
+            return
 
-        return col_id, newid
+        insert = """INSERT INTO collections (module, modsubtype, 
+                streamtable, datatable) VALUES (%s, %s, %s, %s)"""
+
+        self._basicquery(insert, (mod, subtype, stable, dtable))
+        self._releasebasic()
+
 
     def clone_table(self, original, streamid, foreignkey=None):
         tablename = original + "_" + str(streamid)
@@ -698,14 +619,7 @@ class DBInsert(DatabaseCore):
         else:
             query += ")"
 
-        err = self._streamsquery(query)
-        
-        if err != DB_NO_ERROR:
-            log("Failed to clone table %s for new stream %s" % \
-                    (original, str(streamid)))
-            return err
-
-        return DB_NO_ERROR
+        self._streamsquery(query)
 
     def add_foreign_key(self, tablename, column, foreigntable, foreigncolumn):
         # XXX Only supports one column foreign keys for now
@@ -714,60 +628,60 @@ class DBInsert(DatabaseCore):
         # exist
         query = "ALTER TABLE %s ADD FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE" % (tablename, column, foreigntable, foreigncolumn)
 
-        err = self._streamsquery(query)
+        self._streamsquery(query)
         
-        if err != DB_NO_ERROR:
-            log("Failed to add foreign key to table %s" % \
-                    (tablename))
-            return err
-
-        return DB_NO_ERROR
-
     def __delete_everything(self):
 
-        err = self._basicquery("""SELECT table_schema, table_name FROM
+        self._basicquery("""SELECT table_schema, table_name FROM
                     information_schema.tables WHERE table_schema='public'
                     ORDER BY table_schema, table_name""")
-        if err != DB_NO_ERROR:
-            return err
        
         # XXX This may use a lot of memory :0
         rows = self.basic.cursor.fetchall()
         for r in rows:
-            err = self._basicquery("""DROP TABLE IF EXISTS %s CASCADE""" % (r['table_name'],))
-            if err != DB_NO_ERROR:
-                return err            
-        
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after dropping all tables")
-            return err
-
-        return DB_NO_ERROR
- 
-    def update_timestamp(self, stream_ids, lasttimestamp):
-        if len(stream_ids) == 0:
-            return DB_NO_ERROR
-        sql = "UPDATE streams SET lasttimestamp=%s "
-        sql += "WHERE id IN (%s)" % (",".join(["%s"] * len(stream_ids)))
-
-        err = self._dataquery(sql, tuple([lasttimestamp] + stream_ids))
-
-        if err != DB_NO_ERROR:
-            return err        
-
-        #self.conn.commit()
-        return DB_NO_ERROR
-
-    def set_firsttimestamp(self, stream_id, ts):
+            self._basicquery("""DROP TABLE IF EXISTS %s CASCADE""" % (r['table_name'],))
        
-        sql = "UPDATE streams SET firsttimestamp=%s WHERE id = %s"
+        self._basicquery("""DROP SEQUENCE IF EXISTS "streams_id_seq" """)
+        self._releasebasic()
  
-        err = self._dataquery(sql, (ts, stream_id))
+    def update_timestamp(self, datatable, stream_ids, lasttimestamp):
+        
+        for sid in stream_ids:
+            self.streamcache.update_timestamps(datatable, sid, lasttimestamp)
+            #log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
+        
+        return
 
-        if err != DB_NO_ERROR:
-            return err        
-        return DB_NO_ERROR
+    def get_last_timestamp(self, table, streamid):
+        lastdict = self.streamcache.fetch_all_last_timestamps(table)
+
+        if streamid not in lastdict:
+            # Nothing useful in cache, query data table for max timestamp
+            # Warning, this isn't going to be fast so try to avoid doing
+            # this wherever possible!
+            query = "SELECT max(timestamp) FROM %s_" % (table)
+            query += "%s"   # stream id goes in here
+
+            self._basicquery(query, (streamid,))
+
+            if self.basic.cursor.rowcount != 1:
+                log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+                raise DBQueryException(DB_CODING_ERROR)
+
+            row = self.basic.cursor.fetchone()
+            if row[0] == None:
+                return 0
+
+            lastts = int(row[0])
+            lastdict[streamid] = lastts
+            self.streamcache.set_last_timestamps(table, lastdict)
+            
+            self._releasebasic()
+        else:
+            lastts = lastdict[streamid]
+
+        return lastts
+
 
     def find_existing_stream(self, st, props):
         # We know a stream already exists that matches the given properties
@@ -786,38 +700,23 @@ class DBInsert(DatabaseCore):
         query = "SELECT stream_id FROM %s " % (st)
         query += wherecl
 
-        err = self._basicquery(query, tuple(params))
-        if err != DB_NO_ERROR:
-            return err
+        self._basicquery(query, tuple(params))
 
         if self.basic.cursor.rowcount != 1:
             log("Unexpected number of matches when searching for existing stream: %d" % (self.basic.cursor.rowcount))
-            return DB_CODING_ERROR
+            raise DBQueryException(DB_CODING_ERROR)
 
         row = self.basic.cursor.fetchone()
         
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after finding existing stream")
-            return err
+        self._releasebasic()
         return row[0]
 
 
-    def insert_stream(self, tablename, datatable, basecol, submodule, 
-            name, timestamp, streamprops):
-
-        colid, streamid = self.register_new_stream(basecol, submodule, 
-                name, timestamp, datatable)
-       
-        # NOTE: this is reversed for a reason -- putting the error code
-        # into the stream values makes it easier for callers to identify
-        # the error code
-        if colid < 0:
-            return -1, colid
+    def insert_stream(self, tablename, datatable, timestamp, streamprops):
 
         # insert stream into our stream table
         colstr = "(stream_id"
-        values = [streamid]
+        values = []
         for k,v in streamprops.iteritems():
             colstr += ', "%s"' % (k)
             values.append(v)    
@@ -826,21 +725,29 @@ class DBInsert(DatabaseCore):
         params = tuple(values)
         insert = "INSERT INTO %s " % (tablename)
         insert += colstr
-        insert += "VALUES (%s)" % (",".join(["%s"] * len(values)))
-
-        err = self._streamsquery(insert, params)
+        insert += "VALUES (nextval('streams_id_seq'), %s)" % \
+                (",".join(["%s"] * len(values)))
+        insert += " RETURNING stream_id"
         
-        if err == DB_DUPLICATE_KEY:
-            return colid, self.find_existing_stream(tablename, streamprops)
-        elif err != DB_NO_ERROR:
-            return colid, err
- 
+        try:
+            self._streamsquery(insert, params)
+        except DBQueryException as e:
+            if e.code == DB_DUPLICATE_KEY:
+                return self.find_existing_stream(tablename, streamprops)
+            else:
+                raise
+
+        # Grab the new stream ID so we can return it
+        newid = self.streams.cursor.fetchone()[0]
+
+        # Cache the observed timestamp as the first timestamp
+        if timestamp != 0:   
+            self.streamcache.update_timestamps(datatable, newid, timestamp, 
+                    timestamp)
+
         # Create a new data table for this stream, using the "base" data
         # table as a template
-        
-        err = self.clone_table(datatable, streamid)
-        if err != DB_NO_ERROR:
-            return colid, err       
+        self.clone_table(datatable, newid)
  
         # Resist the urge to commit streams or do any live exporting here!
         #
@@ -854,17 +761,12 @@ class DBInsert(DatabaseCore):
         # Also, don't live export the stream until all the new stream stuff
         # has been committed otherwise you will get netevmon asking for
         # data for a stream that hasn't had its data table committed yet.
-        return colid, streamid
+        return newid
 
     def custom_insert(self, customsql, values):
-        err = self._dataquery(customsql, values)
-        if err != DB_NO_ERROR:
-            return err, None
-
+        self._dataquery(customsql, values)
         result = self.data.cursor.fetchone()
-        return DB_NO_ERROR, result     
-
-
+        return result     
 
     def insert_data(self, tablename, collection, stream, ts, result,
             casts = {}):
@@ -888,8 +790,7 @@ class DBInsert(DatabaseCore):
         insert += colstr
         insert += "VALUES (%s)" % (valstr)
 
-        err = self._dataquery(insert, params)
-        return err
+        self._dataquery(insert, params)
     
     def _columns_sql(self, columns):
 
@@ -935,16 +836,8 @@ class DBInsert(DatabaseCore):
             basesql += ")"
         basesql += ")"
 
-        err = self._basicquery(basesql)
-        if err != DB_NO_ERROR:
-            log("Failed to create miscellaneous table %s" % (name))
-            return err
-
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after creating miscellaneous table")
-            return err
-        return DB_NO_ERROR
+        self._basicquery(basesql)
+        self._releasebasic()
 
     def create_data_table(self, name, columns, indexes=[]):
  
@@ -955,46 +848,18 @@ class DBInsert(DatabaseCore):
         basesql += self._columns_sql(columns)
         basesql += ")"
 
-        err = self._basicquery(basesql)
-        if err != DB_NO_ERROR:
-            log("Failed to create data table %s" % (name))
-            return err
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after creating data table")
-            return err
-      
-        err = self.create_index("%s_%s_idx" % (name, "timestamp"), name, \
-                    ["timestamp"])
-        if err != DB_NO_ERROR:
-            log("Failed to create index while creating data table %s" % ( name))
-            return err
+        self._basicquery(basesql)
+        self._releasebasic()
 
- 
-        for ind in indexes:
-            if "columns" not in ind or len(ind["columns"]) == 0:
-                log("Index %s for data table %s has no columns -- skipping" \
-                        % (indname, name))
-                continue
-            
-            if "name" not in ind:
-                indname = ""
-            else:
-                indname = ind["name"]
-    
-            err = self.create_index(indname, name, ind["columns"])
-            if err != DB_NO_ERROR:
-                log("Failed to create index while creating data table %s" % ( name))
-                return err
-        
-        return DB_NO_ERROR
+        # Automatically create an index on timestamp      
+        self.create_index("%s_%s_idx" % (name, "timestamp"), name, \
+                    ["timestamp"])
 
     def create_streams_table(self, name, columns, uniquecols=[]):
 
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
-
-        basesql += "stream_id integer PRIMARY KEY REFERENCES streams(id) ON DELETE CASCADE"
-
+        basesql += "stream_id integer PRIMARY KEY "
+        basesql += "DEFAULT nextval('streams_id_seq')"
         basesql += self._columns_sql(columns)
 
         if len(uniquecols) != 0:
@@ -1008,16 +873,7 @@ class DBInsert(DatabaseCore):
             basesql += ")"
         basesql += ")"
 
-        err = self._basicquery(basesql)
-        if err != DB_NO_ERROR:
-            log("Failed to create stream table %s" % (name))
-            return err
-        err = self._releasebasic()
-        if err != DB_NO_ERROR:
-            log("Failed to tidy up after creating streams table")
-            return err
-
-        return DB_NO_ERROR
-    
+        self._basicquery(basesql)
+        self._releasebasic()
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

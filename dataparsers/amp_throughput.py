@@ -20,155 +20,109 @@
 # $Id$
 
 from libnntsc.dberrorcodes import *
-from libnntsc.parsers.common import create_new_stream, insert_data
+from libnntsc.parsers.common import NNTSCParser
 import libnntscclient.logger as logger
 
-STREAM_TABLE_NAME = "streams_amp_throughput"
-DATA_TABLE_NAME = "data_amp_throughput"
-COLNAME = "amp_throughput"
+class AmpThroughputParser(NNTSCParser):
+    def __init__(self, db):
+        super(AmpThroughputParser, self).__init__(db)
 
-amp_tput_streams = {}
+        self.streamtable = "streams_amp_throughput"
+        self.datatable = "data_amp_throughput"
+        self.colname = "amp_throughput"
+        self.source = "amp"
+        self.module = "throughput"
 
-tput_streamcols = [ \
-    {"name":"source", "type":"varchar", "null":False},
-    {"name":"destination", "type":"varchar", "null":False},
-    {"name":"direction", "type":"varchar", "null":False},
-    {"name":"localaddress", "type":"inet", "null":False},
-    {"name":"remoteaddress", "type":"inet", "null":False},
-    {"name":"duration", "type":"integer", "null":False},
-    {"name":"writesize", "type":"integer", "null":False}, 
-    {"name":"tcpreused", "type":"boolean", "null":False},
-]
+        self.streamcolumns = [
+            {"name":"source", "type":"varchar", "null":False},
+            {"name":"destination", "type":"varchar", "null":False},
+            {"name":"direction", "type":"varchar", "null":False},
+            {"name":"localaddress", "type":"inet", "null":False},
+            {"name":"remoteaddress", "type":"inet", "null":False},
+            {"name":"duration", "type":"integer", "null":False},
+            {"name":"writesize", "type":"integer", "null":False}, 
+            {"name":"tcpreused", "type":"boolean", "null":False},
+        ]
 
-tput_datacols = [ \
-    {"name":"bytes", "type":"bigint", "null":True},    
-    {"name":"packets", "type":"bigint", "null":True},
-    {"name":"runtime", "type":"integer", "null":True}
-]
-
-def construct_key(stream_data):
-    src = str(stream_data["source"])
-    dest = str(stream_data["destination"])
-    direction = str(stream_data["direction"])
-    local = stream_data["localaddress"]
-    remote = stream_data["remoteaddress"]
-    duration = str(stream_data["duration"])
-    writesize = str(stream_data["writesize"])
-    reused = stream_data["tcpreused"]
-    
-    key = (src, dest, direction, local, remote, duration, writesize, reused)
-    return key
-
-def create_existing_stream(stream_data):
-    key = construct_key(stream_data)
-    streamid = stream_data["stream_id"]
-    amp_tput_streams[key] = streamid
-
-def insert_stream(db, exp, timestamp, result):
-    if result['tcpreused'] == True:
-        reuse = ", reused"
-    else:
-        reuse = ""
-
-    name = "throughput %s:%s %s (%s:%s) %s secs, %s byte writes%s" % ( \
-            result['source'], result['destination'], result['direction'], \
-            result['localaddress'], result['remoteaddress'], \
-            result['duration'], result['writesize'], reuse) 
-
-    return create_new_stream(db, exp, "amp", "throughput", name, 
-            tput_streamcols, result, timestamp, STREAM_TABLE_NAME, 
-            DATA_TABLE_NAME)
-
-def stream_table(db):
-    uniqcols = ['source', 'destination', 'direction', 'localaddress', \
+        self.uniquecolumns = [
+            'source', 'destination', 'direction', 'localaddress', \
             'remoteaddress', 'duration', 'writesize', 'tcpreused']
 
-    err = db.create_streams_table(STREAM_TABLE_NAME, tput_streamcols, uniqcols)
+        self.streamindexes = [
+            {"name": "", "columns": ['source']},
+            {"name": "", "columns": ['destination']}
+        ]
 
-    if err != DB_NO_ERROR:
-        logger.log("Failed to create streams table for amp-throughput")
-        return None
+        self.datacolumns = [
+            {"name":"bytes", "type":"bigint", "null":True},    
+            {"name":"packets", "type":"bigint", "null":True},
+            {"name":"runtime", "type":"integer", "null":True}
+        ]
+        
 
-    err = db.create_index("", STREAM_TABLE_NAME, ['source'])
-    if err != DB_NO_ERROR:
-        logger.log("Failed to create source index on %s" % (STREAM_TABLE_NAME))
-        return None
+    def _construct_key(self, stream_data):
+        src = str(stream_data["source"])
+        dest = str(stream_data["destination"])
+        direction = str(stream_data["direction"])
+        local = stream_data["localaddress"]
+        remote = stream_data["remoteaddress"]
+        duration = str(stream_data["duration"])
+        writesize = str(stream_data["writesize"])
+        reused = stream_data["tcpreused"]
+        
+        key = (src, dest, direction, local, remote, duration, writesize, reused)
+        return key
 
-    err = db.create_index("", STREAM_TABLE_NAME, ['destination'])
-    if err != DB_NO_ERROR:
-        logger.log("Failed to create dest index on %s" % (STREAM_TABLE_NAME))
-        return None
+    def create_existing_stream(self, stream_data):
+        key = self._construct_key(stream_data)
+        streamid = stream_data["stream_id"]
+        self.streams[key] = streamid
 
-    return STREAM_TABLE_NAME
 
-def data_table(db):
-
-    # Do we need this? Or do we want one on packets as well?
-    indexes = [{"columns":['bytes']}]
-
-    err = db.create_data_table(DATA_TABLE_NAME, tput_datacols, indexes)
-    if err != DB_NO_ERROR:
-        return None
-    return DATA_TABLE_NAME
-
-def process_single_result(db, exp, timestamp, resdict):
-    key = construct_key(resdict)
-    
-    if key in amp_tput_streams:
-        stream_id = amp_tput_streams[key]
-    else:
-        stream_id = insert_stream(db, exp, timestamp, resdict)
-
-        if stream_id < 0:
-            logger.log("AMPModule: Cannot create new throughput stream")
-            logger.log("AMPModule: %s:%s:%s:%s" % ( \
-                    resdict['source'], resdict['destination'], 
-                    resdict['duration'],
-                    resdict['writesize']))
-            return stream_id
+    def _process_single_result(self, timestamp, resdict):
+        key = self._construct_key(resdict)
+        
+        if key in self.streams:
+            stream_id = self.streams[key]
         else:
-            amp_tput_streams[key] = stream_id
+            stream_id = self.create_new_stream(resdict, timestamp)
 
-    err = insert_data(db, exp, stream_id, timestamp, resdict, tput_datacols,
-            COLNAME, DATA_TABLE_NAME)
-    if err != DB_NO_ERROR:
-        return err
-    return stream_id
+            if stream_id < 0:
+                logger.log("AMPModule: Cannot create new throughput stream")
+                logger.log("AMPModule: %s:%s:%s:%s" % ( \
+                        resdict['source'], resdict['destination'], 
+                        resdict['duration'],
+                        resdict['writesize']))
+                return stream_id
+            else:
+                self.streams[key] = stream_id
+
+        self.insert_data(stream_id, timestamp, resdict) 
+        return stream_id
 
 
-def process_data(db, exp, timestamp, data, source):
-    done = {}
-    for result in data['results']:
-        resdict = {}
-        resdict['source'] = source
-        resdict['destination'] = data['target']
-        resdict['localaddress'] = data['local_address']
-        resdict['remoteaddress'] = data['address']
-        resdict['direction']  = result['direction']
-        resdict['duration'] = result['duration']
-        resdict['runtime'] = result['runtime']
-        resdict['writesize'] = result['write_size']
-        resdict['bytes'] = result['bytes']
-        resdict['packets'] = result['packets']
-        resdict['tcpreused'] = result['tcpreused']
+    def process_data(self, timestamp, data, source):
+        done = {}
+        for result in data['results']:
+            resdict = {}
+            resdict['source'] = source
+            resdict['destination'] = data['target']
+            resdict['localaddress'] = data['local_address']
+            resdict['remoteaddress'] = data['address']
+            resdict['direction']  = result['direction']
+            resdict['duration'] = result['duration']
+            resdict['runtime'] = result['runtime']
+            resdict['writesize'] = result['write_size']
+            resdict['bytes'] = result['bytes']
+            resdict['packets'] = result['packets']
+            resdict['tcpreused'] = result['tcpreused']
 
-        streamid = process_single_result(db, exp, timestamp, resdict)
-        if streamid < 0:
-            return streamid
-        done[streamid] = 0
+            streamid = self._process_single_result(timestamp, resdict)
+            if streamid < 0:
+                return
+            done[streamid] = 0
 
-    return db.update_timestamp(done.keys(), timestamp)
-
-def register(db):
-    st_name = stream_table(db)
-    dt_name = data_table(db)
-
-    if st_name == None or dt_name == None:
-        logger.log("Error creating AMP throughput base tables")
-        return DB_CODING_ERROR
-
-    return db.register_collection("amp", "throughput", st_name, dt_name)
- 
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

@@ -23,7 +23,8 @@
 from libnntsc.database import DBInsert
 from libnntsc.dberrorcodes import *
 from libnntsc.configurator import *
-from libnntsc.parsers import rrd_smokeping, rrd_muninbytes
+from libnntsc.parsers.rrd_smokeping import RRDSmokepingParser
+from libnntsc.parsers.rrd_muninbytes import RRDMuninbytesParser
 import libnntscclient.logger as logger
 import sys, rrdtool, socket, time
 from libnntsc.pikaqueue import initExportPublisher
@@ -39,18 +40,28 @@ class RRDModule:
         if dbconf == {}:
             sys.exit(1)
 
+    
         self.db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"],
-                dbconf["host"])
+                dbconf["host"], cachetime=dbconf['cachetime'])
         self.db.connect_db(15)
+
+        self.smokeparser = RRDSmokepingParser(self.db)
+        self.muninparser = RRDMuninbytesParser(self.db)
 
         self.smokepings = {}
         self.muninbytes = {}
         self.rrds = {}
         for r in rrds:
             if r['modsubtype'] == 'smokeping':
+                lastts = self.smokeparser.get_last_timestamp(r['stream_id'])
+                r['lasttimestamp'] = lastts
                 self.smokepings[r['stream_id']] = r
-            if r['modsubtype'] == 'muninbytes':
+            elif r['modsubtype'] == 'muninbytes':
+                lastts = self.muninparser.get_last_timestamp(r['stream_id'])
+                r['lasttimestamp'] = lastts
                 self.muninbytes[r['stream_id']] = r
+            else:
+                continue
 
             r['lastcommit'] = r['lasttimestamp']
             filename = str(r['filename'])
@@ -60,6 +71,9 @@ class RRDModule:
                 self.rrds[filename] = [r]
 
         self.exporter = initExportPublisher(nntsc_conf, expqueue, exchange)
+
+        self.smokeparser.add_exporter(self.exporter)
+        self.muninparser.add_exporter(self.exporter)
 
     def rejig_ts(self, endts, r):
         # Doing dumbass stuff that I shouldn't have to do to ensure
@@ -99,13 +113,15 @@ class RRDModule:
         fetchres = rrdtool.fetch(fname, "AVERAGE", "-s",
                 str(startts), "-e", str(endts))
 
-
         current = int(fetchres[0][0])
         last = int(fetchres[0][1])
         step = int(fetchres[0][2])
 
         data = fetchres[2]
         current += step
+
+        update_needed = False
+        datatable = None
 
         for line in data:
 
@@ -114,66 +130,46 @@ class RRDModule:
 
             code = DB_DATA_ERROR
             if r['modsubtype'] == "smokeping":
-                code = rrd_smokeping.process_data(self.db, 
-                        self.exporter, r['stream_id'], current, 
-                        line)
-
-            if r['modsubtype'] == "muninbytes":
-                code = rrd_muninbytes.process_data(self.db, 
-                        self.exporter, r['stream_id'], current, 
-                        line)
-
-            if code == DB_NO_ERROR:
-                if current > r['lasttimestamp']:
-                    r['lasttimestamp'] = current
-
-                # RRD streams are created before we see any data 
-                # so we have to update firsttimestamp when we see 
-                # the first data point
-                if (r['firsttimestamp'] == 0):
-                    r['firsttimestamp'] = current;
-                    code = self.db.set_firsttimestamp(
-                                r['stream_id'], 
-                                current)
-            
-            if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:
-                return code
+                parser = self.smokeparser
+            elif r['modsubtype'] == "muninbytes":
+                parser = self.muninparser
+            else:
+                break
                 
-            if code == DB_INTERRUPTED:
-                logger.log("Interrupt in RRD module")
-                return code
-
-            if code != DB_NO_ERROR:
-                logger.log("Error while inserting RRD data")
-
+            parser.process_data(r['stream_id'], current, line)
+            if datatable is None:
+                datatable = parser.get_data_table_name()
+            
+            if current > r['lasttimestamp']:
+                r['lasttimestamp'] = current
+                update_needed = True
+                
             current += step
 
-        code = self.db.update_timestamp([r['stream_id']],
+        if not update_needed:
+            return
+        
+        self.db.commit_data()
+
+        if datatable is not None:
+            self.db.update_timestamp(datatable, [r['stream_id']],
                 r['lasttimestamp'])
-
-        if code == DB_QUERY_TIMEOUT or code == DB_OPERATIONAL_ERROR:
-            return code
-        if code == DB_INTERRUPTED:
-            logger.log("Interrupt in RRD module")
-            return code
-
-        if code != DB_NO_ERROR:
-            logger.log("Error while updating last timestamp for RRD stream")
-            return code
-
-        return DB_NO_ERROR
 
     def rrdloop(self):
         for fname,rrds in self.rrds.items():
             for r in rrds:
-                err = self.read_from_rrd(r, fname)
-
-                if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
-                    return RRD_RETRY
-                if err == DB_INTERRUPTED:
-                    return RRD_HALT
-                # Ignore other DB errors as they represent bad data or 
-                # database code. Try to carry on to the next RRD instead.
+                try:
+                    self.read_from_rrd(r, fname)
+                except DBQueryException as e:
+                    if e.code == DB_QUERY_TIMEOUT:
+                        return RRD_RETRY
+                    if e.code == DB_OPERATIONAL_ERROR:
+                        return RRD_RETRY
+                    if e.code == DB_INTERRUPTED:
+                        return RRD_HALT
+                    # Ignore other DB errors as they represent bad data or 
+                    # database code. Try to carry on to the next RRD instead.
+                    continue
         return RRD_CONTINUE
 
 
@@ -190,18 +186,6 @@ class RRDModule:
             if result == RRD_HALT:
                 break
 
-            err = self.db.commit_data()
-            if err == DB_QUERY_TIMEOUT or err == DB_OPERATIONAL_ERROR:
-                # Revert our lasttimestamp back to whenever we last
-                # successfully committed to ensure we re-insert the data
-                self.revert_rrds()
-                time.sleep(10)
-                continue
-
-            if err != DB_NO_ERROR:
-                logger.log("Error while committing RRD Data")
-                self.revert_rrds()
-
             time.sleep(30)
 
         logger.log("Halting RRD module")
@@ -213,78 +197,29 @@ class RRDModule:
                 if 'lastcommit' in r:
                     r['lasttimestamp'] = r['lastcommit']
 
-def create_rrd_stream(db, rrdtype, params, index, existing):
+def create_rrd_stream(db, rrdtype, params, index, existing, parser):
 
+    if parser is None:
+        return DB_NO_ERROR
 
     if "file" not in params:
         logger.log("Failed to create stream for RRD %d" % (index))
         logger.log("All RRDs must have a 'file' parameter")
-        return
+        return DB_DATA_ERROR
 
     if params['file'] in existing:
-        return
+        return DB_NO_ERROR
 
     info = rrdtool.info(params['file'])
-    minres = info['step']
-    rows = info['rra[0].rows']
+    params['minres'] = info['step']
+    params['highrows'] = info['rra[0].rows']
     logger.log("Creating stream for RRD-%s: %s" % (rrdtype, params['file']))
 
-    code = DB_NO_ERROR
-
-    if rrdtype == "smokeping":
-        if "source" not in params:
-            logger.log("Failed to create stream for RRD %d" % (index))
-            logger.log("All Smokeping RRDs must have a 'source' parameter")
-
-        if "host" not in params:
-            logger.log("Failed to create stream for RRD %d" % (index))
-            logger.log("All Smokeping RRDs must have a 'host' parameter")
-            return
-
-        if "name" not in params:
-            logger.log("Failed to create stream for RRD %d" % (index))
-            logger.log("All Smokeping RRDs must have a 'name' parameter")
-            return
-
-        code = rrd_smokeping.insert_stream(db, None, params['name'], 
-                params['file'],
-                params["source"], params['host'], minres, rows)
-
-    if rrdtype == "muninbytes":
-        if "switch" not in params:
-            logger.log("Failed to create stream for RRD %d" % (index))
-            logger.log("All MuninBytes RRDs must have a 'switch' parameter")
-            return
-        if "interface" not in params:
-            logger.log("Failed to create stream for RRD %d" % (index))
-            logger.log("All MuninBytes RRDs must have a 'interface' parameter")
-            return
-        if "direction" not in params:
-            logger.log("Failed to create stream for RRD %d" % (index))
-            logger.log("All MuninBytes RRDs must have a 'direction' parameter")
-            return
-
-        if params["direction"] not in ["sent", "received"]:
-            logger.log("Failed to create stream for RRD %d" % (index))
-            logger.log("'direction' parameter for MuninBytes RRDs must be either 'sent' or 'received'")
-            return
-
-        if "interfacelabel" not in params:
-            label = None
-            namelabel = "Port " + params["interface"]
-        else:
-            label = params["interfacelabel"]
-            namelabel = label
-
-        muninname = params["switch"] + " >> " + namelabel + " (Bytes " + params["direction"] + ")"
-
-        code = rrd_muninbytes.insert_stream(db, None, muninname, params['file'],
-                params['switch'], params['interface'], params['direction'],
-                minres, rows, label)
-
-    return code
+    parser.insert_stream(params)
 
 def insert_rrd_streams(db, conf):
+    smoke = RRDSmokepingParser(db)
+    munin = RRDMuninbytesParser(db)
 
     try:
         rrds = db.select_streams_by_module("rrd")
@@ -292,9 +227,9 @@ def insert_rrd_streams(db, conf):
         logger.log("Error while fetching existing RRD streams from database")
         return
 
-    files = {}
+    files = set()
     for r in rrds:
-        files[r['filename']] = r['name']
+        files.add(r['filename'])
 
 
     if conf == "":
@@ -324,28 +259,19 @@ def insert_rrd_streams(db, conf):
 
         if x[0] == "type":
             if parameters != {}:
-                code = create_rrd_stream(db, subtype, parameters, index, 
-                       files)
-                if code == DB_GENERIC_ERROR:
-                    logger.log("Database error while creating RRD stream")
-                    return code
-                if code == DB_DATA_ERROR:
-                    logger.log("Invalid RRD stream description")
-                    return code
-                if code == DB_INTERRUPTED:
-                    logger.log("RRD stream processing interrupted")
-                    return code
-                if code == DB_DUPLICATE_KEY:
-                    # Note, we should not see this error as we should get
-                    # back the id of the duplicate stream instead
-                    logger.log("Duplicate key error while inserting RRD stream")
-                    return code
-                if code == DB_CODING_ERROR:
-                    logger.log("Programming error while inserting RRD stream")
-                    return code
-                if code == DB_QUERY_TIMEOUT:
-                    logger.log("Timeout while inserting RRD stream")
-                    return code
+                if subtype == "smokeping":
+                    parser = smoke
+                elif subtype == "muninbytes":
+                    parser = munin
+                else:
+                    parser = None
+                
+                try: 
+                    create_rrd_stream(db, subtype, parameters, index, 
+                       files, parser)
+                except DBQueryException as e:
+                    logger.log("Exception while creating RRD streams, aborting")
+                    return
                     
             parameters = {}
             subtype = x[1]
@@ -355,30 +281,21 @@ def insert_rrd_streams(db, conf):
 
 
     if parameters != {}:
-        code = create_rrd_stream(db, subtype, parameters, index, files)
-        if code == DB_GENERIC_ERROR:
-            logger.log("Database error while creating RRD stream")
-            return code
-        if code == DB_DATA_ERROR:
-            logger.log("Invalid RRD stream description")
-            return code
-        if code == DB_INTERRUPTED:
-            logger.log("RRD stream processing interrupted")
-            return code
-        if code == DB_DUPLICATE_KEY:
-            # Note, we should not see this error as we should get
-            # back the id of the duplicate stream instead
-            logger.log("Duplicate key error while inserting RRD stream")
-            return code
-        if code == DB_CODING_ERROR:
-            logger.log("Programming error while inserting RRD stream")
-            return code
-        if code == DB_QUERY_TIMEOUT:
-            logger.log("Timeout while inserting RRD stream")
-            return code
+        if subtype == "smokeping":
+            parser = smoke
+        elif subtype == "muninbytes":
+            parser = munin
+        else:
+            parser = None
+        
+        try: 
+            create_rrd_stream(db, subtype, parameters, index, 
+               files, parser)
+        except DBQueryException as e:
+            logger.log("Exception while creating RRD streams, aborting")
+            return
 
     f.close()
-    return DB_NO_ERROR
 
 
 def run_module(rrds, config, key, exchange):
@@ -388,33 +305,11 @@ def run_module(rrds, config, key, exchange):
 
 def tables(db):
 
-    st_name = rrd_smokeping.stream_table(db)
-    dt_name = rrd_smokeping.data_table(db)
+    smoke = RRDSmokepingParser(db)
+    munin = RRDMuninbytesParser(db)
 
-    if st_name == None or dt_name == None:
-        logger.log("Error creating RRD Smokeping base tables")
-        return
+    smoke.register()
+    munin.register()
 
-    code = db.register_collection("rrd", "smokeping", st_name, dt_name)
-
-    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
-        logger.log("Failed to register rrd smokeping collection")
-        return
-
-    st_name = rrd_muninbytes.stream_table(db)
-    dt_name = rrd_muninbytes.data_table(db)
-
-    if st_name == None or dt_name == None:
-        logger.log("Error creating RRD Muninbytes base tables")
-        return
-    db.register_collection("rrd", "muninbytes", st_name, dt_name)
-
-    if code != DB_NO_ERROR and code != DB_DUPLICATE_KEY:
-        logger.log("Failed to register rrd muninbytes collection")
-        return
-    #res = {}
-    #res["rrd_smokeping"] = (smokeping_stream_table(), smokeping_stream_constraints(), smokeping_data_table())
-
-    #return res
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
