@@ -166,8 +166,11 @@ class NNTSCParser(object):
         # that we export a collection id number for streams and a string
         # for live data.
         # TODO get rid of this to avoid confusion
-        if self.exporter != None:
-            self.exporter.publishLiveData(self.colname, stream, ts, filtered)
+
+        colid = self._get_collection_id()
+
+        if self.exporter != None and colid > 0:
+            self.exporter.publishLiveData(colid, stream, ts, filtered)
 
 
     def _find_median(self, datapoints):

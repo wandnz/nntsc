@@ -55,6 +55,8 @@ class AmpTracerouteParser(AmpIcmpParser):
             {"name":"addresses", "type":"smallint", "null":False},
         ]
 
+        self.ascollectionid = None
+        self.ipcollectionid = None
     
 
     def data_table(self):
@@ -208,14 +210,14 @@ class AmpTracerouteParser(AmpIcmpParser):
         if self.exporter == None:
             return streamid
     
-        colid = self._get_collection_id("traceroute")
+        colid = self._get_iptraceroute_collection_id()
         if colid <= 0:
             return streamid
 
         self.exporter.publishStream(colid, "amp-traceroute", streamid, 
                 streamparams)
         
-        colid = self._get_collection_id("astraceroute")
+        colid = self._get_astraceroute_collection_id()
         if colid <= 0:
             return streamid
 
@@ -225,22 +227,37 @@ class AmpTracerouteParser(AmpIcmpParser):
         return streamid
 
     def _get_collection_id(self, module):
-        if self.collectionid == None:
-            try:
-                colid = self.db.get_collection_id(self.source, module)
-            except DBQueryException as e:
-                logger.log("Failed to get collection id for %s %s" % \
-                        (self.colname))
-                logger.log("Error was: %s" % (str(e)))
-                raise
+        try:
+            colid = self.db.get_collection_id(self.source, module)
+        except DBQueryException as e:
+            logger.log("Failed to get collection id for %s %s" % \
+                    (self.colname))
+            logger.log("Error was: %s" % (str(e)))
+            raise
+
+        return colid
+    
+    def _get_astraceroute_collection_id(self):
+        if self.ascollectionid is None:
+            colid = self._get_collection_id("astraceroute")
 
             if colid > 0:
-                self.collectionid = colid
+                self.ascollectionid = colid
             else:
                 return -1
 
-        return self.collectionid
+        return self.ascollectionid
+    
+    def _get_iptraceroute_collection_id(self):
+        if self.ipcollectionid is None:
+            colid = self._get_collection_id("traceroute")
 
+            if colid > 0:
+                self.ipcollectionid = colid
+            else:
+                return -1
+
+        return self.ipcollectionid
 
     def _ippath_insertion_sql(self, stream, pathdata):
         pathtable = "data_amp_traceroute_paths_%d" % (stream)
@@ -359,9 +376,10 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         filtered['path'] = result['path']
         filtered['aspath'] = result['aspath']
-        if self.exporter != None:
-            self.exporter.publishLiveData("amp-traceroute", stream, ts, \
-                    filtered)
+        colid = self._get_iptraceroute_collection_id()
+
+        if self.exporter != None and colid > 0:
+            self.exporter.publishLiveData(colid, stream, ts, filtered)
 
     def _update_as_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
@@ -393,17 +411,33 @@ class AmpTracerouteParser(AmpIcmpParser):
                 self.aspaths[keystr] = pathid
         
             if aspath_id not in observed[streamid]['paths']:
-                observed[streamid]['paths'][aspath_id] = \
-                        (1, datapoint['aspathlen'])
+                observed[streamid]['paths'][aspath_id] = { \
+                        'count':1, 'aspathlen':datapoint['aspathlen'],
+                        'aspath':datapoint['aspath'], 
+                        'uniqueas':datapoint['uniqueas'],
+                        'responses':datapoint['responses']
+                }
             else:
                 prev = observed[streamid]['paths'][aspath_id]
-                observed[streamid]['paths'][aspath_id] = (prev[0] + 1, prev[1])
+                observed[streamid]['paths'][aspath_id]['count'] += 1
 
     def _aggregate_streamdata(self, streamdata):
         # Find the most common AS path
-        commonpath = max(streamdata['paths'].iteritems(), \
-                key = operator.itemgetter(1))
-        streamdata['aspath_id'] = commonpath[0]
+        maxfreq = 0
+        commonpathid = -1
+
+        for pathid,pdata in streamdata['paths'].iteritems():
+            if pdata['count'] > maxfreq:
+                common = pdata
+                commonpathid = pathid
+                maxfreq = pdata['count']
+        
+        streamdata['aspath_id'] = commonpathid
+        streamdata['aspath'] = streamdata['paths'][commonpathid]['aspath']
+        streamdata['aspathlen'] = streamdata['paths'][commonpathid]['aspathlen']
+        streamdata['uniqueas'] = streamdata['paths'][commonpathid]['uniqueas']
+        streamdata['responses'] = streamdata['paths'][commonpathid]['responses']
+        
 
     def process_data(self, timestamp, data, source):
         """ Process a AMP traceroute message, which can contain 1 or more 
@@ -468,10 +502,11 @@ class AmpTracerouteParser(AmpIcmpParser):
                     ("amp-astraceroute", stream))
             logger.log("Error was: %s" % (str(e)))
             raise
+       
+        colid = self._get_astraceroute_collection_id()
 
-        if self.exporter != None:
-            self.exporter.publishLiveData("amp-astraceroute", stream, ts, \
-                    filtered)
+        if self.exporter != None and colid > 0:
+            self.exporter.publishLiveData(colid, stream, ts, filtered)
 
 
     def _extract_paths(self, result):
