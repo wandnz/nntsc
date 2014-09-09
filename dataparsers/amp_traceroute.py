@@ -376,6 +376,11 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         filtered['path'] = result['path']
         filtered['aspath'] = result['aspath']
+        filtered['length'] = result['length']
+        filtered['aspath_length'] = result['aspathlen']
+        filtered['uniqueas'] = result["uniqueas"]
+        filtered['responses'] = result["responses"]
+
         colid = self._get_iptraceroute_collection_id()
 
         if self.exporter != None and colid > 0:
@@ -503,6 +508,11 @@ class AmpTracerouteParser(AmpIcmpParser):
             logger.log("Error was: %s" % (str(e)))
             raise
        
+        filtered['aspath'] = result['aspath']
+        filtered['aspath_length'] = result['aspathlen']
+        filtered['uniqueas'] = result["uniqueas"]
+        filtered['responses'] = result["responses"]
+
         colid = self._get_astraceroute_collection_id()
 
         if self.exporter != None and colid > 0:
