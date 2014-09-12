@@ -175,13 +175,16 @@ class DBWorker(threading.Thread):
 
         aggs = self._merge_aggregators(aggcols, aggfunc)
 
-        try:
-            labels = self.db.filter_active_streams(colid, labels, start, 
-                    stoppoint)
-        except DBQueryException as e:
-            logger.log("Failed to filter active streams for collection %s" \
-                    % (colid))
-            return DBWORKER_ERROR
+        # Don't filter streams if the request period is less than the cache
+        # update frequency!
+        if stoppoint - start > 300:
+            try:
+                labels = self.db.filter_active_streams(colid, labels, start, 
+                        stoppoint)
+            except DBQueryException as e:
+                logger.log("Failed to filter active streams for collection %s" \
+                        % (colid))
+                return DBWORKER_ERROR
 
         while start < stoppoint:
             # Temporary fix to allow heavy aggregation over long time
@@ -247,10 +250,6 @@ class DBWorker(threading.Thread):
                 if err != DBWORKER_SUCCESS:
                     return err
 
-                err = self._subscribe_streams(streams, start, end, columns, colid, lab)
-                if err != DBWORKER_SUCCESS:
-                    return err
-
             return DBWORKER_SUCCESS
         
         if end == None:
@@ -262,21 +261,17 @@ class DBWorker(threading.Thread):
             aggcols = self._merge_aggregators(columns, aggs)
             
 
-        # Register our interest in these streams before we start querying, so
-        # the client can stockpile any live data that arrives while we're
-        # busy querying the db.
-        for lab, streams in labels.items():
-            err = self._subscribe_streams(streams, start, end, columns, colid, lab)
-            if err != DBWORKER_SUCCESS:
-                return err
-
         # Only query for historical data for streams that were active
         # during that time period
-        try:
-            labels = self.db.filter_active_streams(colid, labels, start, 
-                    stoppoint)
-        except DBQueryException as e:
-            return DBWORKER_ERROR
+
+        # Don't filter streams if the request period is less than the cache
+        # update frequency!
+        if stoppoint - start > 300:
+            try:
+                labels = self.db.filter_active_streams(colid, labels, start, 
+                        stoppoint)
+            except DBQueryException as e:
+                return DBWORKER_ERROR
 
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY
@@ -359,7 +354,6 @@ class DBWorker(threading.Thread):
 
         # Get any historical data that we've been asked for
         for rows, label, tscol, binsize, exception in rowgen:
-
             if exception is not None:
                 log(exception)
                 if exception.code == DB_QUERY_TIMEOUT:
@@ -483,14 +477,6 @@ class DBWorker(threading.Thread):
 
         return 0
 
-    def _subscribe_streams(self, streams, start, subend, columns, colid, label):
-        try:
-            self.queue.put((NNTSC_SUBSCRIBE, (streams, start, subend, columns, colid, label)), False)
-        except StdQueue.Full:
-            log("DBWorker tried to push subscribe but result queue was full!")
-            return DBWORKER_FULLQUEUE
-        return DBWORKER_SUCCESS
-
     def _enqueue_cancel(self, reqtype, data):
         contents = pickle.dumps((reqtype, data))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_QUERY_CANCELLED, len(contents))
@@ -504,7 +490,6 @@ class DBWorker(threading.Thread):
 
     def _enqueue_history(self, colid, label, history, more, freq, lastts):
 
-        #print name, label, lastts, len(history), freq, more 
         contents = pickle.dumps((colid, label, history, more, freq))
         contents = contents.encode("zlib")
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
@@ -826,20 +811,36 @@ class NNTSCClient(threading.Thread):
             self.workers.append(worker)
 
     def subscribe_stream(self, submsg):
-        streams, start, end, columns, colid, label = submsg
+        colid, start, end, columns, labels, aggs = pickle.loads(submsg)
+       
+        for label, streams in labels.iteritems(): 
 
-        if label not in self.waitlabels:
-            self.waitlabels[label] = streams
-        else:
-            return
+            if label not in self.waitlabels:
+                self.waitlabels[label] = streams
+            else:
+                continue
         
+            for s in streams:
+                self.waitstreams[s] = label
+
+            assert(label not in self.savedlive)
+            self.savedlive[label] = []
+
+            self.parent.register_stream(streams, self.sock, columns, start, \
+                    end, colid, label)
+
+    def unsubscribe_streams(self, unsubmsg):
+        colid, streams = pickle.loads(unsubmsg)
+
+        # XXX what should we do about waitlabels? In theory, one could
+        # unsubscribe from some of the streams in the label without
+        # unsubscribing from all of them. On the other hand, most labels
+        # should only contain one stream from now on...
         for s in streams:
-            self.waitstreams[s] = label
+            if s in self.waitstreams:
+                del self.waitstreams[s]
 
-        assert(label not in self.savedlive)
-        self.savedlive[label] = []
-
-        self.parent.register_stream(streams, self.sock, columns, start, end, colid, label)
+        self.parent.deregister_streams(colid, streams, self.sock)
 
     def finish_subscribe(self, label, lasthist):
         # History has all been sent for this label, so we can now release
@@ -916,12 +917,18 @@ class NNTSCClient(threading.Thread):
         if len(msg) < total_len:
             return msg, 1, error
 
-        # Put the job on our joblist for one of the worker threads to handle
-        try:
-            self.jobs.put((header[1], body), False)
-        except StdQueue.Full:
-            log("Too many jobs queued by a client, dropping client")
-            return msg, 0, 1
+        if (header[1] == NNTSC_UNSUBSCRIBE):
+            self.unsubscribe_streams(body)
+        else:
+            if (header[1] == NNTSC_SUBSCRIBE):
+                self.subscribe_stream(body)
+
+            # Put the job on our joblist for one of the worker threads to handle
+            try:
+                self.jobs.put((header[1], body), False)
+            except StdQueue.Full:
+                log("Too many jobs queued by a client, dropping client")
+                return msg, 0, 1
 
         return msg[total_len:], 0, error
 
@@ -1042,8 +1049,6 @@ class NNTSCClient(threading.Thread):
             elif response == NNTSC_REGISTER_COLLECTION:
                 self.parent.register_collection(self.sock, result)
                     
-            elif response == NNTSC_SUBSCRIBE:
-                self.subscribe_stream(result)
             elif response == NNTSC_HISTORY_DONE:
                 label = obj[1]
                 timestamp = obj[2]
@@ -1173,6 +1178,9 @@ class NNTSCExporter:
 
         self.sublock.acquire()
 
+        if end == 0:
+            end = None
+
         for s in streams:
             if self.subscribers.has_key(s):
                 self.subscribers[s].append((sock, columns, start, end, colid))
@@ -1181,9 +1189,26 @@ class NNTSCExporter:
             
             if colid in self.collections and sock in self.collections[colid]:
                 self.collections[colid][sock] += 1
-            #log("Registered stream %d for socket %d" % (s, sock.fileno()))
+            log("Registered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
         self.sublock.release()     
 
+    def deregister_streams(self, colid, streams, sock):
+        self.sublock.acquire()
+
+        for s in streams:
+            if not self.subscribers.has_key(s):
+                continue
+        
+            # Maybe consider changing this from a list to a dict?
+            self.subscribers[s][:] = \
+                [x for x in self.subscribers[s] if (x[0] != sock \
+                or x[4] != colid)]
+
+            if colid in self.collections and sock in self.collections[colid]:
+                self.collections[colid][sock] -= 1
+
+            log("Deregistered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
+        self.sublock.release()
 
     def register_collection(self, sock, col):
         self.sublock.acquire()
