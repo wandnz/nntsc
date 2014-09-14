@@ -273,6 +273,7 @@ class DBWorker(threading.Thread):
             except DBQueryException as e:
                 return DBWORKER_ERROR
 
+
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY
     
@@ -1189,7 +1190,7 @@ class NNTSCExporter:
             
             if colid in self.collections and sock in self.collections[colid]:
                 self.collections[colid][sock] += 1
-            log("Registered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
+            #log("Registered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
         self.sublock.release()     
 
     def deregister_streams(self, colid, streams, sock):
@@ -1207,7 +1208,7 @@ class NNTSCExporter:
             if colid in self.collections and sock in self.collections[colid]:
                 self.collections[colid][sock] -= 1
 
-            log("Deregistered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
+            #log("Deregistered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
         self.sublock.release()
 
     def register_collection(self, sock, col):
