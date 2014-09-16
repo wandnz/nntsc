@@ -31,6 +31,7 @@ from ampsave.importer import import_data_functions
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
 from libnntsc.parsers.amp_dns import AmpDnsParser
+from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.dberrorcodes import *
@@ -75,6 +76,7 @@ class AmpModule:
             "traceroute":AmpTracerouteParser(self.db),
             "throughput":AmpThroughputParser(self.db),
             "dns":AmpDnsParser(self.db),
+            "http":AmpHttpParser(self.db),
             "tcpping":AmpTcppingParser(self.db)
         }
 
@@ -259,6 +261,9 @@ def tables(db):
     parser.register()
     
     parser = AmpTcppingParser(db)
+    parser.register()
+    
+    parser = AmpHttpParser(db)
     parser.register()
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

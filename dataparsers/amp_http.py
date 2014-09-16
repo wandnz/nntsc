@@ -19,401 +19,131 @@
 #
 # $Id$
 
-
-from libnntsc.database import DB_DATA_ERROR, DB_GENERIC_ERROR, DB_NO_ERROR
+from libnntsc.parsers.common import NNTSCParser
+from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
-from itertools import chain
-import sys, string
 
-STREAM_TABLE_NAME = "streams_amp_http"
-DATA_VIEW_NAME = "data_amp_http"
-TEST_TABLE_NAME = "internal_amp_http_test"
-SERVER_TABLE_NAME = "internal_amp_http_servers"
-OBJ_TABLE_NAME = "internal_amp_http_objects"
+class AmpHttpParser(NNTSCParser):
+    def __init__(self, db):
+        super(AmpHttpParser, self).__init__(db)
 
-amp_http_streams = {}
-test_partitions = None
-server_partitions = None
-obj_partitions = None
+        self.streamtable = "streams_amp_http"
+        self.datatable = "data_amp_http"
+        self.colname = "amp_http"
+        self.source = "amp"
+        self.module = "http"
 
-def stream_table(db):
+        self.streamcolumns = [
+            {"name":"source", "type":"varchar", "null":False},
+            {"name":"destination", "type":"varchar", "null":False},
+            {"name":"max_connections", "type":"integer", "null":False},
+            {"name":"max_connections_per_server", "type":"smallint", "null":False},
+            {"name":"max_persistent_connections_per_server", "type":"smallint", "null":False},
+            {"name":"pipelining_max_requests", "type":"smallint", "null":False},
+            {"name":"persist", "type":"boolean", "null":False},
+            {"name":"pipelining", "type":"boolean", "null":False},
+            {"name":"caching", "type":"boolean", "null":False},
+        ]
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+        self.uniquecolumns = ['source', 'destination', 'max_connections', 
+                'max_connections_per_server', 
+                "max_persistent_connections_per_server",
+                "pipelining_max_requests",
+                "persist", "pipelining", "caching"]
+        self.streamindexes = [
+            {"name": "", "columns": ['source']},
+            {"name": "", "columns": ['destination']}
+        ]
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        Column('source', String, nullable=False),
-        Column('url', String, nullable=False),
-        Column('persist', Boolean, nullable=False),
-        Column('max_connections', Integer, nullable=False),
-        Column('max_connections_per_server', Integer, nullable=False),
-        Column('max_persistent_connections_per_server', Integer, nullable=False),
-        Column('pipelining', Boolean, nullable=False),
-        Column('pipelining_max_requests', Integer, nullable=False),
-        Column('caching', Boolean, nullable=False),
-        UniqueConstraint('source', 'url', 'persist', 'max_connections',
-                'max_connections_per_server',
-                'max_persistent_connections_per_server', 'pipelining',
-                'pipelining_max_requests', 'caching'),
-        extend_existing=True,
-    )
+        self.datacolumns = [
+            {"name":"server_count", "type":"integer", "null":True},
+            {"name":"object_count", "type":"integer", "null":True},
+            {"name":"duration", "type":"integer", "null":True},
+            {"name":"bytes", "type":"bigint", "null":True},
+        ]
 
-    Index('index_amp_http_source', st.c.source)
-    Index('index_amp_http_url', st.c.url)
-
-    return STREAM_TABLE_NAME
-
-def data_tables(db):
-
-    if DATA_VIEW_NAME in db.metadata.tables:
-        return DATA_VIEW_NAME
-
-    testtable = Table(TEST_TABLE_NAME, db.metadata,
-        Column('test_id', Integer, primary_key=True),
-        Column('stream_id', Integer, nullable=False),
-        Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('test_servercount', Integer, nullable=False),
-        Column('test_objectcount', Integer, nullable=False),
-        Column('test_duration', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('test_bytecount', Integer, nullable=False),
-        UniqueConstraint('stream_id', 'test_starttime'),
-        extend_existing=True,
-    )
-
-    #Index('index_amp_http_teststart', testtable.c.test_starttime)
-    #Index('index_amp_http_teststream', testtable.c.stream_id)
+        self.dataindexes = [
+        ] 
 
 
-    servtable = Table(SERVER_TABLE_NAME, db.metadata,
-        Column('server_id', Integer, primary_key=True),
-        Column('test_id', Integer,
-            ForeignKey(TEST_TABLE_NAME + '.test_id', ondelete="CASCADE"),
-            nullable=False),
-        Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('server_index', Integer, nullable=False),
-        Column('server_name', String, nullable=False),
-        Column('server_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('server_endtime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('server_bytecount', Integer, nullable=False),
-        Column('server_objectcount', Integer, nullable=False),
-        UniqueConstraint('test_id', 'server_index', 'server_name'),
-        extend_existing=True,
-    )
-
-    #Index('index_amp_http_servertest', servtable.c.test_id)
-
-    objtable = Table(OBJ_TABLE_NAME, db.metadata,
-        Column('object_id', Integer, primary_key=True),
-        Column('test_id', Integer,
-            ForeignKey(TEST_TABLE_NAME + '.test_id', ondelete="CASCADE"),
-            nullable=False),
-        Column('server_id', Integer,
-            ForeignKey(SERVER_TABLE_NAME + '.server_id',
-                ondelete="CASCADE"), nullable=False),
-        Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('path', String, nullable=False),
-        Column('code', Integer, nullable=False),
-        Column('obj_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('obj_endtime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('obj_lookuptime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('obj_connecttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('obj_starttransfertime', postgresql.DOUBLE_PRECISION,
-                nullable=False),
-        Column('obj_totaltime', postgresql.DOUBLE_PRECISION, nullable=False),
-        Column('obj_size', Integer, nullable=False),
-        Column('numconnects', Integer, nullable=False),
-        Column('pipeline', Integer, nullable=False),
-        Column('public', Boolean, nullable=False),
-        Column('private', Boolean, nullable=False),
-        Column('nocache', Boolean, nullable=False),
-        Column('nostore', Boolean, nullable=False),
-        Column('notransform', Boolean, nullable=False),
-        Column('mustrevalidate', Boolean, nullable=False),
-        Column('proxyrevalidate', Boolean, nullable=False),
-        Column('maxage', Integer, nullable=False),
-        Column('s_maxage', Integer, nullable=False),
-        Column('x_cache', Integer, nullable=False),
-        Column('x_cache_lookup', Integer, nullable=False),
-        extend_existing=True,
-    )
-
-    #Index('index_amp_http_objecttest', objtable.c.test_id)
-    #Index('index_amp_http_objectserver', objtable.c.server_id)
-
-    fullobjs = servtable.join(objtable).select().\
-            where(and_(servtable.c.test_id == objtable.c.test_id, \
-            servtable.c.test_starttime == objtable.c.test_starttime)) \
-            .reduce_columns()
-    fo = fullobjs.alias()
-
-    viewquery = testtable.join(fo).select().where( \
-            fo.c.test_starttime == testtable.c.test_starttime).reduce_columns()
-    dataview = db.create_view(DATA_VIEW_NAME, viewquery)
-
-    return DATA_VIEW_NAME
-
-def register(db):
-    st_name = stream_table(db)
-    dt_name = data_tables(db)
-
-    db.register_collection("amp", "http", st_name, dt_name)
-
-
-def insert_stream(db, exp, source, data, timestamp):
-    name = "http %s:%s" % (source, data['url'])
-
-    props = {"source":source, "url":data['url'],
-            "persist":data['keep_alive'],
-            "max_connections":data['max_connections'],
-            "max_connections_per_server":data['max_connections_per_server'],
-            "max_persistent_connections_per_server":data['max_persistent_connections_per_server'],
-            "pipelining":data['pipelining'],
-            "pipelining_max_requests":data['pipelining_maxrequests'],
-            "caching":data['caching']}
-
-    return db.insert_stream(exp, STREAM_TABLE_NAME, "amp", "http", name,
-            timestamp, props)
-
-
-def insert_test(db, stream, timestamp, data):
-    global test_partitions
-
-    dt = db.metadata.tables[TEST_TABLE_NAME]
-
-    if test_partitions == None:
-        test_partitions = PartitionedTable(db, TEST_TABLE_NAME,
-                60 * 60 * 24 * 7, ["test_starttime", "stream_id", "test_id"],
-                "test_starttime")
-
-    test_partitions.update(timestamp)
-
-    test_info = {"stream_id":stream, "test_starttime":timestamp, \
-            "test_servercount":data['server_count'], \
-            "test_objectcount":data['object_count'], \
-            "test_duration":data['duration'], \
-            "test_bytecount":data['bytes']}
-
-    try:
-        query = dt.insert().values(**test_info)
-        db.conn.execute(query)
-
-        # Find the id of what we just inserted. I know this is generally not
-        # the right way to do this, but we can't just RETURN it due to table
-        # partitioning (see amp_traceroute for more detailed explanation).
-
-        query = text("""SELECT max(test_id) FROM %s WHERE stream_id=:id AND
-                test_starttime=:start AND test_servercount=:servers AND
-                test_objectcount=:objects AND test_duration=:duration AND
-                test_bytecount=:bytes;""" % (TEST_TABLE_NAME))
-
-        result = db.conn.execute(query, id=stream, start=timestamp,
-                servers=data['server_count'], objects=data['object_count'],
-                duration=data['duration'], bytes=data['bytes'])
-        assert(result.rowcount == 1)
-        row = result.fetchone()
-        test_id = row[0]
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR, None
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR, None
+    def _stream_key(self, stream_data):
+        src = str(stream_data["source"])
         
-    db.commit_transaction()
+        if 'url' in stream_data:
+            dest = str(stream_data["url"])
+        else:
+            dest = str(stream_data['destination'])
 
-    return test_id, test_info
+        max_c = str(stream_data['max_connections'])
+        max_cps = str(stream_data['max_connections_per_server'])
+        max_pcps = str(stream_data['max_persistent_connections_per_server'])
 
-def insert_server(db, stream, timestamp, testid, server, index):
-    global server_partitions
+        if 'pipelining_maxrequests' in stream_data:
+            pipe_max = str(stream_data['pipelining_maxrequests'])
+        else:
+            pipe_max = str(stream_data['pipelining_max_requests'])
 
-    dt = db.metadata.tables[SERVER_TABLE_NAME]
-    if server_partitions == None:
-        server_partitions = PartitionedTable(db, SERVER_TABLE_NAME,
-                60 * 60 * 24 * 7, ["test_starttime", "test_id", "server_id"],
-                "test_starttime")
-    server_partitions.update(timestamp)
+        pipe = stream_data['pipelining']
 
-    server_info = {"test_id":testid, "server_index":index, \
-            "test_starttime": timestamp, \
-            "server_name": server["hostname"], \
-            "server_starttime": server["start"], \
-            "server_endtime": server["end"], \
-            "server_bytecount": server["bytes"], \
-            "server_objectcount": server["object_count"]}
+        if 'keep_alive' in stream_data:
+            persist = stream_data['keep_alive']
+        else:
+            persist = stream_data['persist']
+        caching = stream_data['caching']
 
-    try:
-        db.conn.execute(dt.insert(), **server_info)
+        key = (src, dest, max_c, max_cps, max_pcps, pipe_max, persist, pipe, caching)
 
-        # Get the id of the server we just inserted. I know this is not
-        # the normal way to do this, but we can't just RETURN it due to table
-        # partitioning (see amp_traceroute for more detailed explanation).
+        return key
 
-        # This should be unique enough without having to check the other
-        # columns...
-        query = text("""SELECT max(server_id) FROM %s WHERE test_id=:testid AND
-                server_index=:index;""" % (SERVER_TABLE_NAME))
-        result = db.conn.execute(query, index=index, testid=testid)
-        assert(result.rowcount == 1)
-        row = result.fetchone()
-        server_id = row[0]
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR, None
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR, None
-    db.commit_transaction()
+    def create_existing_stream(self, stream_data):
+        """Extract the stream key from the stream data provided by NNTSC
+    when the AMP module is first instantiated"""
 
-    return server_id, server_info
+        key = self._stream_key(stream_data)
+        self.streams[key] = stream_data['stream_id']
 
+    def _mangle_result(self, data):
+        # Our columns are slightly different to the names that AMPsave uses,
+        # so we'll have to mangle them to match what we're expecting 
+        key = self._stream_key(data)
 
-def insert_object(db, stream, timestamp, testid, serverid, obj):
-    global obj_partitions
+        mangled = {}
+        mangled['source'] = key[0]
+        mangled['destination'] = key[1]
+        mangled['max_connections'] = key[2]
+        mangled['max_connections_per_server'] = key[3]
+        mangled['max_persistent_connections_per_server'] = key[4]
+        mangled['pipelining_max_requests'] = key[5]
+        mangled['persist'] = key[6]
+        mangled['pipelining'] = key[7]
+        mangled['caching'] = key[8]
 
-    dt = db.metadata.tables[OBJ_TABLE_NAME]
-    if obj_partitions == None:
-        obj_partitions = PartitionedTable(db, OBJ_TABLE_NAME,
-                60 * 60 * 24 * 7, ["test_starttime", "test_id", "server_id", \
-                "object_id"],
-                "test_starttime")
-    obj_partitions.update(timestamp)
+        mangled['server_count'] = data['server_count']
+        mangled['object_count'] = data['object_count']
 
-    obj_info = {"test_id": testid, "server_id":serverid, \
-            "test_starttime":timestamp, "path":obj["path"], \
-            "code": obj["code"], "obj_starttime":obj["start"], \
-            "obj_endtime":obj["end"], "obj_totaltime":obj["total_time"], \
-            "obj_lookuptime":obj["lookup_time"], \
-            "obj_connecttime":obj["connect_time"], \
-            "obj_starttransfertime":obj["start_transfer_time"], \
-            "pipeline":obj["pipeline"], "obj_size":obj["bytes"], \
-            "numconnects":obj["connect_count"], \
-            "public":obj["headers"]["flags"]["pub"], \
-            "private":obj["headers"]["flags"]["priv"], \
-            "nocache":obj["headers"]["flags"]["no_cache"], \
-            "nostore":obj["headers"]["flags"]["no_store"], \
-            "notransform":obj["headers"]["flags"]["no_transform"], \
-            "mustrevalidate":obj["headers"]["flags"]["must_revalidate"], \
-            "proxyrevalidate":obj["headers"]["flags"]["proxy_revalidate"], \
-            "maxage":obj["headers"]["max_age"], \
-            "s_maxage":obj["headers"]["s_maxage"], \
-            "x_cache":obj["headers"]["x_cache"], \
-            "x_cache_lookup":obj["headers"]["x_cache_lookup"],
-    }
+        # AMPSave reports duration in ms, we're going to store it as ms
+        mangled['duration'] = int(data['duration']) 
+        mangled['bytes'] = data['bytes']
 
-    try:
-        db.conn.execute(dt.insert(), **obj_info)
+        return mangled, key
 
-        # Get the id of the object we just inserted. I know this is not
-        # the normal way to do this, but we can't just RETURN it due to table
-        # partitioning (see amp_traceroute for more detailed explanation).
+    def process_data(self, timestamp, data, source):
+        data['source'] = source
 
-        # This should be unique enough without having to check the other
-        # columns...
-        query = text("""SELECT max(object_id) FROM %s WHERE test_id=:testid AND
-                server_id=:serverid AND path=:path AND obj_starttime=:start AND
-                obj_endtime=:end AND code=:code;""" % \
-                (OBJ_TABLE_NAME))
-        result = db.conn.execute(query, testid=testid, serverid=serverid,
-                start=obj['start'], end=obj['end'], code=obj['code'],
-                path=obj['path'])
-        assert(result.rowcount == 1)
-        row = result.fetchone()
-        object_id = row[0]
-    except (DataError, IntegrityError, ProgrammingError) as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_DATA_ERROR, None
-    except SQLAlchemyError as e:
-        db.rollback_transaction()
-        logger.log(e)
-        return DB_GENERIC_ERROR, None
-    db.commit_transaction()
+        mangled, key = self._mangle_result(data)
 
-    return object_id, obj_info
+        if key in self.streams:
+            stream_id = self.streams[key]
+        else:
+            stream_id = self.create_new_stream(mangled, timestamp)
+            if stream_id < 0:
+                logger.log("AMPModule: Cannot create stream for: ")
+                logger.log("AMPModule: dns %s %s\n", source, \
+                        mangled['destination'])
+            self.streams[key] = stream_id
 
-def export_http_row(exp, stream, ts, objid, testinfo, serverinfo, objinfo):
-
-    # Construct a dictionary-equivalent of a row from the data view using
-    # the rows we added to the internal tables, so we can export it to
-    # anyone wanting live data.
-
-    # Merge the three info dicts, removing duplicate keys
-    dicts = [testinfo, serverinfo, objinfo]
-    merged = dict(chain(*[d.iteritems() for d in dicts]))
-
-    # Add in elements that aren't in one of the three info dicts
-    merged['object_id'] = objid
-
-    if exp != None:
-        exp.publishLiveData("amp_http", stream, ts, merged)
-    return 0
-
-
-def create_existing_stream(data):
-    key = (str(data['source']), str(data['url']), data['persist'], \
-            str(data['max_connections']), \
-            str(data['max_connections_per_server']), \
-            str(data['max_persistent_connections_per_server']), \
-            data['pipelining'], \
-            str(data['pipelining_max_requests']), \
-            data['caching'])
-
-    amp_http_streams[key] = data['stream_id']
-
-def process_data(db, exp, timestamp, data, source):
-
-    streamkey = (source, data['url'], data['keep_alive'], \
-            str(data['max_connections']), \
-            str(data['max_connections_per_server']), \
-            str(data['max_persistent_connections_per_server']), \
-            data['pipelining'], str(data['pipelining_maxrequests']), \
-            data['caching'])
-
-    if streamkey in amp_http_streams:
-        stream_id = amp_http_streams[streamkey]
-    else:
-        stream_id = insert_stream(db, exp, source, data, timestamp)
-        if stream_id < 0:
-            logger.log("AMPModule: Cannot create stream for:")
-            logger.log("AMPModule: %s %s %s \n" % ("http", source,
-                    data['url']))
-            return stream_id
-        amp_http_streams[streamkey] = stream_id
-
-    test_id, test_info = insert_test(db, stream_id, timestamp, data)
-    if test_id < 0:
-        logger.log("AMPModule: Cannot create HTTP test row for stream %d\n" \
-                % (stream_id))
-        return test_id
-
-    servindex = 0
-    for serv in data['servers']:
-        server_id, server_info = insert_server(db, stream_id, timestamp, \
-                test_id, serv, servindex)
-
-        if server_id < 0:
-            logger.log("AMPModule: Cannot create HTTP server for stream %d\n" \
-                    % (stream_id))
-            return server_id
-
-        for obj in serv['objects']:
-            obj_id, obj_info = insert_object(db, stream_id, timestamp, \
-                    test_id, server_id, obj)
-            if obj_id < 0:
-                logger.log("AMPModule: Cannot create HTTP object for %d\n" \
-                        % (stream_id))
-                return obj_id
-            export_http_row(exp, stream_id, timestamp, obj_id, test_info, \
-                    server_info, obj_info)
-
-        servindex += 1
-    return db.update_timestamp([stream_id], timestamp)
+        self.insert_data(stream_id, timestamp, mangled)
+        self.db.update_timestamp(self.datatable, [stream_id], timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
