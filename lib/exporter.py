@@ -1142,6 +1142,7 @@ class NNTSCExporter:
         self.subscribers = {}
         self.sources = []
         self.livequeue = None
+        self.queueid = None
 
         self.clients = {}
         self.clientlock = threading.Lock()
@@ -1492,14 +1493,12 @@ class NNTSCExporter:
         if self.listen_sock == -1:
             return -1
 
-        if queueid != None:
-            self.livequeue = initExportConsumer(nntsc_conf, queueid, 
+        self.queueid = queueid
+        if queueid is not None:
+            self.livequeue = initExportConsumer(nntsc_conf, queueid, \
                     'nntsclive')
-       
-            if self.livequeue == None:
-                log("Failed to initialise consumer for exporter")
-                return -1
-
+        else:
+            self.livequeue = None
         return 0 
 
     def run(self):
@@ -1513,20 +1512,15 @@ class NNTSCExporter:
         listenthread.start()
        
         if self.livequeue is not None:
+            try:
+                self.livequeue.configure(self.sources, self.receive_source, 1) 
+                self.livequeue.run()
+            except KeyboardInterrupt:
+                self.livequeue.halt_consumer()
+            except:
+                log("Unknown exception while reading from live queue")
+                raise
          
-            # Prepare our export queue consumer
-            while 1:
-                for s in self.sources:
-                    self.livequeue.bind_queue(s)
-                self.livequeue.configure_consumer(self.receive_source)
-
-                # Start reading from the queue
-                retval = self.livequeue.run_consumer()
-                if retval == PIKA_CONSUMER_HALT:
-                    break
-
-                # Reconnect if we are going to be retrying
-                self.livequeue.connect()
         else:
             while 1:
                 try:

@@ -43,7 +43,7 @@ import libnntscclient.logger as logger
 DEFAULT_COMMIT_FREQ=50
 
 class AmpModule:
-    def __init__(self, tests, nntsc_config, expqueue, exchange):
+    def __init__(self, tests, nntsc_config, routekey, exchange, queueid):
 
         self.processed = 0
 
@@ -89,7 +89,8 @@ class AmpModule:
                 key = self.parsers[testtype].create_existing_stream(i)
 
         self.initSource(nntsc_config)
-        self.exporter = initExportPublisher(nntsc_config, expqueue, exchange)
+        self.exporter, self.pubthread = \
+                initExportPublisher(nntsc_config, routekey, exchange, queueid)
 
         for k, parser in self.parsers.iteritems():
             parser.add_exporter(self.exporter)
@@ -197,26 +198,26 @@ class AmpModule:
 
                 elif e.code == DB_INTERRUPTED:
                     logger.log("Interrupt while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
             
                 elif e.code == DB_GENERIC_ERROR:
                     logger.log("Database error while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
                 elif e.code == DB_QUERY_TIMEOUT:
                     logger.log("Database timeout while processing AMP data")
-                    continue
+                    channel.close()
                 elif e.code == DB_CODING_ERROR:
                     logger.log("Bad database code encountered while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
                 elif e.code == DB_DUPLICATE_KEY:
                     logger.log("Duplicate key error while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
         
                 else:
                     logger.log("Unknown error code returned by database: %d" \
                             % (code))
                     logger.log("Shutting down AMP module")
-                    raise PikaNNTSCException(False)
+                    channel.close()
             break
 
     def run(self):
@@ -224,27 +225,22 @@ class AmpModule:
 
         logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
 
-        while 1:
-            self.source.connect()
-            retval = self.source.configure_consumer(self.process_data, 
-                    self.commitfreq)
-            if retval == PIKA_CONSUMER_HALT:
-                break
-            if retval == PIKA_CONSUMER_RETRY:
-                logger.log("Failed to configure consumer, retrying in 5s")
-                time.sleep(5)
-                continue
 
-            
-            retval = self.source.run_consumer()
-            if retval == PIKA_CONSUMER_HALT:
-                break
+        try:
+            self.source.configure([], self.process_data, self.commitfreq)
+            self.source.run()
+        except KeyboardInterrupt:
+            self.source.halt_consumer()
+        except:
+            logger.log("AMP: Unknown exception during consumer loop")
 
         logger.log("AMP: Closed connection to RabbitMQ")
 
-def run_module(tests, config, key, exchange):
-    amp = AmpModule(tests, config, key, exchange)
+def run_module(tests, config, key, exchange, queueid):
+    amp = AmpModule(tests, config, key, exchange, queueid)
     amp.run()
+
+    amp.pubthread.join()
 
 def tables(db):
 

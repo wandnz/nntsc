@@ -46,7 +46,8 @@ class DataCollector():
         try:
             routingkey = self.queueid + "-" + name
             p = Process(name=name, target=mod.run_module, args=(streams, conf,
-                    routingkey, 'nntsclive'))
+                    routingkey, 'nntsclive', self.queueid
+                    ))
             p.daemon = True
 
             self.exporter.register_source(routingkey, self.queueid)
