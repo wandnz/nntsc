@@ -147,7 +147,7 @@ class PikaPublisher(PikaBasicAsync):
                 return
             
             try:
-                pubstring = self._outstanding.get(False)
+                pubstring = self._outstanding.get(True, 1)
             except StdQueue.Empty:
                 continue
             
