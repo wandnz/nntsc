@@ -233,6 +233,7 @@ class AmpModule:
             self.source.halt_consumer()
         except:
             logger.log("AMP: Unknown exception during consumer loop")
+            raise
 
         logger.log("AMP: Closed connection to RabbitMQ")
 
