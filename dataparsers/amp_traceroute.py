@@ -326,6 +326,8 @@ class AmpTracerouteParser(AmpIcmpParser):
     def insert_ippath(self, stream, ts, result):
         """ Insert data for a single traceroute path into the database """
 
+        if 'path' not in result or result['path'] is None:
+            return
         keystr = "%s" % (stream)
         for p in result['path']:
             keystr += "_%s" % (p)
@@ -436,7 +438,7 @@ class AmpTracerouteParser(AmpIcmpParser):
                 common = pdata
                 commonpathid = pathid
                 maxfreq = pdata['count']
-        
+       
         streamdata['aspath_id'] = commonpathid
         streamdata['aspath'] = streamdata['paths'][commonpathid]['aspath']
         streamdata['aspathlen'] = streamdata['paths'][commonpathid]['aspathlen']
@@ -484,6 +486,8 @@ class AmpTracerouteParser(AmpIcmpParser):
                 self._update_as_stream(asobserved, streamid, d) 
             
         for sid, streamdata in asobserved.iteritems():
+            if len(streamdata['paths']) == 0:
+                continue
             self._aggregate_streamdata(streamdata)
             self.insert_aspath(sid, timestamp, streamdata)
 
