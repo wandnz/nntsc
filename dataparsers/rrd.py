@@ -111,6 +111,9 @@ class RRDModule:
 
         startts, endts = self.rejig_ts(endts, r)
 
+        if startts == endts:
+            return
+
         fetchres = rrdtool.fetch(fname, "AVERAGE", "-s",
                 str(startts), "-e", str(endts))
 
