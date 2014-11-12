@@ -365,7 +365,7 @@ class DBWorker(threading.Thread):
                     return DBWORKER_RETRY
                 else:
                     return DBWORKER_ERROR
-                
+            
             # If we have reached the end of the history for the current label,
             # flush any history we've got remaining for that stream
             if label != currlabel:

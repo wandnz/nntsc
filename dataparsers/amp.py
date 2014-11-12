@@ -186,7 +186,7 @@ class AmpModule:
                     # Disconnect while inserting data, need to reprocess the
                     # entire set of messages
                     logger.log("Database disconnect while processing AMP data")
-                    raise PikaNNTSCException(True)
+                    channel.close()
 
                 elif e.code == DB_DATA_ERROR:
                     # Data was bad so we couldn't insert into the database.

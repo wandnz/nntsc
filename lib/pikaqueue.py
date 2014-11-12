@@ -42,7 +42,8 @@ class PikaBasicAsync(object):
                         port=int(port),
                         ssl=ssl,
                         credentials=creds,
-                        retry_delay=5), self._pikaConnectionOpen,
+                        retry_delay=5,
+                        connection_attempts=25), self._pikaConnectionOpen,
                         stop_ioloop_on_close=False)
         return connection
     
@@ -72,7 +73,7 @@ class PikaBasicAsync(object):
         self._connection.add_on_close_callback(self._pikaConnectionClosed)
         self._connection.channel(on_open_callback=self._pikaChannelOpen)
 
-    def _pikaConnectionClosed(self):
+    def _pikaConnectionClosed(self, conn, reply_code, reply_text):
         logger.log("Pika connection was closed")
 
         self._channel = None
