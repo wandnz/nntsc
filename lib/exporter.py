@@ -154,7 +154,7 @@ class DBWorker(threading.Thread):
 
     def aggregate(self, aggmsg):
         tup = pickle.loads(aggmsg)
-        name, start, end, labels, aggcols, groupcols, binsize, aggfunc = tup
+        colid, start, end, labels, aggcols, groupcols, binsize, aggfunc = tup
         now = int(time.time())
 
         if end == 0:
@@ -163,7 +163,7 @@ class DBWorker(threading.Thread):
         if start == None or start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                err = self._enqueue_history(name, lab, [], False, 0, now)
+                err = self._enqueue_history(colid, lab, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
                     return err 
             return DBWORKER_SUCCESS
@@ -175,16 +175,24 @@ class DBWorker(threading.Thread):
 
         aggs = self._merge_aggregators(aggcols, aggfunc)
 
-        try:
-            labels = self.db.filter_active_streams(name, labels, start, 
-                    stoppoint)
-        except DBQueryException as e:
-            logger.log("Failed to filter active streams for collection %s" \
-                    % (name))
-            return DBWORKER_ERROR
+        # Don't filter streams if the request period is less than the cache
+        # update frequency!
+        if stoppoint - start > 300:
+            try:
+                labels = self.db.filter_active_streams(colid, labels, start, 
+                        stoppoint)
+            except DBQueryException as e:
+                logger.log("Failed to filter active streams for collection %s" \
+                        % (colid))
+                return DBWORKER_ERROR
 
         while start < stoppoint:
-            queryend = start + MAX_HISTORY_QUERY
+            # Temporary fix to allow heavy aggregation over long time
+            # periods. TODO get rid of need for MAX_HISTORY_QUERY
+            if binsize > MAX_HISTORY_QUERY:
+                queryend = stoppoint
+            else:
+                queryend = start + MAX_HISTORY_QUERY
 
             if queryend >= stoppoint:
                 queryend = stoppoint
@@ -197,10 +205,10 @@ class DBWorker(threading.Thread):
                 if queryend % binsize < binsize - 1:
                     queryend = (int(queryend / binsize) * binsize) - 1
 
-            generator = self.db.select_aggregated_data(name, labels, aggs,
+            generator = self.db.select_aggregated_data(colid, labels, aggs,
                     start, queryend, groupcols, binsize)
 
-            error = self._query_history(generator, name, labels, more, start,
+            error = self._query_history(generator, colid, labels, more, start,
                     queryend)
 
             if error == DBWORKER_RETRY:
@@ -225,7 +233,8 @@ class DBWorker(threading.Thread):
         return DBWORKER_SUCCESS
 
     def subscribe(self, submsg):
-        name, start, end, cols, labels, aggs = pickle.loads(submsg)
+        colid, start, end, columns, labels, aggs = pickle.loads(submsg)
+        
         now = int(time.time())
 
         origstart = start
@@ -237,11 +246,7 @@ class DBWorker(threading.Thread):
         if start >= now:
             # No historical data, send empty history for all streams
             for lab, streams in labels.items():
-                err = self._enqueue_history(name, lab, [], False, 0, start)
-                if err != DBWORKER_SUCCESS:
-                    return err
-
-                err = self._subscribe_streams(streams, start, end, cols, name, lab)
+                err = self._enqueue_history(colid, lab, [], False, 0, start)
                 if err != DBWORKER_SUCCESS:
                     return err
 
@@ -253,24 +258,21 @@ class DBWorker(threading.Thread):
             stoppoint = end
 
         if aggs != []:
-            aggcols = self._merge_aggregators(cols, aggs)
+            aggcols = self._merge_aggregators(columns, aggs)
             
-
-        # Register our interest in these streams before we start querying, so
-        # the client can stockpile any live data that arrives while we're
-        # busy querying the db.
-        for lab, streams in labels.items():
-            err = self._subscribe_streams(streams, start, end, cols, name, lab)
-            if err != DBWORKER_SUCCESS:
-                return err
 
         # Only query for historical data for streams that were active
         # during that time period
-        try:
-            labels = self.db.filter_active_streams(name, labels, start, 
-                    stoppoint)
-        except DBQueryException as e:
-            return DBWORKER_ERROR
+
+        # Don't filter streams if the request period is less than the cache
+        # update frequency!
+        if stoppoint - start > 300:
+            try:
+                labels = self.db.filter_active_streams(colid, labels, start, 
+                        stoppoint)
+            except DBQueryException as e:
+                return DBWORKER_ERROR
+
 
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY
@@ -302,13 +304,13 @@ class DBWorker(threading.Thread):
             # Only aggregate the streams for each label if explicitly requested,
             # otherwise fetch full historical data
             if aggs != []:
-                generator = self.db.select_aggregated_data(name, labels,
+                generator = self.db.select_aggregated_data(colid, labels,
                         aggcols, start, queryend, [], 1)
             else:
-                generator = self.db.select_data(name, labels, cols, start,
+                generator = self.db.select_data(colid, labels, columns, start,
                         queryend)
 
-            error = self._query_history(generator, name, labels, more, start,
+            error = self._query_history(generator, colid, labels, more, start,
                     queryend)
 
             if error == DBWORKER_RETRY:
@@ -326,11 +328,11 @@ class DBWorker(threading.Thread):
         #log("Subscribe job completed successfully (%s)\n" % (self.threadid))
         return DBWORKER_SUCCESS
 
-    def _cancel_history(self, name, labels, start, end, more):
+    def _cancel_history(self, colid, labels, start, end, more):
         # If the query was cancelled, let the client know that
         # the absence of data for this time range is due to a 
         # database query timeout rather than a lack of data
-        err = self._enqueue_cancel(NNTSC_HISTORY, (name, labels, start, end, more))
+        err = self._enqueue_cancel(NNTSC_HISTORY, (colid, labels, start, end, more))
         if err != DBWORKER_SUCCESS:
             return err
 
@@ -344,7 +346,7 @@ class DBWorker(threading.Thread):
 
         return DBWORKER_SUCCESS
 
-    def _query_history(self, rowgen, name, labels, more, start, end):
+    def _query_history(self, rowgen, colid, labels, more, start, end):
 
         currlabel = -1
         historysize = 0
@@ -353,18 +355,17 @@ class DBWorker(threading.Thread):
 
         # Get any historical data that we've been asked for
         for rows, label, tscol, binsize, exception in rowgen:
-
             if exception is not None:
                 log(exception)
                 if exception.code == DB_QUERY_TIMEOUT:
-                    return self._cancel_history(name, labels, start, end, more)
+                    return self._cancel_history(colid, labels, start, end, more)
                 elif exception.code == DB_OPERATIONAL_ERROR:
                     if self._reconnect_database() == -1:
                         return DBWORKER_ERROR 
                     return DBWORKER_RETRY
                 else:
                     return DBWORKER_ERROR
-                
+            
             # If we have reached the end of the history for the current label,
             # flush any history we've got remaining for that stream
             if label != currlabel:
@@ -378,7 +379,7 @@ class DBWorker(threading.Thread):
                     else:
                         lastts = start
                     
-                    err = self._enqueue_history(name, currlabel, history, \
+                    err = self._enqueue_history(colid, currlabel, history, \
                             more, freq, lastts)
                     if err != DBWORKER_SUCCESS:
                         return err
@@ -404,7 +405,7 @@ class DBWorker(threading.Thread):
                 if freq == 0:
                     freq = self._calc_frequency(freqstats, binsize)
                 lastts = history[-1]['timestamp']
-                err = self._enqueue_history(name, currlabel, history, True, 
+                err = self._enqueue_history(colid, currlabel, history, True, 
                         freq, lastts)
                 if err != DBWORKER_SUCCESS:
                     return err
@@ -430,7 +431,7 @@ class DBWorker(threading.Thread):
             history = []
 
         if currlabel != -1:
-            err = self._enqueue_history(name, currlabel, history, more, 
+            err = self._enqueue_history(colid, currlabel, history, more, 
                     freq, lastts)
             if err != DBWORKER_SUCCESS:
                 return err
@@ -444,7 +445,7 @@ class DBWorker(threading.Thread):
         missing = allstreams - observed
         for m in missing:
             assert (m in labels)
-            err = self._enqueue_history(name, m, [], more, 0, 0)
+            err = self._enqueue_history(colid, m, [], more, 0, 0)
             if err != DBWORKER_SUCCESS:
                 return err
 
@@ -477,14 +478,6 @@ class DBWorker(threading.Thread):
 
         return 0
 
-    def _subscribe_streams(self, streams, start, subend, cols, name, label):
-        try:
-            self.queue.put((NNTSC_SUBSCRIBE, (streams, start, subend, cols, name, label)), False)
-        except StdQueue.Full:
-            log("DBWorker tried to push subscribe but result queue was full!")
-            return DBWORKER_FULLQUEUE
-        return DBWORKER_SUCCESS
-
     def _enqueue_cancel(self, reqtype, data):
         contents = pickle.dumps((reqtype, data))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_QUERY_CANCELLED, len(contents))
@@ -496,10 +489,9 @@ class DBWorker(threading.Thread):
             return DBWORKER_FULLQUEUE
         return DBWORKER_SUCCESS
 
-    def _enqueue_history(self, name, label, history, more, freq, lastts):
+    def _enqueue_history(self, colid, label, history, more, freq, lastts):
 
-        #print name, label, lastts, len(history), freq, more 
-        contents = pickle.dumps((name, label, history, more, freq))
+        contents = pickle.dumps((colid, label, history, more, freq))
         contents = contents.encode("zlib")
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
@@ -534,7 +526,7 @@ class DBWorker(threading.Thread):
         # Requesting the collection list
          
         try:
-            cols = self.db.list_collections()
+            collections = self.db.list_collections()
         except DBQueryException as e:
             if e.code == DB_QUERY_TIMEOUT:
                 log("Query timed out while fetching collections")
@@ -547,7 +539,7 @@ class DBWorker(threading.Thread):
                 return DBWORKER_ERROR
 
         shrink = []
-        for c in cols:
+        for c in collections:
             shrink.append({"id":c['id'], "module":c['module'], "modsubtype":c['modsubtype']})
 
         col_pickle = pickle.dumps(shrink)
@@ -820,20 +812,36 @@ class NNTSCClient(threading.Thread):
             self.workers.append(worker)
 
     def subscribe_stream(self, submsg):
-        streams, start, end, cols, name, label = submsg
+        colid, start, end, columns, labels, aggs = pickle.loads(submsg)
+       
+        for label, streams in labels.iteritems(): 
 
-        if label not in self.waitlabels:
-            self.waitlabels[label] = streams
-        else:
-            return
+            if label not in self.waitlabels:
+                self.waitlabels[label] = streams
+            else:
+                continue
         
+            for s in streams:
+                self.waitstreams[s] = label
+
+            assert(label not in self.savedlive)
+            self.savedlive[label] = []
+
+            self.parent.register_stream(streams, self.sock, columns, start, \
+                    end, colid, label)
+
+    def unsubscribe_streams(self, unsubmsg):
+        colid, streams = pickle.loads(unsubmsg)
+
+        # XXX what should we do about waitlabels? In theory, one could
+        # unsubscribe from some of the streams in the label without
+        # unsubscribing from all of them. On the other hand, most labels
+        # should only contain one stream from now on...
         for s in streams:
-            self.waitstreams[s] = label
+            if s in self.waitstreams:
+                del self.waitstreams[s]
 
-        assert(label not in self.savedlive)
-        self.savedlive[label] = []
-
-        self.parent.register_stream(streams, self.sock, cols, start, end, name, label)
+        self.parent.deregister_streams(colid, streams, self.sock)
 
     def finish_subscribe(self, label, lasthist):
         # History has all been sent for this label, so we can now release
@@ -910,12 +918,18 @@ class NNTSCClient(threading.Thread):
         if len(msg) < total_len:
             return msg, 1, error
 
-        # Put the job on our joblist for one of the worker threads to handle
-        try:
-            self.jobs.put((header[1], body), False)
-        except StdQueue.Full:
-            log("Too many jobs queued by a client, dropping client")
-            return msg, 0, 1
+        if (header[1] == NNTSC_UNSUBSCRIBE):
+            self.unsubscribe_streams(body)
+        else:
+            if (header[1] == NNTSC_SUBSCRIBE):
+                self.subscribe_stream(body)
+
+            # Put the job on our joblist for one of the worker threads to handle
+            try:
+                self.jobs.put((header[1], body), False)
+            except StdQueue.Full:
+                log("Too many jobs queued by a client, dropping client")
+                return msg, 0, 1
 
         return msg[total_len:], 0, error
 
@@ -1036,8 +1050,6 @@ class NNTSCClient(threading.Thread):
             elif response == NNTSC_REGISTER_COLLECTION:
                 self.parent.register_collection(self.sock, result)
                     
-            elif response == NNTSC_SUBSCRIBE:
-                self.subscribe_stream(result)
             elif response == NNTSC_HISTORY_DONE:
                 label = obj[1]
                 timestamp = obj[2]
@@ -1130,6 +1142,7 @@ class NNTSCExporter:
         self.subscribers = {}
         self.sources = []
         self.livequeue = None
+        self.queueid = None
 
         self.clients = {}
         self.clientlock = threading.Lock()
@@ -1163,21 +1176,41 @@ class NNTSCExporter:
 
         return results
 
-    def register_stream(self, streams, sock, cols, start, end, name, label):
+    def register_stream(self, streams, sock, columns, start, end, colid, label):
 
         self.sublock.acquire()
 
+        if end == 0:
+            end = None
+
         for s in streams:
             if self.subscribers.has_key(s):
-                self.subscribers[s].append((sock, cols, start, end, name))
+                self.subscribers[s].append((sock, columns, start, end, colid))
             else:
-                self.subscribers[s] = [(sock, cols, start, end, name)]
+                self.subscribers[s] = [(sock, columns, start, end, colid)]
             
-            if name in self.collections and sock in self.collections[name]:
-                self.collections[name][sock] += 1
-            #log("Registered stream %d for socket %d" % (s, sock.fileno()))
+            if colid in self.collections and sock in self.collections[colid]:
+                self.collections[colid][sock] += 1
+            #log("Registered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
         self.sublock.release()     
 
+    def deregister_streams(self, colid, streams, sock):
+        self.sublock.acquire()
+
+        for s in streams:
+            if not self.subscribers.has_key(s):
+                continue
+        
+            # Maybe consider changing this from a list to a dict?
+            self.subscribers[s][:] = \
+                [x for x in self.subscribers[s] if (x[0] != sock \
+                or x[4] != colid)]
+
+            if colid in self.collections and sock in self.collections[colid]:
+                self.collections[colid][sock] -= 1
+
+            #log("Deregistered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
+        self.sublock.release()
 
     def register_collection(self, sock, col):
         self.sublock.acquire()
@@ -1296,10 +1329,10 @@ class NNTSCExporter:
     def export_live_data(self, received, key):
 
         try:
-            name, stream_id, timestamp, values = received
+            colid, stream_id, timestamp, values = received
         except ValueError:
             log("Incorrect data format from source %s" % (key))
-            log("Format should be (name, streamid, timestamp, values dict)")
+            log("Format should be (colid, streamid, timestamp, values dict)")
             return -1
 
         if not isinstance(values, dict):
@@ -1313,6 +1346,14 @@ class NNTSCExporter:
 
             for sock, columns, start, end, col in self.subscribers[stream_id]:
                 if timestamp < start:
+                    active.append((sock, columns, start, end, col))
+                    continue
+
+                # Only export data if it was generated by the collection we
+                # are subscribed to -- this is mainly to deal with 
+                # amp-traceroute vs amp-astraceroute which share stream ids
+                # across both collections
+                if int(col) != int(colid):
                     active.append((sock, columns, start, end, col))
                     continue
 
@@ -1452,14 +1493,12 @@ class NNTSCExporter:
         if self.listen_sock == -1:
             return -1
 
-        if queueid != None:
-            self.livequeue = initExportConsumer(nntsc_conf, queueid, 
+        self.queueid = queueid
+        if queueid is not None:
+            self.livequeue = initExportConsumer(nntsc_conf, queueid, \
                     'nntsclive')
-       
-            if self.livequeue == None:
-                log("Failed to initialise consumer for exporter")
-                return -1
-
+        else:
+            self.livequeue = None
         return 0 
 
     def run(self):
@@ -1473,20 +1512,15 @@ class NNTSCExporter:
         listenthread.start()
        
         if self.livequeue is not None:
+            try:
+                self.livequeue.configure(self.sources, self.receive_source, 1) 
+                self.livequeue.run()
+            except KeyboardInterrupt:
+                self.livequeue.halt_consumer()
+            except:
+                log("Unknown exception while reading from live queue")
+                raise
          
-            # Prepare our export queue consumer
-            while 1:
-                for s in self.sources:
-                    self.livequeue.bind_queue(s)
-                self.livequeue.configure_consumer(self.receive_source)
-
-                # Start reading from the queue
-                retval = self.livequeue.run_consumer()
-                if retval == PIKA_CONSUMER_HALT:
-                    break
-
-                # Reconnect if we are going to be retrying
-                self.livequeue.connect()
         else:
             while 1:
                 try:

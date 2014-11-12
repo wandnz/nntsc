@@ -410,9 +410,9 @@ class DBInsert(DatabaseCore):
  
         smokefunc = """
             CREATE OR REPLACE FUNCTION _final_smoke(anyarray)
-                RETURNS anyarray AS
+                RETURNS numeric[] AS
             $BODY$
-                SELECT array_agg(avg) FROM (
+                SELECT array_agg(avg)::numeric[] FROM (
                     SELECT avg(foo), ntile FROM (
                         SELECT foo, ntile(20) OVER (PARTITION BY one ORDER BY foo) FROM (
                             SELECT 1 as one, unnest($1) as foo
@@ -644,7 +644,8 @@ class DBInsert(DatabaseCore):
         self._basicquery("""DROP SEQUENCE IF EXISTS "streams_id_seq" """)
         self._releasebasic()
  
-    def update_timestamp(self, datatable, stream_ids, lasttimestamp):
+    def update_timestamp(self, datatable, stream_ids, lasttimestamp, 
+            first=None):
         
         for sid in stream_ids:
             self.streamcache.update_timestamps(datatable, sid, lasttimestamp)

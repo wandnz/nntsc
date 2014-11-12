@@ -166,8 +166,22 @@ class NNTSCParser(object):
         # that we export a collection id number for streams and a string
         # for live data.
         # TODO get rid of this to avoid confusion
-        if self.exporter != None:
-            self.exporter.publishLiveData(self.colname, stream, ts, filtered)
+
+        colid = self._get_collection_id()
+
+        if self.exporter != None and colid > 0:
+            self.exporter.publishLiveData(colid, stream, ts, filtered)
+
+
+    def _find_median(self, datapoints):
+        if len(datapoints) == 0:
+            return None
+
+        half = int(len(datapoints) / 2)
+        if (len(datapoints) % 2) == 1:
+            return datapoints[half]
+
+        return (datapoints[half] + datapoints[half - 1]) / 2
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

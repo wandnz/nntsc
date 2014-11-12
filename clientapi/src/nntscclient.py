@@ -84,6 +84,23 @@ class NNTSCClient:
 
         return 0
 
+    def unsubscribe_streams(self, colid, streams):
+        if self.sock == None:
+            logger.log("Cannot send NNTSC_UNSUBSCRIBE on a closed socket!")
+            return -1
+
+        contents = pickle.dumps((colid, streams))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_UNSUBSCRIBE, len(contents))
+        
+        try:
+            self.sock.sendall(header + contents)
+        except error, msg:
+            logger.log("Error sending NNTSC_UNSUBSCRIBE for %s: %s" % (colid, msg[1]))
+            return -1
+
+        return 0
+
+
     def request_aggregate(self, col, labels, start, end, aggcolumns, binsize,
             groupcolumns=[], aggfunc="avg"):
 

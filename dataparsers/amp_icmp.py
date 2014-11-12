@@ -36,29 +36,26 @@ class AmpIcmpParser(NNTSCParser):
         self.streamcolumns = [
             {"name":"source", "type":"varchar", "null":False},
             {"name":"destination", "type":"varchar", "null":False},
-            {"name":"address", "type":"inet", "null":False},
+            {"name":"family", "type":"varchar", "null":False},
             {"name":"packet_size", "type":"varchar", "null":False},
-            {"name":"datastyle", "type":"varchar", "null":False}
         ]
 
         self.uniquecolumns = ['source', 'destination', 'packet_size', 
-                'address']
+                'family']
         self.streamindexes = [
             {"name": "", "columns": ['source']},
             {"name": "", "columns": ['destination']}
         ]
 
         self.datacolumns = [
-            {"name":"rtt", "type":"integer", "null":True},
+            {"name":"median", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
-            {"name":"ttl", "type":"smallint", "null":True},
             {"name":"loss", "type":"smallint", "null":False},
-            {"name":"error_type", "type":"smallint", "null":True},
-            {"name":"error_code", "type":"smallint", "null":True},
+            {"name":"results", "type":"smallint", "null":False},
+            {"name":"rtts", "type":"integer[]", "null":True},
         ]
 
         self.dataindexes = [
-            {"name": "", "columns":['rtt']}
         ] 
 
 
@@ -68,11 +65,11 @@ class AmpIcmpParser(NNTSCParser):
 
         src = str(stream_data["source"])
         dest = str(stream_data["destination"])
-        addr = str(stream_data["address"])
+        family = str(stream_data["family"])
         size = str(stream_data["packet_size"])
         streamid = stream_data["stream_id"]
 
-        key = (src, dest, addr, size)
+        key = (src, dest, family, size)
 
         self.streams[key] = streamid
 
@@ -89,6 +86,11 @@ class AmpIcmpParser(NNTSCParser):
                     (self.colname))
             return None, None
 
+        if '.' in result['address']:
+            family = "ipv4"
+        else:
+            family = "ipv6"
+
         if result['random']:
             sizestr = "random"
         else:
@@ -100,11 +102,10 @@ class AmpIcmpParser(NNTSCParser):
         
         props['source'] = source
         props['destination'] = result['target']
-        props['address']  = result['address']
+        props['family']  = family
         props['packet_size'] = sizestr
-        props['datastyle'] = "rtt_ms"
 
-        key = (props['source'], props['destination'], props['address'], \
+        key = (props['source'], props['destination'], props['family'], \
                 props['packet_size'])
         return props, key
 
@@ -117,11 +118,34 @@ class AmpIcmpParser(NNTSCParser):
         # this function here
         return 1
 
+    def _update_stream(self, observed, streamid, datapoint):
+        if streamid not in observed:
+            observed[streamid] = { "loss":0, "rtts":[], 
+                    "median":None, "packet_size":datapoint["packet_size"],
+                    "results":0 }
+
+        observed[streamid]["results"] += 1
+
+        if 'loss' in datapoint:
+            observed[streamid]["loss"] += datapoint['loss']
+
+        if 'rtt' in datapoint and datapoint['rtt'] is not None:
+            observed[streamid]["rtts"].append(datapoint['rtt'])
+            
+    def _aggregate_streamdata(self, streamdata):
+        streamdata["rtts"].sort()
+        streamdata["median"] = self._find_median(streamdata["rtts"])
+
+        # Add None entries to our array for lost measurements -- we
+        # have to wait until now to add them otherwise they'll mess
+        # with our median calculation
+        streamdata["rtts"] += [None] * streamdata['loss']
+
     def process_data(self, timestamp, data, source):
         """ Process a AMP ICMP message, which can contain 1 or more sets of 
             results 
         """
-        done = {}
+        observed = {}
 
         for d in data:
             streamparams, key = self._stream_properties(source, d)
@@ -142,15 +166,16 @@ class AmpIcmpParser(NNTSCParser):
             else:
                 streamid = self.streams[key]
 
-                if streamid in done:
-                    continue
+            self._update_stream(observed, streamid, d)
 
-            if self._mangle_result(d):
-                self.insert_data(streamid, timestamp, d)
-                done[streamid] = 0
+        for sid, streamdata in observed.iteritems():
+            self._aggregate_streamdata(streamdata)
+
+            casts = {"rtts":"integer[]"}
+            self.insert_data(sid, timestamp, streamdata, casts)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, observed.keys(), timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

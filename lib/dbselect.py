@@ -18,6 +18,8 @@ import time
 #DB_QUERY_CANCEL = -1
 #DB_QUERY_RETRY = -2
 
+traceroute_tables = ['data_amp_traceroute', 'data_amp_astraceroute']
+
 class DBSelector(DatabaseCore):
     def __init__(self, uniqueid, dbname, dbuser=None, dbpass=None, dbhost=None,
             timeout=0, cachetime=0):
@@ -198,7 +200,6 @@ class DBSelector(DatabaseCore):
         if type(binsize) is not int:
             return
 
-
         # Set default time boundaries
         if stop_time == None:
             stop_time = int(time.time())
@@ -219,17 +220,14 @@ class DBSelector(DatabaseCore):
             del groupcols[groupcols.index("stream_id")]
 
         # Make sure we only query for columns that exist in the data table
-        if table == "data_amp_traceroute":
-            groupcols = amp_traceroute.sanitise_columns(groupcols)
-        else:
-            groupcols = self._sanitise_columns(columns, groupcols)
-
-        aggcols = self._filter_aggregation_columns(table, aggcols)
+        groupcols = self._sanitise_columns(table, columns, groupcols)
+        aggcols = self._filter_aggregation_columns(table, columns, aggcols)
+        uniquecols = list(set([k[0] for k in aggcols] + groupcols))
 
         self.qb.reset()
 
         # Convert our column and aggregator lists into useful bits of SQL
-        labeled_aggcols = self._apply_aggregation(aggcols)
+        labeled_aggcols = self._apply_aggregation(aggcols, groupcols)
         labeled_groupcols = list(groupcols)
 
         # Add a column for the maximum timestamp in the bin
@@ -253,7 +251,6 @@ class DBSelector(DatabaseCore):
         # each measurement
         innselclause = " SELECT nntsclabel, timestamp "
 
-        uniquecols = list(set([k[0] for k in aggcols]))
         for col in uniquecols:
             innselclause += ", " + col
 
@@ -294,7 +291,8 @@ class DBSelector(DatabaseCore):
                     "union", "joincondition", "wheretime", "outselend",
                     "outgroup"]
             query, params = self.qb.create_query(order)
-  
+            #print query %params
+
             try:
                 self._dataquery(query, params)
             except DBQueryException as e:
@@ -357,10 +355,7 @@ class DBSelector(DatabaseCore):
             yield(None, None, None, None, e)
 
         # Make sure we only query for columns that are in the data table
-        if table == "data_amp_traceroute":
-            selectcols = amp_traceroute.sanitise_columns(selectcols)
-        else:
-            selectcols = self._sanitise_columns(columns, selectcols)
+        selectcols = self._sanitise_columns(table, columns, selectcols)
 
         # XXX for now, lets try to munge graph types that give a list of
         # stream ids into the label dictionary format that we want
@@ -569,7 +564,7 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("joincondition", joincond, [])
 
 
-        if table == "data_amp_traceroute":
+        if table in traceroute_tables:
             amp_traceroute.generate_union(self.qb, table, uniquestreams)
         else:
             self._generate_union(table, uniquestreams)
@@ -619,7 +614,7 @@ class DBSelector(DatabaseCore):
         self._releasebasic()
         return table, columns, streamtname
 
-    def _sanitise_columns(self, columns, selcols):
+    def _sanitise_columns(self, table, columns, selcols):
         """ Removes columns from the provided list if they are not present
             in the list of columns available for a table.
 
@@ -641,11 +636,18 @@ class DBSelector(DatabaseCore):
         for i in range(0, len(selcols)):
             cn = selcols[i]
             
-            if cn in columns:
-                sanitised.append(cn)
+            if table in traceroute_tables:
+                # Include columns from other tables that amp-traceroute
+                # joins with. 
+                cn = amp_traceroute.sanitise_column(cn) 
+                if cn is not None:
+                    sanitised.append(cn)
+            else:
+                if cn in columns:
+                    sanitised.append(cn)
         return sanitised
 
-    def _apply_aggregation(self, aggregators):
+    def _apply_aggregation(self, aggregators, groupcols):
 
         rename = False
         aggcols = []
@@ -659,8 +661,10 @@ class DBSelector(DatabaseCore):
             rename = True
 
         for colname, func in aggregators:
+            # Strip any table names from the column
+            colname = colname.split('.')[-1]
             labelstr = colname
-            if rename:
+            if rename or colname in groupcols:
                 labelstr += "_" + func
 
             # this isn't the greatest, but we have to treat this one different
@@ -668,6 +672,8 @@ class DBSelector(DatabaseCore):
                 colclause = "string_to_array(" + \
                     "most(array_to_string(%s,',')),',') AS %s" % (
                         colname, labelstr)
+            elif func == "arraysize":
+                colclause = "array_length(%s, 1) AS %s" % (colname, labelstr)
             else:
                 colclause = "%s(%s) AS %s" % (
                         func, colname, labelstr)
@@ -675,17 +681,19 @@ class DBSelector(DatabaseCore):
 
         return aggcols
     
-    def _filter_aggregation_columns(self, table, aggcols):
+    def _filter_aggregation_columns(self, table, columns, aggcols):
         keys = [k[0] for k in aggcols]
         
-        if table == "data_amp_traceroute":
-            keys = amp_traceroute.sanitise_columns(keys)
-
         filtered = []
         for k,v in aggcols:
-            if k not in keys:
-                continue
-            filtered.append((k,v))
+            if table in traceroute_tables:
+                col = amp_traceroute.sanitise_column(k)
+                if col is not None:
+                    filtered.append((col, v))
+
+            else:
+                if k in columns:
+                    filtered.append((k,v))
 
         return filtered
       

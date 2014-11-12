@@ -31,6 +31,7 @@ from ampsave.importer import import_data_functions
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
 from libnntsc.parsers.amp_dns import AmpDnsParser
+from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.dberrorcodes import *
@@ -42,7 +43,7 @@ import libnntscclient.logger as logger
 DEFAULT_COMMIT_FREQ=50
 
 class AmpModule:
-    def __init__(self, tests, nntsc_config, expqueue, exchange):
+    def __init__(self, tests, nntsc_config, routekey, exchange, queueid):
 
         self.processed = 0
 
@@ -75,6 +76,7 @@ class AmpModule:
             "traceroute":AmpTracerouteParser(self.db),
             "throughput":AmpThroughputParser(self.db),
             "dns":AmpDnsParser(self.db),
+            "http":AmpHttpParser(self.db),
             "tcpping":AmpTcppingParser(self.db)
         }
 
@@ -87,7 +89,8 @@ class AmpModule:
                 key = self.parsers[testtype].create_existing_stream(i)
 
         self.initSource(nntsc_config)
-        self.exporter = initExportPublisher(nntsc_config, expqueue, exchange)
+        self.exporter, self.pubthread = \
+                initExportPublisher(nntsc_config, routekey, exchange, queueid)
 
         for k, parser in self.parsers.iteritems():
             parser.add_exporter(self.exporter)
@@ -183,7 +186,7 @@ class AmpModule:
                     # Disconnect while inserting data, need to reprocess the
                     # entire set of messages
                     logger.log("Database disconnect while processing AMP data")
-                    raise PikaNNTSCException(True)
+                    channel.close()
 
                 elif e.code == DB_DATA_ERROR:
                     # Data was bad so we couldn't insert into the database.
@@ -195,26 +198,26 @@ class AmpModule:
 
                 elif e.code == DB_INTERRUPTED:
                     logger.log("Interrupt while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
             
                 elif e.code == DB_GENERIC_ERROR:
                     logger.log("Database error while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
                 elif e.code == DB_QUERY_TIMEOUT:
                     logger.log("Database timeout while processing AMP data")
-                    continue
+                    channel.close()
                 elif e.code == DB_CODING_ERROR:
                     logger.log("Bad database code encountered while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
                 elif e.code == DB_DUPLICATE_KEY:
                     logger.log("Duplicate key error while processing AMP data")
-                    raise PikaNNTSCException(False)
+                    channel.close()
         
                 else:
                     logger.log("Unknown error code returned by database: %d" \
                             % (code))
                     logger.log("Shutting down AMP module")
-                    raise PikaNNTSCException(False)
+                    channel.close()
             break
 
     def run(self):
@@ -222,27 +225,23 @@ class AmpModule:
 
         logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
 
-        while 1:
-            self.source.connect()
-            retval = self.source.configure_consumer(self.process_data, 
-                    self.commitfreq)
-            if retval == PIKA_CONSUMER_HALT:
-                break
-            if retval == PIKA_CONSUMER_RETRY:
-                logger.log("Failed to configure consumer, retrying in 5s")
-                time.sleep(5)
-                continue
 
-            
-            retval = self.source.run_consumer()
-            if retval == PIKA_CONSUMER_HALT:
-                break
+        try:
+            self.source.configure([], self.process_data, self.commitfreq)
+            self.source.run()
+        except KeyboardInterrupt:
+            self.source.halt_consumer()
+        except:
+            logger.log("AMP: Unknown exception during consumer loop")
+            raise
 
         logger.log("AMP: Closed connection to RabbitMQ")
 
-def run_module(tests, config, key, exchange):
-    amp = AmpModule(tests, config, key, exchange)
+def run_module(tests, config, key, exchange, queueid):
+    amp = AmpModule(tests, config, key, exchange, queueid)
     amp.run()
+
+    amp.pubthread.join()
 
 def tables(db):
 
@@ -259,6 +258,9 @@ def tables(db):
     parser.register()
     
     parser = AmpTcppingParser(db)
+    parser.register()
+    
+    parser = AmpHttpParser(db)
     parser.register()
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

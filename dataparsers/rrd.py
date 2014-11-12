@@ -34,7 +34,7 @@ RRD_CONTINUE = 1
 RRD_HALT = 2
 
 class RRDModule:
-    def __init__(self, rrds, nntsc_conf, expqueue, exchange):
+    def __init__(self, rrds, nntsc_conf, routekey, exchange, queueid):
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
@@ -70,7 +70,8 @@ class RRDModule:
             else:
                 self.rrds[filename] = [r]
 
-        self.exporter = initExportPublisher(nntsc_conf, expqueue, exchange)
+        self.exporter, self.pubthread = \
+                initExportPublisher(nntsc_conf, routekey, exchange, queueid)
 
         self.smokeparser.add_exporter(self.exporter)
         self.muninparser.add_exporter(self.exporter)
@@ -109,6 +110,9 @@ class RRDModule:
         endts = rrdtool.last(str(fname))
 
         startts, endts = self.rejig_ts(endts, r)
+
+        if startts == endts:
+            return
 
         fetchres = rrdtool.fetch(fname, "AVERAGE", "-s",
                 str(startts), "-e", str(endts))
@@ -298,10 +302,11 @@ def insert_rrd_streams(db, conf):
     f.close()
 
 
-def run_module(rrds, config, key, exchange):
-    rrd = RRDModule(rrds, config, key, exchange)
+def run_module(rrds, config, key, exchange, queueid):
+    rrd = RRDModule(rrds, config, key, exchange, queueid)
     rrd.run()
 
+    rrd.pubthread.join()
 
 def tables(db):
 
