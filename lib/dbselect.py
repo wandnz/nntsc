@@ -252,7 +252,9 @@ class DBSelector(DatabaseCore):
         innselclause = " SELECT nntsclabel, timestamp "
 
         for col in uniquecols:
-            innselclause += ", " + col
+            # Already got timestamp in this clause...
+            if col not in ['timestamp']:
+                innselclause += ", " + col
 
         self.qb.add_clause("innersel", innselclause, [])
 
