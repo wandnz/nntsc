@@ -165,7 +165,7 @@ class AmpModule:
             try:
                 data = self.amp_modules[test].get_data(body)
             except AmpTestVersionMismatch as e:
-                logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e.str()))
+                logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e))
                 data = None
 
             if data is None:
