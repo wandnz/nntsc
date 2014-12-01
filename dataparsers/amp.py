@@ -28,6 +28,7 @@ from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
         PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
 import pika
 from ampsave.importer import import_data_functions
+from ampsave.exceptions import AmpTestVersionMismatch
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
 from libnntsc.parsers.amp_dns import AmpDnsParser
@@ -161,7 +162,11 @@ class AmpModule:
                 channel.basic_ack(delivery_tag=method.delivery_tag)
                 break
 
-            data = self.amp_modules[test].get_data(body)
+            try:
+                data = self.amp_modules[test].get_data(body)
+            except AmpTestVersionMismatch as e:
+                logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e.str()))
+                data = None
 
             if data is None:
                 channel.basic_ack(delivery_tag = method.delivery_tag)
