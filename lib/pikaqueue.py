@@ -154,7 +154,7 @@ class PikaPublisher(PikaBasicAsync):
             
             self._channel.basic_publish(self._exchangename, self._pubkey,
                     pubstring, 
-                    pika.BasicProperties(delivery_mode=2,
+                    pika.BasicProperties(delivery_mode=1,
                         content_type = "text/plain"))
     
 
