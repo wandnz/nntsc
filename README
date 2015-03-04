@@ -135,6 +135,27 @@ and their options are as follows:
 	password - the password to use when connecting to the database.	Leave
 	           blank if no password required.
 
+[liveexport]
+  Options relating to the Rabbit queue that funnels newly collected data to 
+  the live exporter.
+
+  Available options:
+        queueid - the name of the message queue.
+        port - the port that the local Rabbit instance is listening on.
+        username - the username to use when connecting to Rabbit.
+        password - the password to use when connecting to Rabbit.
+
+[modules]
+  These options are used to enable or disable NNTSC dataparsers. To enable
+  a module, set the appropriate option to "yes". To disable a module, set 
+  the option to "no".
+
+  Available options:
+        amp - controls whether NNTSC accepts data from AMP. 
+        lpi - controls whether NNTSC accepts data from the libprotoident
+              collector.
+        rrd - controls whether NNTSC can read data from RRD files.
+
 [lpi]
   Options relating to accepting and storing data from a libprotoident collector
 
@@ -148,8 +169,6 @@ and their options are as follows:
   Options relating to connecting to an AMP message queue and receiving AMP data
 
   Available options:
-  	disable - if True, all other AMP options are ignored and no connection
-	          is made to an AMP message queue.
   	username - the username to use when connecting to AMP's message queue.
 	password - the password to use when connecting to AMP's message queue.
 	host - the host where the AMP message broker is running.
@@ -227,10 +246,8 @@ and streams that are stored within them. Don't do this unless you are really
 sure you want to lose all that data!
 
 If you explore your new database with the psql tool, you should have a
-'collections' table and a 'streams' table. You may also have a number of tables
-begining with 'stream_' and 'data_' as well as possibly a series of tables
-beginning with 'internal_'. Make sure you at least have a collections and
-streams table.
+'collections' table and a number of tables begining with 'stream_' and 
+'data_', one per collection. 
 
 
 Starting NNTSC
@@ -254,11 +271,14 @@ config file.
 
 Alternatively, you may manually start an NNTSC daemon by running the following:
 
-	nntsc -b -C <your config file> [-P pidfile]
+	nntsc -b -C <your config file> [-p port] [-P pidfile]
 
 Finally, you may run NNTSC in the foreground by omitting the '-b' option from
 the manual command given above. In this case, we strongly recommend running
 NNTSC within screen or some other persistant terminal environment.
+
+By default, the nntsc exporter will listen on port 61234 for incoming client 
+connections. This can be changed using the '-p' option.
 
 Note that in all cases, the same config file must be used by both NNTSC and the
 build_nntsc_db script.
@@ -283,8 +303,8 @@ hopefully we can improve that in future releases.
 
 To use the client API, just add the following imports to your Python program:
 
-	from libnntsc.export import *
-	from libnntsc.client.nntscclient import NNTSCClient
+	from libnntscclient.protocol import *
+	from libnntscclient.nntscclient import NNTSCClient
 
 There are three types of messages that a client can send to the NNTSC collector:
 
