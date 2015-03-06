@@ -122,7 +122,10 @@ class AmpHttpParser(NNTSCParser):
         mangled['object_count'] = data['object_count']
 
         # AMPSave reports duration in ms, we're going to store it as ms
-        mangled['duration'] = int(data['duration']) 
+        if data['duration'] is None:
+            mangled['duration'] = None
+        else:
+            mangled['duration'] = int(data['duration']) 
         mangled['bytes'] = data['bytes']
 
         return mangled, key
