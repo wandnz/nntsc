@@ -183,9 +183,9 @@ class AmpModule:
                     channel.basic_ack(method.delivery_tag, True)
                     self.processed = 0
                 
-                if test in self.collections:
-                    self.exporter.publishPush(self.collections[test], \
-                            properties.timestamp)
+                #if test in self.collections:
+                #    self.exporter.publishPush(self.collections[test], \
+                #            properties.timestamp)
             except DBQueryException as e:
                 if e.code == DB_OPERATIONAL_ERROR:
                     # Disconnect while inserting data, need to reprocess the
