@@ -794,6 +794,7 @@ class NNTSCClient(threading.Thread):
         self.jobs = Queue(100000)
         self.releasedlive = Queue(100000)
         self.outstanding = ""
+        self.sockfd = sock.fileno()
 
         self.running = 0
         self.waitstreams = {}
@@ -973,6 +974,7 @@ class NNTSCClient(threading.Thread):
             sendobj = obj[0] + obj[1]
             contents = pickle.loads(obj[1])
             streamid = contents[1]
+            ts = obj[2]
 
             if streamid in self.waitstreams:
                 # Still waiting for history to come back for this stream.
@@ -983,6 +985,8 @@ class NNTSCClient(threading.Thread):
                 #log("Saving data for stream %d -- %s" % (streamid, lab))
                 continue
 
+            if streamid == 64191:
+                log("Exporting %s %s at %.0f, queue size %u" % (streamid, ts, time.time(), self.livequeue.qsize()))
             # Just reflect the objects directly to the client
             if self.transmit_client(sendobj) == -1:
                 return -1
@@ -1007,9 +1011,15 @@ class NNTSCClient(threading.Thread):
         
     def transmit_client(self, result):
         try:
+            fd = self.sock.fileno()
+        except error, msg:
+            log("Tried to transmit on a broken socket: %s" % (msg[1]))
+            return -1
+
+        try:
             sent = self.sock.send(result)
         except error, msg:
-            log("Error sending message to client fd %d: %s" % (self.sock.fileno(), msg[1]))
+            log("Error sending message to client fd %d: %s" % (fd, msg[1]))
             return -1
 
         if sent == 0:
@@ -1106,6 +1116,9 @@ class NNTSCClient(threading.Thread):
                         self.running = 0
                         break
 
+            if self.running == 0:
+                break
+
             if self.sock in outready:
                 if len(self.outstanding) > 0:
                     if self.transmit_client(self.outstanding) == -1:
@@ -1124,7 +1137,7 @@ class NNTSCClient(threading.Thread):
                     break
 
 
-        #log("Closing client thread on fd %d" % self.sock.fileno())
+        log("Closing client thread on fd %d" % self.sockfd)
         self.parent.deregister_client(self.sock)
         self.livequeue.close()
         self.sock.close()
@@ -1148,12 +1161,16 @@ class NNTSCExporter:
         self.clientlock = threading.Lock()
         self.sublock = threading.Lock()
 
+        self.isbehinda = False
+        self.isbehindb = False
         self.newstreams = {}
 
     def deregister_client(self, sock):
 
         self.clientlock.acquire()
         if sock in self.clients:
+            if 'queue' in self.clients[sock]:
+                self.clients[sock]['queue'].close()
             del self.clients[sock]
         self.clientlock.release()
 
@@ -1258,7 +1275,7 @@ class NNTSCExporter:
                 # hope the thread picks up that we closed its
                 # socket and can exit itself nicely
                 sock.close()
-                #self.deregister_client(sock)
+                self.deregister_client(sock)
                 continue
 
 
@@ -1315,7 +1332,7 @@ class NNTSCExporter:
                 # hope the thread picks up that we closed its
                 # socket and can exit itself nicely
                 sock.close()
-                #self.deregister_client(sock)
+                self.deregister_client(sock)
                 continue
          
             self.newstreams[stream_id]["sockets"].append(sock)   
@@ -1328,6 +1345,7 @@ class NNTSCExporter:
 
     def export_live_data(self, received, key):
 
+        debugstart = time.time()
         try:
             colid, stream_id, timestamp, values = received
         except ValueError:
@@ -1338,6 +1356,13 @@ class NNTSCExporter:
         if not isinstance(values, dict):
             log("Values should expressed as a dictionary")
             return -1
+        
+        if debugstart - timestamp > 300 and not self.isbehinda and colid != 6:
+            print "A Fallen behind:", debugstart, timestamp, stream_id
+            self.isbehinda = True
+        elif self.isbehinda and debugstart - timestamp <= 60 and colid != 6:
+            print "A Caught up again:", debugstart, timestamp, stream_id
+            self.isbehinda = False
 
         self.sublock.acquire()
         self.clientlock.acquire()
@@ -1369,6 +1394,12 @@ class NNTSCExporter:
 
                 if sock in self.clients.keys():
                     try:
+                        if debugstart - timestamp > 300 and not self.isbehindb:
+                            print "B Fallen behind:", debugstart, timestamp, stream_id
+                            self.isbehindb = True
+                        elif self.isbehindb and debugstart - timestamp <= 60:
+                            print "B Caught up again:", debugstart, timestamp, stream_id
+                            self.isbehindb = False
                         self.clients[sock]['queue'].put((header, contents, timestamp), True, 10)
                     except StdQueue.Full:
                         # This may not actually stop the client thread,
@@ -1376,7 +1407,8 @@ class NNTSCExporter:
                         # hope the thread picks up that we closed its
                         # socket and can exit itself nicely
                         sock.close()
-                        #self.deregister_client(sock)
+                        log("Client queue has filled up!")
+                        self.deregister_client(sock)
                         continue
                     #log("Pushed live data onto queue for stream %d" % (stream_id))
                     if results != {}:
@@ -1430,7 +1462,7 @@ class NNTSCExporter:
     def createClient(self, clientfd): 
         #log("Creating client on fd %d" % (clientfd.fileno()))
         queue = Queue(1000000)
-        clientfd.setblocking(0)
+        clientfd.setblocking(1)
 
         cthread = NNTSCClient(clientfd, self, queue, self.dbconf, \
                 self.dbtimeout)
