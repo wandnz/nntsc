@@ -36,7 +36,7 @@ from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.dberrorcodes import *
-import time
+import time, signal
 import logging
 
 import libnntscclient.logger as logger
@@ -45,7 +45,7 @@ DEFAULT_COMMIT_FREQ=50
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, routekey, exchange, queueid):
-
+        
         self.processed = 0
 
         logging.basicConfig()
@@ -243,6 +243,7 @@ class AmpModule:
         logger.log("AMP: Closed connection to RabbitMQ")
 
 def run_module(tests, config, key, exchange, queueid):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     amp = AmpModule(tests, config, key, exchange, queueid)
     amp.run()
 

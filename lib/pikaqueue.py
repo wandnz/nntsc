@@ -98,8 +98,8 @@ class PikaBasicAsync(object):
         
     def _pikaChannelClosed(self, channel, replycode, replytext):
         logger.log("Pika Channel was closed: %s %s" % (replycode, replytext))
-        if not self._closing:
-            self._connection.close()
+        #if not self._closing:
+        self._connection.close()
 
     def _pikaExchangeDeclared(self, unused):
         self._channel.queue_declare(self._pikaQueueDeclared, self._queuename,
@@ -161,6 +161,7 @@ class PikaPublisher(PikaBasicAsync):
 class PikaPubQueue(object):
     def __init__(self, sourcequeue):
         self._outstanding = sourcequeue
+        self.isbehind = False
 
     def publishStream(self, colid, colname, streamid, streamprops):
         content = (1, (colid, colname, streamid, streamprops))
@@ -176,7 +177,22 @@ class PikaPubQueue(object):
         content = (0, (colname, stream, ts, result))
         pubstring = pickle.dumps(content)
         try:
+            start = time.time()
+           
+            if start - ts >= 300 and self.isbehind == False and colname != 6:
+                logger.log("Pika queue has fallen behind by %d secs" % (start - ts))
+                self.isbehind = True
+
+            if start - ts <= 60 and self.isbehind == True:
+                logger.log("Pika queue has caught up again")
+                self.isbehind = False
+            
             self._outstanding.put(pubstring, True, 10)
+            end = time.time()
+
+            if end - start > 0.1:
+                logger.log("Slow pika queue put for stream %s: %d secs" % (stream, end-start))
+
         except StdQueue.Full:
             logger.log("Internal publishing queue has reached capacity!")
             return -1

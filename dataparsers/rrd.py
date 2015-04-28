@@ -26,7 +26,7 @@ from libnntsc.configurator import *
 from libnntsc.parsers.rrd_smokeping import RRDSmokepingParser
 from libnntsc.parsers.rrd_muninbytes import RRDMuninbytesParser
 import libnntscclient.logger as logger
-import sys, rrdtool, socket, time
+import sys, rrdtool, socket, time, signal
 from libnntsc.pikaqueue import initExportPublisher
 
 RRD_RETRY = 0
@@ -303,6 +303,7 @@ def insert_rrd_streams(db, conf):
 
 
 def run_module(rrds, config, key, exchange, queueid):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     rrd = RRDModule(rrds, config, key, exchange, queueid)
     rrd.run()
 

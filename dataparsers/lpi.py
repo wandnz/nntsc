@@ -31,7 +31,7 @@ from libnntsc.pikaqueue import initExportPublisher
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
-import time
+import time, signal
 
 class LPIModule:
     def __init__(self, existing, nntsc_conf, expqueue, exchange):
@@ -240,6 +240,7 @@ class LPIModule:
 
 
 def run_module(existing, config, key, exchange):
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     lpi = LPIModule(existing, config, key, exchange)
     lpi.run()
 
