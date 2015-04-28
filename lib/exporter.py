@@ -22,7 +22,7 @@
 # $Id$
 
 
-import sys, socket, time, struct, getopt
+import sys, socket, time, struct, getopt, signal
 import cPickle as pickle
 from socket import *
 from multiprocessing import Pipe, Queue
@@ -985,8 +985,6 @@ class NNTSCClient(threading.Thread):
                 #log("Saving data for stream %d -- %s" % (streamid, lab))
                 continue
 
-            if streamid == 64191:
-                log("Exporting %s %s at %.0f, queue size %u" % (streamid, ts, time.time(), self.livequeue.qsize()))
             # Just reflect the objects directly to the client
             if self.transmit_client(sendobj) == -1:
                 return -1
@@ -1100,8 +1098,14 @@ class NNTSCClient(threading.Thread):
         self.transmit_client(header + contents)
 
         while self.running:
+
+            try:
+                fd = self.sock.fileno()
+            except error, msg:
+                log("Client is no longer active: " % (msg[1]))
+                break
+
             input = [self.sock]
-            
             if self.write_required():
                 writer = [self.sock]
             else:
@@ -1136,8 +1140,7 @@ class NNTSCClient(threading.Thread):
                     self.running = 0
                     break
 
-
-        log("Closing client thread on fd %d" % self.sockfd)
+        #log("Closing client thread on fd %d" % self.sockfd)
         self.parent.deregister_client(self.sock)
         self.livequeue.close()
         self.sock.close()
@@ -1549,6 +1552,7 @@ class NNTSCExporter:
                 self.livequeue.run()
             except KeyboardInterrupt:
                 self.livequeue.halt_consumer()
+                raise
             except:
                 log("Unknown exception while reading from live queue")
                 raise
@@ -1557,8 +1561,8 @@ class NNTSCExporter:
             while 1:
                 try:
                     listenthread.join(1)
-                except KeyboardInterrupt:
-                    break
+                #except KeyboardInterrupt:
+                #    break
                 except:
                     raise
         
@@ -1575,7 +1579,10 @@ class NNTSCListener(threading.Thread):
             # Wait for any sign of an incoming connection
             listener = [self.sock]
 
-            inpready, outready, exready = select.select(listener, [], [])
+            try:
+                inpready, outready, exready = select.select(listener, [], [])
+            except:
+                break
             
             if self.sock not in inpready:
                 continue
