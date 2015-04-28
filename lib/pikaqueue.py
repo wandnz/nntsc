@@ -98,8 +98,8 @@ class PikaBasicAsync(object):
         
     def _pikaChannelClosed(self, channel, replycode, replytext):
         logger.log("Pika Channel was closed: %s %s" % (replycode, replytext))
-        if not self._closing:
-            self._connection.close()
+        #if not self._closing:
+        self._connection.close()
 
     def _pikaExchangeDeclared(self, unused):
         self._channel.queue_declare(self._pikaQueueDeclared, self._queuename,
