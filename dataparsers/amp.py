@@ -47,6 +47,8 @@ class AmpModule:
     def __init__(self, tests, nntsc_config, routekey, exchange, queueid):
         
         self.processed = 0
+        self.exporter = None
+        self.pubthread = None
 
         logging.basicConfig()
         self.dbconf = get_nntsc_db_config(nntsc_config)
@@ -90,11 +92,22 @@ class AmpModule:
                 key = self.parsers[testtype].create_existing_stream(i)
 
         self.initSource(nntsc_config)
-        self.exporter, self.pubthread = \
-                initExportPublisher(nntsc_config, routekey, exchange, queueid)
+        
+        liveconf = get_nntsc_config_bool(nntsc_config, "liveexport", "enabled")
+        if liveconf == "NNTSCConfigError":
+            logger.log("Bad 'enabled' option for liveexport -- disabling")
+            liveconf = False
 
-        for k, parser in self.parsers.iteritems():
-            parser.add_exporter(self.exporter)
+        if liveconf == "NNTSCConfigMissing":
+            liveconf = True
+
+        if liveconf:
+            self.exporter, self.pubthread = \
+                    initExportPublisher(nntsc_config, routekey, exchange, \
+                    queueid)
+
+            for k, parser in self.parsers.iteritems():
+                parser.add_exporter(self.exporter)
 
     def initSource(self, nntsc_config):
         # Parse connection info
@@ -247,7 +260,8 @@ def run_module(tests, config, key, exchange, queueid):
     amp = AmpModule(tests, config, key, exchange, queueid)
     amp.run()
 
-    amp.pubthread.join()
+    if amp.pubthread:
+        amp.pubthread.join()
 
 def tables(db):
 

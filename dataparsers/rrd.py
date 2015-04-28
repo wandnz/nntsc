@@ -36,6 +36,9 @@ RRD_HALT = 2
 class RRDModule:
     def __init__(self, rrds, nntsc_conf, routekey, exchange, queueid):
 
+        self.exporter = None
+        self.pubthread = None
+
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
             sys.exit(1)
@@ -70,11 +73,20 @@ class RRDModule:
             else:
                 self.rrds[filename] = [r]
 
-        self.exporter, self.pubthread = \
-                initExportPublisher(nntsc_conf, routekey, exchange, queueid)
+        liveconf = get_nntsc_config_bool(nntsc_config, "liveexport", "enabled")
+        if liveconf == "NNTSCConfigError":
+            logger.log("Bad 'enabled' option for liveexport -- disabling")
+            liveconf = False
 
-        self.smokeparser.add_exporter(self.exporter)
-        self.muninparser.add_exporter(self.exporter)
+        if liveconf == "NNTSCConfigMissing":
+            liveconf = True
+
+        if liveconf:
+            self.exporter, self.pubthread = \
+                    initExportPublisher(nntsc_conf, routekey, exchange, queueid)
+
+            self.smokeparser.add_exporter(self.exporter)
+            self.muninparser.add_exporter(self.exporter)
 
     def rejig_ts(self, endts, r):
         # Doing dumbass stuff that I shouldn't have to do to ensure
@@ -307,7 +319,8 @@ def run_module(rrds, config, key, exchange, queueid):
     rrd = RRDModule(rrds, config, key, exchange, queueid)
     rrd.run()
 
-    rrd.pubthread.join()
+    if rrd.pubthread:
+        rrd.pubthread.join()
 
 def tables(db):
 

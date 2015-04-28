@@ -34,13 +34,15 @@ import libnntscclient.logger as logger
 import time, signal
 
 class LPIModule:
-    def __init__(self, existing, nntsc_conf, expqueue, exchange):
+    def __init__(self, existing, nntsc_conf, routekey, exchange, queueid):
 
         self.enabled = True
         self.wait = 15
         self.current_header = {}
         self.observed_protos = {}
         self.protocol_map = {}
+        self.exporter = None
+        self.pubthread = None
 
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
@@ -85,12 +87,22 @@ class LPIModule:
             if s['modsubtype'] == "users":
                 self.usersparser.create_existing_stream(s)
 
-        self.exporter = initExportPublisher(nntsc_conf, expqueue, exchange)
+        liveconf = get_nntsc_config_bool(nntsc_config, "liveexport", "enabled")
+        if liveconf == "NNTSCConfigError":
+            logger.log("Bad 'enabled' option for liveexport -- disabling")
+            liveconf = False
+
+        if liveconf == "NNTSCConfigMissing":
+            liveconf = True
+
+        if liveconf:
+            self.exporter, self.pubthread = initExportPublisher(nntsc_conf, \
+                    routekey, exchange, queueid)
         
-        self.bytesparser.add_exporter(self.exporter)
-        self.packetsparser.add_exporter(self.exporter)
-        self.usersparser.add_exporter(self.exporter)
-        self.flowsparser.add_exporter(self.exporter)
+            self.bytesparser.add_exporter(self.exporter)
+            self.packetsparser.add_exporter(self.exporter)
+            self.usersparser.add_exporter(self.exporter)
+            self.flowsparser.add_exporter(self.exporter)
 
     def process_stats(self, data):
         if data == {}:
@@ -243,6 +255,9 @@ def run_module(existing, config, key, exchange):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     lpi = LPIModule(existing, config, key, exchange)
     lpi.run()
+
+    if lpi.pubthread:
+        lpi.pubthread.join()
 
 def tables(db):
 
