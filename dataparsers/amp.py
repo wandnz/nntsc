@@ -180,6 +180,11 @@ class AmpModule:
             except AmpTestVersionMismatch as e:
                 logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e))
                 data = None
+            except AssertionError as e:
+                # A lot of ampsave functions assert fail if something goes
+                # wrong, so we need to catch that and chuck the bogus data
+                logger.log("Ignoring AMP result for %s test (ampsave assertion failure): %s" % (test, e))
+                data = None
 
             if data is None:
                 channel.basic_ack(delivery_tag = method.delivery_tag)
