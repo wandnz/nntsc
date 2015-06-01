@@ -73,7 +73,7 @@ class RRDModule:
             else:
                 self.rrds[filename] = [r]
 
-        liveconf = get_nntsc_config_bool(nntsc_config, "liveexport", "enabled")
+        liveconf = get_nntsc_config_bool(nntsc_conf, "liveexport", "enabled")
         if liveconf == "NNTSCConfigError":
             logger.log("Bad 'enabled' option for liveexport -- disabling")
             liveconf = False
