@@ -23,7 +23,8 @@ class PikaNNTSCException(Exception):
             return "NNTSC Exception encountered while reading Rabbit Queue -- halting"
 
 class PikaBasicAsync(object):
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword):
+    def __init__(self, exchange, queuename, host, port, ssl, user, pword, 
+            durable):
         self._connection = None
         self._channel = None
         self._host = host
@@ -33,7 +34,8 @@ class PikaBasicAsync(object):
         self._exchangename = exchange
         self._closing = False
         self._queuename = queuename
-    
+        self._durable = durable
+
         logging.basicConfig()
 
     def _pikaConnect(self, host, port, ssl, creds):
@@ -94,7 +96,7 @@ class PikaBasicAsync(object):
                     type='direct')
         else:
             self._channel.queue_declare(self._pikaQueueDeclared, 
-                    self._queuename, durable = True)
+                    self._queuename, durable = self._durable)
         
     def _pikaChannelClosed(self, channel, replycode, replytext):
         logger.log("Pika Channel was closed: %s %s" % (replycode, replytext))
@@ -103,7 +105,7 @@ class PikaBasicAsync(object):
 
     def _pikaExchangeDeclared(self, unused):
         self._channel.queue_declare(self._pikaQueueDeclared, self._queuename,
-                durable = True)
+                durable = self._durable)
 
     def _pikaQueueDeclared(self, methodframe):
         return 
@@ -115,9 +117,9 @@ class PikaBasicAsync(object):
 class PikaPublisher(PikaBasicAsync):
     
     def __init__(self, exchange, queuename, key, host, port, ssl, user, pword,
-            sourcequeue):
+            sourcequeue, durable=True):
         super(PikaPublisher, self).__init__(exchange, queuename, host, port,
-                ssl, user, pword)
+                ssl, user, pword, durable)
         self._pubkey = key
         self._halted = False
         self._stopping = False
@@ -146,12 +148,17 @@ class PikaPublisher(PikaBasicAsync):
         while 1:
             if self._stopping:
                 return
+           
             
             try:
                 pubstring = self._outstanding.get(True, 1)
             except StdQueue.Empty:
                 continue
             
+            msgtype, content = pickle.loads(pubstring)
+            if self._channel is None:
+                return    
+
             self._channel.basic_publish(self._exchangename, self._pubkey,
                     pubstring, 
                     pika.BasicProperties(delivery_mode=1,
@@ -161,7 +168,6 @@ class PikaPublisher(PikaBasicAsync):
 class PikaPubQueue(object):
     def __init__(self, sourcequeue):
         self._outstanding = sourcequeue
-        self.isbehind = False
 
     def publishStream(self, colid, colname, streamid, streamprops):
         content = (1, (colid, colname, streamid, streamprops))
@@ -176,6 +182,7 @@ class PikaPubQueue(object):
     def publishLiveData(self, colname, stream, ts, result):
         content = (0, (colname, stream, ts, result))
         pubstring = pickle.dumps(content)
+        
         try:
             self._outstanding.put(pubstring, True, 10)
         except StdQueue.Full:
@@ -196,14 +203,16 @@ class PikaPubQueue(object):
 
 
 class PikaConsumer(PikaBasicAsync):
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword):
+    def __init__(self, exchange, queuename, host, port, ssl, user, pword, 
+            durable=True):
         super(PikaConsumer, self).__init__(exchange, queuename, host, port,
-                ssl, user, pword)
+                ssl, user, pword, durable)
         self._consumer_tag = None
         self._unbound = []
         self._keys = []
-        self._prefetch = 1
+        self._prefetch = 0
         self.callback = None
+        self.noack = False
     
     def halt_consumer(self):
         self._closing = True
@@ -242,19 +251,20 @@ class PikaConsumer(PikaBasicAsync):
         return 1
 
     def _start_consume(self):
-        self._channel.basic_qos(prefetch_count=self._prefetch)
+        if self._prefetch != 0:
+            self._channel.basic_qos(prefetch_count=self._prefetch)
         self._channel.add_on_cancel_callback(self._pikaCancelled)
         logger.log("Started consuming from %s" % (self._queuename))
         self._consumer_tag = self._channel.basic_consume(self.callback, 
-                self._queuename)
+                self._queuename, self.noack)
 
     
-    def configure(self, keys, callback, prefetch):
+    def configure(self, keys, callback, prefetch, noack=False):
         self._keys = keys[:]
         self._unbound = keys[:]
         self.callback = callback
         self._prefetch = prefetch
-        
+        self.noack = noack 
     
 
 def parseExportOptions(conf):
@@ -283,7 +293,7 @@ def startPubThread(conf, key, exchange, queuename, src):
 
     
     exporter = PikaPublisher(exchange, queuename, key, 'localhost', port, 
-            False, username, password, src)
+            False, username, password, src, False)
     if exporter == None:
         logger.log("Failed to create live exporter for %s -- no live export will occur" % (queuename))
 
@@ -312,7 +322,7 @@ def initExportConsumer(conf, queuename, exchange):
         return None
 
     consumer = PikaConsumer(exchange, queuename, 'localhost', port, False, 
-            username, password)
+            username, password, False)
     if consumer == None:
         logger.log("Failed to create live consumer for %s -- no live export will occur" % (queuename))
     return consumer

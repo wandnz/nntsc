@@ -973,17 +973,18 @@ class NNTSCClient(threading.Thread):
             
             sendobj = obj[0] + obj[1]
             contents = pickle.loads(obj[1])
-            streamid = contents[1]
-            ts = obj[2]
 
-            if streamid in self.waitstreams:
-                # Still waiting for history to come back for this stream.
-                # Save this live data so we can send it after the history is
-                # complete.
-                lab = self.waitstreams[streamid]
-                self.savedlive[lab].append(obj)
-                #log("Saving data for stream %d -- %s" % (streamid, lab))
-                continue
+            if len(obj) == 3:
+                streamid = contents[1]
+                ts = obj[2]
+                if streamid in self.waitstreams:
+                    # Still waiting for history to come back for this stream.
+                    # Save this live data so we can send it after the history is
+                    # complete.
+                    lab = self.waitstreams[streamid]
+                    self.savedlive[lab].append(obj)
+                    #log("Saving data for stream %d -- %s" % (streamid, lab))
+                    continue
 
             # Just reflect the objects directly to the client
             if self.transmit_client(sendobj) == -1:
@@ -1164,8 +1165,6 @@ class NNTSCExporter:
         self.clientlock = threading.Lock()
         self.sublock = threading.Lock()
 
-        self.isbehinda = False
-        self.isbehindb = False
         self.newstreams = {}
 
     def deregister_client(self, sock):
@@ -1348,7 +1347,6 @@ class NNTSCExporter:
 
     def export_live_data(self, received, key):
 
-        debugstart = time.time()
         try:
             colid, stream_id, timestamp, values = received
         except ValueError:
@@ -1360,13 +1358,6 @@ class NNTSCExporter:
             log("Values should expressed as a dictionary")
             return -1
         
-        if debugstart - timestamp > 300 and not self.isbehinda and colid != 6:
-            print "A Fallen behind:", debugstart, timestamp, stream_id
-            self.isbehinda = True
-        elif self.isbehinda and debugstart - timestamp <= 60 and colid != 6:
-            print "A Caught up again:", debugstart, timestamp, stream_id
-            self.isbehinda = False
-
         self.sublock.acquire()
         self.clientlock.acquire()
         if stream_id in self.subscribers.keys():
@@ -1397,12 +1388,6 @@ class NNTSCExporter:
 
                 if sock in self.clients.keys():
                     try:
-                        if debugstart - timestamp > 300 and not self.isbehindb:
-                            print "B Fallen behind:", debugstart, timestamp, stream_id
-                            self.isbehindb = True
-                        elif self.isbehindb and debugstart - timestamp <= 60:
-                            print "B Caught up again:", debugstart, timestamp, stream_id
-                            self.isbehindb = False
                         self.clients[sock]['queue'].put((header, contents, timestamp), True, 10)
                     except StdQueue.Full:
                         # This may not actually stop the client thread,
@@ -1456,7 +1441,7 @@ class NNTSCExporter:
         if msgtype == 2:
             ret = self.export_push(contents, key)
 
-        channel.basic_ack(delivery_tag = method.delivery_tag)
+        #channel.basic_ack(delivery_tag = method.delivery_tag)
         if ret == -1:
             self.drop_source(key)
     
@@ -1548,7 +1533,7 @@ class NNTSCExporter:
        
         if self.livequeue is not None:
             try:
-                self.livequeue.configure(self.sources, self.receive_source, 1) 
+                self.livequeue.configure(self.sources, self.receive_source, 1, True) 
                 self.livequeue.run()
             except KeyboardInterrupt:
                 self.livequeue.halt_consumer()

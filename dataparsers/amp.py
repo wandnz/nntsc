@@ -144,7 +144,7 @@ class AmpModule:
         logger.log("Connecting to RabbitMQ queue %s on host %s:%s (ssl=%s), username %s" % (queue, host, port, ssl, username))
 
         self.source = PikaConsumer('', queue, host, port, 
-                ssl, username, password)
+                ssl, username, password, True)
 
 
     def process_data(self, channel, method, properties, body):
