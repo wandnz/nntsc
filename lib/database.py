@@ -363,10 +363,10 @@ class DBInsert(DatabaseCore):
         super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost, \
                 new, debug, cachetime=cachetime)
 
+    def connect_db(self, retrywait):
         self.streams = NNTSCCursor(self.connstr, False, None)
         self.data = NNTSCCursor(self.connstr, False, None)
 
-    def connect_db(self, retrywait):
         if self.streams.connect(retrywait) == -1:
             return -1
         if self.data.connect(retrywait) == -1:
