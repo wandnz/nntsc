@@ -37,16 +37,15 @@ class AmpThroughputParser(NNTSCParser):
             {"name":"source", "type":"varchar", "null":False},
             {"name":"destination", "type":"varchar", "null":False},
             {"name":"direction", "type":"varchar", "null":False},
-            {"name":"localaddress", "type":"inet", "null":False},
-            {"name":"remoteaddress", "type":"inet", "null":False},
+            {"name":"address", "type":"inet", "null":False},
             {"name":"duration", "type":"integer", "null":False},
             {"name":"writesize", "type":"integer", "null":False}, 
             {"name":"tcpreused", "type":"boolean", "null":False},
         ]
 
         self.uniquecolumns = [
-            'source', 'destination', 'direction', 'localaddress', \
-            'remoteaddress', 'duration', 'writesize', 'tcpreused']
+            'source', 'destination', 'direction', \
+            'address', 'duration', 'writesize', 'tcpreused']
 
         self.streamindexes = [
             {"name": "", "columns": ['source']},
@@ -64,13 +63,12 @@ class AmpThroughputParser(NNTSCParser):
         src = str(stream_data["source"])
         dest = str(stream_data["destination"])
         direction = str(stream_data["direction"])
-        local = stream_data["localaddress"]
-        remote = stream_data["remoteaddress"]
+        remote = stream_data["address"]
         duration = str(stream_data["duration"])
         writesize = str(stream_data["writesize"])
         reused = stream_data["tcpreused"]
         
-        key = (src, dest, direction, local, remote, duration, writesize, reused)
+        key = (src, dest, direction, remote, duration, writesize, reused)
         return key
 
     def create_existing_stream(self, stream_data):
@@ -107,14 +105,16 @@ class AmpThroughputParser(NNTSCParser):
             resdict = {}
             resdict['source'] = source
             resdict['destination'] = data['target']
-            resdict['localaddress'] = data['local_address']
-            resdict['remoteaddress'] = data['address']
+            resdict['address'] = data['address']
             resdict['direction']  = result['direction']
             resdict['duration'] = result['duration']
             resdict['runtime'] = result['runtime']
             resdict['writesize'] = result['write_size']
             resdict['bytes'] = result['bytes']
-            resdict['packets'] = result['packets']
+            if 'packets' in result:
+                resdict['packets'] = result['packets']
+            else:
+                resdict['packets'] = None
             resdict['tcpreused'] = result['tcpreused']
 
             streamid = self._process_single_result(timestamp, resdict)
