@@ -109,8 +109,15 @@ class AmpThroughputParser(NNTSCParser):
             resdict['direction']  = result['direction']
             resdict['duration'] = result['duration']
             resdict['runtime'] = result['runtime']
-            resdict['writesize'] = result['write_size']
             resdict['bytes'] = result['bytes']
+
+            # new style has write_size fixed for all schedule items in a test,
+            # but we should try to be backwards compatible for a while at least.
+            if 'write_size' in result:
+                resdict['writesize'] = result['write_size']
+            else:
+                resdict['writesize'] = data['write_size']
+
             if 'packets' in result:
                 resdict['packets'] = result['packets']
             else:
