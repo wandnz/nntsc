@@ -1,0 +1,15 @@
+Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: libnntsc-client
+Upstream-Contact: contact@wand.net.nz
+Source: http://wand.net.nz/projects/details/storage-network-monitoring-and-measurement-data
+
+Files: *
+Copyright: 2013 The University of Waikato, Hamilton, New Zealand
+License: Special pre-release license
+ NNTSC is proprietary to the University of Waikato and may not be
+ redistributed, published or disclosed without the express permission
+ of the University of Waikato and the WAND Network Research Group.
+ .
+ THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR
+ IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
+ WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
