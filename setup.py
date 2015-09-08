@@ -18,7 +18,7 @@ if sys.version_info < (2, 7):
         requires.append('argparse')
 
 setup(name="nntsc",
-	version="2.7.0",
+	version="2.7",
 	description='Nathan\'s Network Time Series Collector',
         author='Nathan Overall, Shane Alcock',
         author_email='contact@wand.net.nz',
@@ -30,6 +30,8 @@ setup(name="nntsc",
 		'libnntsc':'lib', \
 		'libnntsc.parsers':'dataparsers', \
 	},
+        # XXX these appear to be completely ignored now and so we have to use
+        # the manifest file?
 	include_package_data=True,
 	package_data = {
 		'libnntsc': ['conf/nntsc.conf', 'conf/rrd.examples',
