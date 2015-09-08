@@ -10,7 +10,10 @@ Homepage: http://wand.net.nz/projects/details/storage-network-monitoring-and-mea
 
 Package: nntsc
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}
+# XXX temporarily remove python dependencies, as Debian doesn't package most
+# of the ones that we use
+#Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}, python
 Description: Collects, stores and examines network time series data
  NNTSC is a system designed for collecting, storing and examining network
  time series data. Unlike RRDs, NNTSC does not attempt to aggregate
