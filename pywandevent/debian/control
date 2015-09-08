@@ -1,0 +1,28 @@
+Source: pywandevent
+Section: libs
+Priority: optional
+Maintainer: Brendon Jones <brendonj@waikato.ac.nz>
+Build-Depends: debhelper (>= 9.0.0), dh-python, python, python-setuptools
+Standards-Version: 3.9.3
+Homepage: http://research.wand.net.nz/software/libwandevent.php
+#Vcs-Git: git://git.debian.org/collab-maint/nntsc.git
+#Vcs-Browser: http://git.debian.org/?p=collab-maint/nntsc.git;a=summary
+
+Package: pywandevent
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}
+Description: Python implementation of libwandevent
+ Libwandevent is a software library that provides an API for developing
+ event-driven programs. Libwandevent is intended for the development
+ of programs that may have a number of 'events' that can occur at any given
+ point in the program's execution which need to be handled as soon as possible
+ without blocking or waiting on other inactive events.
+ .
+ The idea behind the design of libwandevent is that the developer will register
+ events and provide libwandevent with a function that is to be called should
+ that event occur. All of the code for managing the events and determining
+ whether an event has occurred is contained within libwandevent, leaving the
+ developer free to concentrate on the events themselves rather than having to
+ check for the occurence of the event.
+ .
+ This package provides a python implementation of libwandevent.
