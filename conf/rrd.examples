@@ -30,7 +30,7 @@ switch=Example Switch
 # the port number
 interface=20
 
-# This is an optional parameter that can be used to provide a textual 
+# This is an optional parameter that can be used to provide a textual
 # description of what the interface is used for / connected to
 interfacelabel=Steve's Desk
 
@@ -38,7 +38,7 @@ interfacelabel=Steve's Desk
 direction=received
 
 # The full path to the RRD file containing the munin byte counts for the
-# given switch / interface / direction combination. 
+# given switch / interface / direction combination.
 file=/var/lib/munin/internal/example-sw.internal-snmp_example_sw_internal_if_20-recv-d.rrd
 
 
