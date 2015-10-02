@@ -36,6 +36,7 @@ from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.dberrorcodes import *
+from google.protobuf.message import DecodeError
 import time, signal
 import logging
 
@@ -182,6 +183,11 @@ class AmpModule:
 
             try:
                 data = self.amp_modules[test].get_data(body)
+            except DecodeError as e:
+                # we got something that wasn't a valid protocol buffer message
+                logger.log("Failed to decode result from %s for %s test: %s" % (
+                    properties.user_id, test, e))
+                data = None
             except AmpTestVersionMismatch as e:
                 logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e))
                 data = None
