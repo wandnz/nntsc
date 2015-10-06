@@ -184,10 +184,21 @@ class AmpModule:
             try:
                 data = self.amp_modules[test].get_data(body)
             except DecodeError as e:
+                # TODO restore this error message once clients updated >= 0.5.0
                 # we got something that wasn't a valid protocol buffer message
-                logger.log("Failed to decode result from %s for %s test: %s" % (
-                    properties.user_id, test, e))
-                data = None
+                #logger.log("Failed to decode result from %s for %s test: %s" %(
+                #properties.user_id, test, e))
+
+                # TODO remove these once all clients use amplet-client >= 0.5.0
+                # temporarily try old data parsing functions
+                try:
+                    data = self.amp_modules[test].get_old_data(body)
+                except AmpTestVersionMismatch as e:
+                    logger.log("Old %s test (Version mismatch): %s" % (test, e))
+                    data = None
+                except AssertionError as e:
+                    logger.log("Old %s test (assert failure): %s" % (test, e))
+                    data = None
             except AmpTestVersionMismatch as e:
                 logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e))
                 data = None
