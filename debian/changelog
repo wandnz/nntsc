@@ -1,3 +1,15 @@
+nntsc (2.7-1) unstable; urgency=low
+
+  * Each exporter client is now a separate thread.
+  * Database queries by the exporter are now made using worker threads.
+  * Improved robustness when clients disconnect.
+  * Added dataparsers for all the existing AMP tests.
+  * Enabled all the dataparser modules.
+  * Replaced exporter to client pipe with a rabbit queue.
+  * Change table structure to one-table-per-stream.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Mon,  7 Sep 2015 17:26:52 +1200
+
 nntsc (2.2-1) unstable; urgency=low
 
   * Install extra sample configuration.
