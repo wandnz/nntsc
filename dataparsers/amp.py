@@ -36,6 +36,7 @@ from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.dberrorcodes import *
+from google.protobuf.message import DecodeError
 import time, signal
 import logging
 
@@ -46,7 +47,7 @@ DEFAULT_COMMIT_FREQ=50
 class AmpModule:
     def __init__(self, tests, nntsc_config, routekey, exchange, queueid):
         
-        self.processed = 0
+        self.pending = []
         self.exporter = None
         self.pubthread = None
 
@@ -152,31 +153,52 @@ class AmpModule:
             Depending on the test this message may include multiple results.
         """
 
-        # We need this loop so that we can try processing the message again
-        # if an insert fails due to a query timeout. If
-        # we exit this function without acknowledging the message then we
-        # will stop getting messages (including the unacked one!)
-        while 1:
+        # push every new message onto the end of the list to be processed
+        self.pending.append((channel, method, properties, body))
+
+        # once there are enough messages ready to go, process them all
+        if len(self.pending) < self.commitfreq:
+            return
+
+        # track how many messages were successfully written to the database
+        processed = 0
+
+        for channel, method, properties, body in self.pending:
+            # ignore any messages that don't have user_id set
             if not hasattr(properties, "user_id"):
-                # ignore any messages that don't have user_id set
-                channel.basic_ack(delivery_tag = method.delivery_tag)
-                break
-                
+                continue
+
             test = properties.headers["x-amp-test-type"]
 
+            # ignore any messages for tests we don't have a module for
             if test not in self.amp_modules:
                 logger.log("unknown test: '%s'" % (
                         properties.headers["x-amp-test-type"]))
                 logger.log("AMP -- Data error, acknowledging and moving on")
-                channel.basic_ack(delivery_tag = method.delivery_tag)
-                break
-               
+                continue
+
+            # ignore any messages for tests we don't have a parser for
             if test not in self.parsers:
-                channel.basic_ack(delivery_tag=method.delivery_tag)
-                break
+                continue
 
             try:
                 data = self.amp_modules[test].get_data(body)
+            except DecodeError as e:
+                # TODO restore this error message once clients updated >= 0.5.0
+                # we got something that wasn't a valid protocol buffer message
+                #logger.log("Failed to decode result from %s for %s test: %s" %(
+                #properties.user_id, test, e))
+
+                # TODO remove these once all clients use amplet-client >= 0.5.0
+                # temporarily try old data parsing functions
+                try:
+                    data = self.amp_modules[test].get_old_data(body)
+                except AmpTestVersionMismatch as e:
+                    logger.log("Old %s test (Version mismatch): %s" % (test, e))
+                    data = None
+                except AssertionError as e:
+                    logger.log("Old %s test (assert failure): %s" % (test, e))
+                    data = None
             except AmpTestVersionMismatch as e:
                 logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e))
                 data = None
@@ -186,62 +208,71 @@ class AmpModule:
                 logger.log("Ignoring AMP result for %s test (ampsave assertion failure): %s" % (test, e))
                 data = None
 
+            # ignore any broken messages and carry on
             if data is None:
-                channel.basic_ack(delivery_tag = method.delivery_tag)
-                break
-
-            source = properties.user_id
+                continue
 
             try:
-                self.parsers[test].process_data(properties.timestamp, data, 
-                        source)
-                self.processed += 1
-                if self.processed >= self.commitfreq:
-                    self.db.commit_data()
-                    channel.basic_ack(method.delivery_tag, True)
-                    self.processed = 0
-                
-                #if test in self.collections:
-                #    self.exporter.publishPush(self.collections[test], \
-                #            properties.timestamp)
+                # pass the message off to the test specific code
+                self.parsers[test].process_data(properties.timestamp, data,
+                        properties.user_id)
+                processed += 1
             except DBQueryException as e:
                 if e.code == DB_OPERATIONAL_ERROR:
                     # Disconnect while inserting data, need to reprocess the
                     # entire set of messages
                     logger.log("Database disconnect while processing AMP data")
                     channel.close()
+                    return
 
                 elif e.code == DB_DATA_ERROR:
                     # Data was bad so we couldn't insert into the database.
                     # Acknowledge the message so we can dump it from the queue
                     # and move on but don't try to export it to clients.
                     logger.log("AMP -- Data error, acknowledging and moving on")
-                    channel.basic_ack(delivery_tag = method.delivery_tag)
-                    break
+                    continue
 
                 elif e.code == DB_INTERRUPTED:
                     logger.log("Interrupt while processing AMP data")
                     channel.close()
-            
+                    return
+
                 elif e.code == DB_GENERIC_ERROR:
                     logger.log("Database error while processing AMP data")
                     channel.close()
+                    return
+
                 elif e.code == DB_QUERY_TIMEOUT:
                     logger.log("Database timeout while processing AMP data")
                     channel.close()
+                    return
+
                 elif e.code == DB_CODING_ERROR:
                     logger.log("Bad database code encountered while processing AMP data")
                     channel.close()
+                    return
+
                 elif e.code == DB_DUPLICATE_KEY:
                     logger.log("Duplicate key error while processing AMP data")
                     channel.close()
-        
+                    return
+
                 else:
-                    logger.log("Unknown error code returned by database: %d" \
-                            % (code))
+                    logger.log("Unknown error code returned by database: %d" %
+                            (code))
                     logger.log("Shutting down AMP module")
                     channel.close()
-            break
+                    return
+
+        # commit the data if anything was successfully processed
+        if processed > 0:
+            self.db.commit_data()
+
+        # ack all data up to and including the most recent message
+        channel.basic_ack(method.delivery_tag, True)
+
+        # empty the list of pending data ready for more
+        self.pending = []
 
     def run(self):
         """ Run forever, calling the process_data callback for each message """
