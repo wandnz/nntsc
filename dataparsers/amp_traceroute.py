@@ -537,9 +537,13 @@ class AmpTracerouteParser(AmpIcmpParser):
         for x in result['hops']:
             if 'address' in x:
                 ippath.append(x['address'])
+            else:
+                ippath.append(None)
 
             if 'rtt' in x:
                 rtts.append(x['rtt'])
+            else:
+                rtts.append(None)
 
             if 'as' not in x:
                 continue
