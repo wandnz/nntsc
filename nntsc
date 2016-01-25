@@ -26,6 +26,7 @@ import sys, time, getopt, string, os, imp, select, argparse
 from multiprocessing import *
 
 from libnntsc.database import DBInsert
+from libnntsc.influx import InfluxInsertor
 from libnntsc.configurator import *
 from libnntsc.dberrorcodes import *
 from libnntsc.importer import import_parsers
@@ -82,7 +83,7 @@ class DataCollector():
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
             sys.exit(1)
-
+            
         if dbconf["name"] == "":
             logger.log("No database name specified in the NNTSC configuration file")
             sys.exit(1)
@@ -92,6 +93,18 @@ class DataCollector():
 
         logger.log("Connecting to NNTSC database %s on host %s with user %s" % (dbconf["name"], dbconf["host"], dbconf["user"]))
         self.db.connect_db(15);
+
+        influxconf = get_influx_config(nntsc_conf)
+        if influxconf == {}:
+            sys.exit(1)
+
+        if influxconf["useinflux"]:
+            logger.log("Connecting to Influx database {} on host {} with user {}".format(
+                influxconf["name"], influxconf["host"], influxconf["user"]))
+            self.influxdb = InfluxInsertor(
+                influxconf["name"], influxconf["user"], influxconf["pass"],
+                influxconf["host"], influxconf["port"])
+        
         self.processes = []
         
         if not self.exportonly:

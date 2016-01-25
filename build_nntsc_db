@@ -24,6 +24,7 @@
 import sys, getopt, socket, time, os, imp
 
 from libnntsc.database import DBInsert
+from libnntsc.influx import InfluxInsertor
 from libnntsc.configurator import *
 from libnntsc.importer import import_parsers
 from libnntsc.parsers.rrd import insert_rrd_streams
@@ -83,6 +84,35 @@ except DBQueryException as e:
     logger.log("Failed to create tables for nntsc database")
     sys.exit(1)
 
+influxconf = get_influx_config(nntsc_conf)
+
+if influxconf == {}:
+    logger.log("Invalid options for influx database")
+    sys.exit(1)
+
+if influxconf["useinflux"] and "amp" in modules.keys():
+    influxdb = InfluxInsertor(
+        influxconf["name"], influxconf["user"], influxconf["pass"],
+        influxconf["host"], influxconf["port"])
+    if clean_db:
+        try:
+            influxdb.new_db()
+        except DBQueryException as e:
+            logger.log("Failed to empty InfluxDB")
+            sys.exit(1)
+    try:
+        influxdb.create_retention_policies(influxconf["keepdata"],
+                                           influxconf["keeprollups"])
+    except DBQueryException as e:
+        logger.log("Failed to create retention policies for influx")
+        sys.exit(1)
+    try:
+        influxdb.build_cqs(modules["amp"], db, "rollups")
+    except DBQueryException as e:
+        logger.log("Failed to build continuous queries for influx")
+        sys.exit(1)
+
+        
 if 'rrd' in enabled_modules:
 
     rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
@@ -99,6 +129,7 @@ if 'rrd' in enabled_modules:
         if e.code == DB_GENERIC_ERROR:
             logger.log("Database error while creating RRD streams -- may need to manually check database")
             sys.exit(1)
+
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

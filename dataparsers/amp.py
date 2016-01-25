@@ -23,6 +23,7 @@
 import sys
 
 from libnntsc.database import DBInsert
+from libnntsc.influx import InfluxInsertor
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
         PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
@@ -61,6 +62,17 @@ class AmpModule:
 
         self.db.connect_db(15)
 
+        self.influxconf = get_influx_config(nntsc_config)
+        if self.influxconf == {}:
+            sys.exit(1)
+
+        if self.influxconf["useinflux"]:
+            self.influxdb = InfluxInsertor(
+                self.influxconf["name"], self.influxconf["user"], self.influxconf["pass"],
+                self.influxconf["host"], self.influxconf["port"])
+        else:
+            self.influxdb = None
+
         # the amp modules understand how to extract the test data from the blob
         self.amp_modules = import_data_functions()
 
@@ -76,12 +88,12 @@ class AmpModule:
                 self.collections[c['modsubtype']] = c['id']
 
         self.parsers = {
-            "icmp":AmpIcmpParser(self.db),
+            "icmp":AmpIcmpParser(self.db, self.influxdb),
             "traceroute":AmpTracerouteParser(self.db),
-            "throughput":AmpThroughputParser(self.db),
-            "dns":AmpDnsParser(self.db),
-            "http":AmpHttpParser(self.db),
-            "tcpping":AmpTcppingParser(self.db)
+            "throughput":AmpThroughputParser(self.db, self.influxdb),
+            "dns":AmpDnsParser(self.db, self.influxdb),
+            "http":AmpHttpParser(self.db, self.influxdb),
+            "tcpping":AmpTcppingParser(self.db, self.influxdb)
         }
 
         # set all the streams that we already know about for easy lookup of
@@ -299,6 +311,24 @@ def run_module(tests, config, key, exchange, queueid):
     if amp.pubthread:
         amp.pubthread.join()
 
+def cqs(db, influxdb, retention_policy="default"):
+
+    parser = AmpIcmpParser(db, influxdb)
+    parser.build_cqs(retention_policy)
+
+    parser = AmpTcppingParser(db, influxdb)
+    parser.build_cqs(retention_policy)
+
+    parser = AmpDnsParser(db, influxdb)
+    parser.build_cqs(retention_policy)
+
+    parser = AmpThroughputParser(db, influxdb)
+    parser.build_cqs(retention_policy)
+
+    parser = AmpHttpParser(db, influxdb)
+    parser.build_cqs(retention_policy)
+
+    
 def tables(db):
 
     parser = AmpIcmpParser(db)

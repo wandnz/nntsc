@@ -3,8 +3,10 @@ import libnntscclient.logger as logger
 import time
 
 class NNTSCParser(object):
-    def __init__(self, db):
+    def __init__(self, db, influxdb=None):
         self.db = db
+        self.influxdb = influxdb
+        
         self.streamtable = None
         self.datatable = None
         self.colname = "Unspecified"
@@ -21,6 +23,8 @@ class NNTSCParser(object):
 
         self.collectionid = None
 
+        self.cqs = []
+
     def add_exporter(self, exp):
         self.exporter = exp
 
@@ -34,6 +38,13 @@ class NNTSCParser(object):
         lastts = self.db.get_last_timestamp(self.datatable, stream)
         return lastts
 
+    def build_cqs(self, retention_policy="default"):
+        if not self.influxdb:
+            logger.log("Tried to build Continuous Queries without InfluxDB")
+            return
+
+        self.influxdb.create_cqs(self.cqs, self.datatable, retention_policy)
+    
     def _create_indexes(self, table, indexes):
         for ind in indexes:
             if "columns" not in ind or len(ind["columns"]) == 0:
@@ -154,8 +165,12 @@ class NNTSCParser(object):
                 filtered[col["name"]] = None
 
         try:
-            self.db.insert_data(self.datatable, self.colname, stream, ts, 
-                    filtered, casts)
+            if self.influxdb:
+                self.influxdb.insert_data(self.datatable,
+                                          stream, ts, filtered, casts)
+            else:
+                self.db.insert_data(self.datatable, self.colname, stream, ts, 
+                                filtered, casts)
         except DBQueryException as e:
             logger.log("Failed to insert new data for %s stream %d" % \
                     (self.colname, stream))

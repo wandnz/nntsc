@@ -25,8 +25,8 @@ import libnntscclient.logger as logger
 from libnntsc.parsers.common import NNTSCParser
 
 class AmpDnsParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpDnsParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpDnsParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_dns"
         self.datatable = "data_amp_dns"
@@ -80,6 +80,20 @@ class AmpDnsParser(NNTSCParser):
 
         self.dataindexes = [
             {"name": "", "columns":['rtt']}
+        ]
+
+        self.cqs = [
+            (
+                ['5m','10m','20m','40m','80m','4h'],
+                {
+#                    "sum(loss)":"loss",
+                    "count(rtt)":"num_results",
+                    "mean(rtt)":"mean_rtt",
+                    "stddev(rtt)":"stddev_rtt",
+                    "max(rtt)":"max_rtt",
+                    "min(rtt)":"min_rtt"
+                }
+            )
         ]
 
     def _result_to_key(self, res):

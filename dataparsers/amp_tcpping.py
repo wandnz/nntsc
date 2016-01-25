@@ -21,12 +21,13 @@
 
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.dberrorcodes import *
+from copy import deepcopy
 import libnntscclient.logger as logger
 
 
 class AmpTcppingParser(AmpIcmpParser):
-    def __init__(self, db):
-        super(AmpTcppingParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpTcppingParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_tcpping"
         self.datatable = "data_amp_tcpping"
@@ -61,6 +62,29 @@ class AmpTcppingParser(AmpIcmpParser):
             #{"name":"icmptype", "type":"smallint", "null":True},
             #{"name":"icmpcode", "type":"smallint", "null":True},
         ]
+
+        aggs  =  {
+            "sum(loss)":"loss",
+            "sum(results)":"num_results",
+            "mean(median)":"mean_rtt",
+            "stddev(median)":"stddev_rtt",
+            "max(median)":"max_rtt",
+            "min(median)":"min_rtt"
+          }
+
+        aggs_w_ntile = deepcopy(aggs)
+        aggs_w_ntile.update(
+              {"percentile(rtt, {})".format(
+                  i):"\"{}_percentile_rtt\"".format(
+                      i) for i in range(5,100,5)}
+        )
+        
+        self.cqs = [
+            (['1h','1d'],
+            aggs),
+            (['5m','10m','20m','40m','80m','4h'],
+             aggs_w_ntile)
+            ]
 
         #self.dataindexes = []
 

@@ -21,12 +21,15 @@
 
 from libnntsc.parsers.common import NNTSCParser
 from libnntsc.dberrorcodes import *
+from copy import deepcopy
 import libnntscclient.logger as logger
 
 class AmpIcmpParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpIcmpParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpIcmpParser, self).__init__(db, influxdb)
 
+        self.influxdb = influxdb
+        
         self.streamtable = "streams_amp_icmp"
         self.datatable = "data_amp_icmp"
         self.colname = "amp_icmp"
@@ -56,8 +59,30 @@ class AmpIcmpParser(NNTSCParser):
         ]
 
         self.dataindexes = [
-        ] 
+        ]
 
+        aggs  =  {
+            "sum(loss)":"loss",
+            "sum(results)":"num_results",
+            "mean(median)":"mean_rtt",
+            "stddev(median)":"stddev_rtt",
+            "max(median)":"max_rtt",
+            "min(median)":"min_rtt"
+          }
+
+        aggs_w_ntile = deepcopy(aggs)
+        aggs_w_ntile.update(
+              {"percentile(rtt, {})".format(
+                  i):"\"{}_percentile_rtt\"".format(
+                      i) for i in range(5,100,5)}
+        )
+        
+        self.cqs = [
+            (['1h','1d'],
+            aggs),
+            (['5m','10m','20m','40m','80m','4h'],
+             aggs_w_ntile)
+            ]
 
     def create_existing_stream(self, stream_data):
         """Extract the stream key from the stream data provided by NNTSC
@@ -171,7 +196,10 @@ class AmpIcmpParser(NNTSCParser):
         for sid, streamdata in observed.iteritems():
             self._aggregate_streamdata(streamdata)
 
-            casts = {"rtts":"integer[]"}
+            if self.influxdb:
+                casts = {"rtts":str}
+            else:
+                casts = {"rtts":"integer[]"}
             self.insert_data(sid, timestamp, streamdata, casts)
 
         # update the last timestamp for all streams we just got data for

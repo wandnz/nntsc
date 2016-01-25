@@ -24,8 +24,8 @@ from libnntsc.parsers.common import NNTSCParser
 import libnntscclient.logger as logger
 
 class AmpThroughputParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpThroughputParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpThroughputParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_throughput"
         self.datatable = "data_amp_throughput"
@@ -57,7 +57,17 @@ class AmpThroughputParser(NNTSCParser):
             {"name":"packets", "type":"bigint", "null":True},
             {"name":"runtime", "type":"integer", "null":True}
         ]
-        
+
+        self.cqs = [
+            (
+                ['1h','4h','12h','24h'],
+                {
+                    'sum(bytes)':'bytes',
+                    'sum(packets)':'packets',
+                    'sum(runtime)':'runtime'
+                }
+            )
+        ]
 
     def _construct_key(self, stream_data):
         src = str(stream_data["source"])

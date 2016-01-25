@@ -24,8 +24,8 @@ from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 class AmpHttpParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpHttpParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpHttpParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_http"
         self.datatable = "data_amp_http"
@@ -63,7 +63,19 @@ class AmpHttpParser(NNTSCParser):
         ]
 
         self.dataindexes = [
-        ] 
+        ]
+
+        self.cqs = [
+            (
+                ['15m','1h','3h','6h'],
+                {
+                    'max(server_count)':'server_count',
+                    'max(object_count)':'object_count',
+                    'max("duration")':'"duration"',
+                    'max(bytes)':'bytes'
+                }
+            )
+        ]
 
 
     def _stream_key(self, stream_data):
