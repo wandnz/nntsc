@@ -42,8 +42,11 @@ class NNTSCParser(object):
         if not self.influxdb:
             logger.log("Tried to build Continuous Queries without InfluxDB")
             return
-
+        
         self.influxdb.create_cqs(self.cqs, self.datatable, retention_policy)
+
+    def get_cqs(self):
+        return self.cqs
     
     def _create_indexes(self, table, indexes):
         for ind in indexes:

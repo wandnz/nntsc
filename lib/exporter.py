@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 # This file is part of NNTSC
 #
 # Copyright (C) 2013 The University of Waikato, Hamilton, New Zealand
@@ -30,6 +29,7 @@ import Queue as StdQueue
 import threading, select
 
 from libnntsc.dbselect import DBSelector
+from libnntsc.influx import InfluxSelector
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
@@ -97,14 +97,16 @@ DBWORKER_FULLQUEUE = -3
 DBWORKER_HALT = -4
 
 class DBWorker(threading.Thread):
-    def __init__(self, parent, queue, dbconf, threadid, timeout):
+    def __init__(self, parent, queue, dbconf, threadid, timeout, influxconf):
         threading.Thread.__init__(self)
         self.dbconf = dbconf
+        self.influxconf = influxconf
         self.parent = parent
         self.queue = queue
         self.threadid = threadid
         self.timeout = timeout
         self.db = None
+        self.influxdb = None
 
     def process_job(self, job):
         jobtype = job[0]
@@ -182,7 +184,7 @@ class DBWorker(threading.Thread):
                 labels = self.db.filter_active_streams(colid, labels, start, 
                         stoppoint)
             except DBQueryException as e:
-                logger.log("Failed to filter active streams for collection %s" \
+                log("Failed to filter active streams for collection %s" \
                         % (colid))
                 return DBWORKER_ERROR
 
@@ -206,7 +208,7 @@ class DBWorker(threading.Thread):
                     queryend = (int(queryend / binsize) * binsize) - 1
 
             generator = self.db.select_aggregated_data(colid, labels, aggs,
-                    start, queryend, groupcols, binsize)
+                                start, queryend, groupcols, binsize, influxdb=self.influxdb)
 
             error = self._query_history(generator, colid, labels, more, start,
                     queryend)
@@ -303,12 +305,14 @@ class DBWorker(threading.Thread):
 
             # Only aggregate the streams for each label if explicitly requested,
             # otherwise fetch full historical data
+
             if aggs != []:
                 generator = self.db.select_aggregated_data(colid, labels,
-                        aggcols, start, queryend, [], 1)
+                                                           aggcols, start, queryend, [], 1,
+                                                           influxdb=self.influxdb)
             else:
                 generator = self.db.select_data(colid, labels, columns, start,
-                        queryend)
+                                                queryend, influxdb=self.influxdb)
 
             error = self._query_history(generator, colid, labels, more, start,
                     queryend)
@@ -643,7 +647,6 @@ class DBWorker(threading.Thread):
         req_hdr = struct.unpack(nntsc_req_fmt,
                 reqmsg[0:struct.calcsize(nntsc_req_fmt)])
 
-
         if req_hdr[0] == NNTSC_REQ_COLLECTION:
             return self._request_collections()
 
@@ -662,6 +665,12 @@ class DBWorker(threading.Thread):
                 cachetime = self.dbconf["cachetime"])
         self.db.connect_db(30)
 
+    def _connect_influx(self):
+        self.influxdb = InfluxSelector(self.threadid, self.influxconf["name"],
+                                    self.influxconf["user"], self.influxconf["pass"],
+                                    self.influxconf["host"], self.influxconf["port"],
+                                    self.timeout)
+        
     def run(self):
         running = 1
 
@@ -679,6 +688,8 @@ class DBWorker(threading.Thread):
             # risk of inactive threads preventing us from contacting
             # the database
             self._connect_database()
+            if self.influxconf and self.influxconf["useinflux"]:
+                self._connect_influx()
             err = self.process_job(job)
             if err == DBWORKER_HALT:
                 break
@@ -783,7 +794,7 @@ class DBWorker(threading.Thread):
         return freq
 
 class NNTSCClient(threading.Thread):
-    def __init__(self, sock, parent, queue, dbconf, dbtimeout):
+    def __init__(self, sock, parent, queue, dbconf, dbtimeout, influxconf):
         threading.Thread.__init__(self)
         assert(dbconf)
         self.sock = sock
@@ -806,7 +817,7 @@ class NNTSCClient(threading.Thread):
         for i in range(0, MAX_WORKERS):
             threadid = "client%d_thread%d" % (self.sock.fileno(), i)
 
-            worker = DBWorker(self, self.workdone, dbconf, threadid, dbtimeout)
+            worker = DBWorker(self, self.workdone, dbconf, threadid, dbtimeout, influxconf)
             worker.daemon = True
             worker.start()
 
@@ -1155,6 +1166,7 @@ class NNTSCExporter:
         self.listen_port = port
         self.listen_sock = None
         self.dbconf = None
+        self.influxconf = None
         self.collections = {}
         self.subscribers = {}
         self.sources = []
@@ -1453,7 +1465,7 @@ class NNTSCExporter:
         clientfd.setblocking(1)
 
         cthread = NNTSCClient(clientfd, self, queue, self.dbconf, \
-                self.dbtimeout)
+                              self.dbtimeout, self.influxconf)
         cthread.daemon = True
         cthread.start()
 
@@ -1505,7 +1517,12 @@ class NNTSCExporter:
         if dbconf == {}:
             sys.exit(1)
 
+        influxconf = get_influx_config(nntsc_conf)
+        if influxconf == {}:
+            sys.exit(1)
+            
         self.dbconf = dbconf
+        self.influxconf = influxconf
         self.dbtimeout = dbtimeout
 
         self.listen_sock = self.create_listener(self.listen_port)

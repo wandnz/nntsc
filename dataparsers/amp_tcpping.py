@@ -63,25 +63,24 @@ class AmpTcppingParser(AmpIcmpParser):
             #{"name":"icmpcode", "type":"smallint", "null":True},
         ]
 
-        aggs  =  {
-            "sum(loss)":"loss",
-            "sum(results)":"num_results",
-            "mean(median)":"mean_rtt",
-            "stddev(median)":"stddev_rtt",
-            "max(median)":"max_rtt",
-            "min(median)":"min_rtt"
-          }
+        aggs  =  [
+            ("loss","sum","loss"),
+            ("num_results","sum","results"),
+            ("mean_rtt", "mean", "median"),
+            ("stddev_rtt", "stddev", "median"),
+            ("max_rtt", "max", "median"),
+            ("min_rtt","min","median")
+          ]
 
         aggs_w_ntile = deepcopy(aggs)
-        aggs_w_ntile.update(
-              {"percentile(rtt, {})".format(
-                  i):"\"{}_percentile_rtt\"".format(
-                      i) for i in range(5,100,5)}
-        )
+        aggs_w_ntile += [("\"{}_percentile_rtt\"".format(
+                      i), "percentile", "median, {}".format(i)) for i in range(5,100,5)]
+
         
         self.cqs = [
-            (['1h','1d'],
-            aggs),
+# Uncomment to aggregate data for tooltips... Doesn't seem to be helpful though            
+#            (['1h','1d'],
+#            aggs),
             (['5m','10m','20m','40m','80m','4h'],
              aggs_w_ntile)
             ]

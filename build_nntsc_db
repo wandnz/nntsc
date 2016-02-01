@@ -91,9 +91,13 @@ if influxconf == {}:
     sys.exit(1)
 
 if influxconf["useinflux"] and "amp" in modules.keys():
-    influxdb = InfluxInsertor(
-        influxconf["name"], influxconf["user"], influxconf["pass"],
-        influxconf["host"], influxconf["port"])
+    try:
+        influxdb = InfluxInsertor(
+            influxconf["name"], influxconf["user"], influxconf["pass"],
+            influxconf["host"], influxconf["port"])
+    except DBQueryException as e:
+        logger.log("Failed to connect to InfluxDB")
+        sys.exit(1)
     if clean_db:
         try:
             influxdb.new_db()
@@ -107,7 +111,7 @@ if influxconf["useinflux"] and "amp" in modules.keys():
         logger.log("Failed to create retention policies for influx")
         sys.exit(1)
     try:
-        influxdb.build_cqs(modules["amp"], db, "rollups")
+        influxdb.build_cqs(db, "rollups")
     except DBQueryException as e:
         logger.log("Failed to build continuous queries for influx")
         sys.exit(1)

@@ -85,14 +85,14 @@ class AmpDnsParser(NNTSCParser):
         self.cqs = [
             (
                 ['5m','10m','20m','40m','80m','4h'],
-                {
-#                    "sum(loss)":"loss",
-                    "count(rtt)":"num_results",
-                    "mean(rtt)":"mean_rtt",
-                    "stddev(rtt)":"stddev_rtt",
-                    "max(rtt)":"max_rtt",
-                    "min(rtt)":"min_rtt"
-                }
+                [
+                    # ("loss", "sum", "loss")
+                    ("num_results","count","rtt"),
+                    ("mean_rtt","mean","rtt"),
+                    ("stddev_rtt","stddev","rtt"),
+                    ("max_rtt","max","rtt"),
+                    ("min_rtt","min","rtt")
+                ]
             )
         ]
 

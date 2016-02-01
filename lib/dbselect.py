@@ -4,6 +4,7 @@ from libnntscclient.logger import *
 from libnntsc.parsers import amp_traceroute
 from libnntsc.querybuilder import QueryBuilder
 from libnntsc.database import DatabaseCore, NNTSCCursor
+from libnntsc.influx import InfluxSelector
 from libnntsc.dberrorcodes import *
 import time
 
@@ -22,7 +23,7 @@ traceroute_tables = ['data_amp_traceroute', 'data_amp_astraceroute']
 
 class DBSelector(DatabaseCore):
     def __init__(self, uniqueid, dbname, dbuser=None, dbpass=None, dbhost=None,
-            timeout=0, cachetime=0):
+                 timeout=0, cachetime=0):
 
         super(DBSelector, self).__init__(dbname, dbuser, dbpass, dbhost, 
                 False, False, timeout, cachetime)
@@ -43,7 +44,7 @@ class DBSelector(DatabaseCore):
         self.cursorname = "cursor_" + uniqueid
 
         self.data = NNTSCCursor(self.connstr, False, self.cursorname)
-
+                
     def connect_db(self, retrywait):
         if self.data.connect(retrywait) == -1:
             return -1
@@ -149,7 +150,7 @@ class DBSelector(DatabaseCore):
 
     def select_aggregated_data(self, col, labels, aggcols,
             start_time = None, stop_time = None, groupcols = None,
-            binsize = 0):
+                               binsize = 0, influxdb = None):
 
         """ Queries the database for time series data, splits the time
             series into bins and applies the given aggregation function(s)
@@ -181,6 +182,8 @@ class DBSelector(DatabaseCore):
                 binsize -- the size of each time bin. If 0 (the default),
                            the entire data series will aggregated into a
                            single summary value.
+                influxdb -- a reference to an InfluxSelector(). If None, will
+                           use postgreSQL, otherwise will use influxdb for data
 
             This function is a generator function and will yield a tuple each
             time it is iterated over. The tuple contains a row from the result
@@ -223,6 +226,13 @@ class DBSelector(DatabaseCore):
         groupcols = self._sanitise_columns(table, columns, groupcols)
         aggcols = self._filter_aggregation_columns(table, columns, aggcols)
         uniquecols = list(set([k[0] for k in aggcols] + groupcols))
+        
+        if influxdb and table not in traceroute_tables:
+            for row in influxdb.select_aggregated_data(table, labels, aggcols,
+                                                       start_time, stop_time,
+                                                       groupcols, binsize):
+                yield row
+            return
 
         self.qb.reset()
 
@@ -305,11 +315,15 @@ class DBSelector(DatabaseCore):
                 if errcode != DB_NO_ERROR:
                     yield(None, label, None, None, DBQueryException(errcode))
                 else:
+#                    if len(row) > 1:
+#                        log("Result: [{},...]".format(row[0]))
+#                    else:
+#                        log("Result: {}".format(row))
                     yield (row, label, tscol, binsize, None)
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
-            stop_time=None):
+                    stop_time=None, influxdb=None):
 
         """ Queries the database for time series data.
 
@@ -330,6 +344,8 @@ class DBSelector(DatabaseCore):
                 stop_time -- a timestamp describing the end of the time
                              period that data is required for. If None,
                              this is set to the current time.
+                influxdb -- a reference to an InfluxSelector(). If None, will
+                           use postgreSQL, otherwise will use influxdb for data
 
             This function is a generator function and will yield a tuple each
             time it is iterated over. The tuple contains a row from the result
@@ -362,6 +378,13 @@ class DBSelector(DatabaseCore):
         # XXX for now, lets try to munge graph types that give a list of
         # stream ids into the label dictionary format that we want
         assert(type(labels) is dict)
+
+        if influxdb and table not in traceroute_tables:
+            for row in influxdb.select_data(table, labels, selectcols,
+                                                       start_time, stop_time):
+                yield row
+            return
+
 
         # These columns are important so include them regardless
         if 'timestamp' not in selectcols:
@@ -727,7 +750,7 @@ class DBSelector(DatabaseCore):
 
             if fetched == []:
                 break
-
+            
             yield fetched, DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

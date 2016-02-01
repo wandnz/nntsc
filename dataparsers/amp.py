@@ -310,24 +310,6 @@ def run_module(tests, config, key, exchange, queueid):
 
     if amp.pubthread:
         amp.pubthread.join()
-
-def cqs(db, influxdb, retention_policy="default"):
-
-    parser = AmpIcmpParser(db, influxdb)
-    parser.build_cqs(retention_policy)
-
-    parser = AmpTcppingParser(db, influxdb)
-    parser.build_cqs(retention_policy)
-
-    parser = AmpDnsParser(db, influxdb)
-    parser.build_cqs(retention_policy)
-
-    parser = AmpThroughputParser(db, influxdb)
-    parser.build_cqs(retention_policy)
-
-    parser = AmpHttpParser(db, influxdb)
-    parser.build_cqs(retention_policy)
-
     
 def tables(db):
 

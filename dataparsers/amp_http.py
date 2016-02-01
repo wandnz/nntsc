@@ -68,12 +68,12 @@ class AmpHttpParser(NNTSCParser):
         self.cqs = [
             (
                 ['15m','1h','3h','6h'],
-                {
-                    'max(server_count)':'server_count',
-                    'max(object_count)':'object_count',
-                    'max("duration")':'"duration"',
-                    'max(bytes)':'bytes'
-                }
+                [
+                    ('server_count','max','server_count'),
+                    ('object_count','max','object_count'),
+                    ('"duration"','max','"duration"'),
+                    ('bytes','max','bytes')
+                ]
             )
         ]
 
