@@ -25,6 +25,13 @@ class NNTSCParser(object):
 
         self.cqs = []
 
+    def get_random_field(self):
+        """Get a random field to aggregate. Used by influx to find last timestamp"""
+        if len(self.datacolumns) == 0:
+            return None
+        else:
+            return self.datacolumns[0]["name"]
+
     def add_exporter(self, exp):
         self.exporter = exp
 
@@ -35,7 +42,7 @@ class NNTSCParser(object):
         return self.streamtable
 
     def get_last_timestamp(self, stream):
-        lastts = self.db.get_last_timestamp(self.datatable, stream)
+        lastts = self.db.get_last_timestamp(self.datatable, stream, self.influxdb)
         return lastts
 
     def build_cqs(self, retention_policy="default"):

@@ -279,6 +279,8 @@ class AmpModule:
         # commit the data if anything was successfully processed
         if processed > 0:
             self.db.commit_data()
+            if self.influxdb:
+                self.influxdb.commit_data()
 
         # ack all data up to and including the most recent message
         channel.basic_ack(method.delivery_tag, True)

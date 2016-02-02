@@ -111,12 +111,12 @@ class DBWorker(threading.Thread):
     def process_job(self, job):
         jobtype = job[0]
         jobdata = job[1]
-
+        
         if jobtype == -1:
             return DBWORKER_HALT
    
         self.retries = 0
-    
+
         if jobtype == NNTSC_REQUEST:
             return self.process_request(jobdata)
 
@@ -157,8 +157,8 @@ class DBWorker(threading.Thread):
     def aggregate(self, aggmsg):
         tup = pickle.loads(aggmsg)
         colid, start, end, labels, aggcols, groupcols, binsize, aggfunc = tup
-        now = int(time.time())
 
+        now = int(time.time())
         if end == 0:
             end = None
 
@@ -182,7 +182,7 @@ class DBWorker(threading.Thread):
         if stoppoint - start > 300:
             try:
                 labels = self.db.filter_active_streams(colid, labels, start, 
-                        stoppoint)
+                                                       stoppoint, self.influxdb)
             except DBQueryException as e:
                 log("Failed to filter active streams for collection %s" \
                         % (colid))

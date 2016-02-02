@@ -649,38 +649,40 @@ class DBInsert(DatabaseCore):
         
         for sid in stream_ids:
             self.streamcache.update_timestamps(datatable, sid, lasttimestamp)
-            #log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
+            # log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
         
         return
 
-    def get_last_timestamp(self, table, streamid):
+    def get_last_timestamp(self, table, streamid, influxdb = None):
         lastdict = self.streamcache.fetch_all_last_timestamps(table)
-
-        if streamid not in lastdict:
+        
+        if streamid not in lastdict:            
             # Nothing useful in cache, query data table for max timestamp
             # Warning, this isn't going to be fast so try to avoid doing
             # this wherever possible!
-            query = "SELECT max(timestamp) FROM %s_" % (table)
-            query += "%s"   # stream id goes in here
+            if influxdb:
+                lastts = influxdb.query_timestamp(table, streamid)
+            else:
+                query = "SELECT max(timestamp) FROM %s_" % (table)
+                query += "%s"   # stream id goes in here
+                
+                self._basicquery(query, (streamid,))
 
-            self._basicquery(query, (streamid,))
+                if self.basic.cursor.rowcount != 1:
+                    log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+                    raise DBQueryException(DB_CODING_ERROR)
 
-            if self.basic.cursor.rowcount != 1:
-                log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
-                raise DBQueryException(DB_CODING_ERROR)
+                row = self.basic.cursor.fetchone()
+                if row[0] == None:
+                    return 0
 
-            row = self.basic.cursor.fetchone()
-            if row[0] == None:
-                return 0
-
-            lastts = int(row[0])
+                lastts = int(row[0])
             lastdict[streamid] = lastts
             self.streamcache.set_last_timestamps(table, lastdict)
             
             self._releasebasic()
         else:
             lastts = lastdict[streamid]
-
         return lastts
 
 

@@ -493,7 +493,7 @@ class DBSelector(DatabaseCore):
         self.dbqueries += 1
         return ts
 
-    def filter_active_streams(self, collection, labels, start, end):
+    def filter_active_streams(self, collection, labels, start, end, influxdb=None):
         filteredlabels = {}
         storerequiredlast = False
         storerequiredfirst = False
@@ -501,7 +501,7 @@ class DBSelector(DatabaseCore):
         table, columns, streamtable = self._get_data_table(collection)
         firstdict = self.streamcache.fetch_all_first_timestamps(table)
         lastdict = self.streamcache.fetch_all_last_timestamps(table)
-
+        
         for lab, streams in labels.iteritems():
             self.cachehits = 0
             self.dbqueries = 0
@@ -512,7 +512,10 @@ class DBSelector(DatabaseCore):
                     firstdict[sid] = None
 
                 if firstdict[sid] == None:
-                    firstts = self._query_timestamp(table, sid, "min")
+                    if influxdb is not None:
+                        firstts = influxdb.query_timestamp(table, sid, "first")
+                    else:
+                        firstts = self._query_timestamp(table, sid, "min")
                     firstdict[sid] = firstts
                     storerequiredfirst = True
                 else:
@@ -523,7 +526,10 @@ class DBSelector(DatabaseCore):
                     lastdict[sid] = None
 
                 if lastdict[sid] == None:
-                    lastts = self._query_timestamp(table, sid, "max")
+                    if influxdb is not None:
+                        firstts = influxdb.query_timestamp(table, sid, "last")
+                    else:
+                        lastts = self._query_timestamp(table, sid, "max", influxdb)
                     storerequiredlast = True
                     lastdict[sid] = lastts
                 else:

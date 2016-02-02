@@ -26,7 +26,7 @@ from influxdb.exceptions import InfluxDBClientError
 from libnntsc.dberrorcodes import *
 from libnntsc.querybuilder import QueryBuilder
 import libnntscclient.logger as logger
-from libnntsc.cqs import build_cqs, get_cqs
+from libnntsc.cqs import build_cqs, get_cqs, get_parser
 from requests import ConnectionError
 import time
 
@@ -61,11 +61,25 @@ class InfluxConnection(object):
             self.handler(e)
 
     def query(self, query):
+        """Returns ResultSet object"""
         try:
-            return self.client.query(query, epoch='s').get_points()
+            return self.client.query(query, epoch='s')
         except Exception as e:
             self.handler(e)
-        
+
+    def query_timestamp(self, table, streamid, first_or_last="last"):
+        if first_or_last == "max":
+            first_or_last = "last"
+        if first_or_last == "min":
+            first_or_last = "first"    
+        if first_or_last not in ["first", "last"]:
+            return
+        field = get_parser(table).get_random_field()
+        query = "select {}({}) from {} where stream = '{}'".format(
+            first_or_last, field, table, streamid)
+        ts = self.query(query)
+        return ts.get_points().next()["time"]
+            
     def handler(self, db_exception):
         try:
             raise db_exception
@@ -81,31 +95,35 @@ class InfluxConnection(object):
 class InfluxInsertor(InfluxConnection):
     def __init__(self, dbname, user, password, host, port, timeout=None):
         super(InfluxInsertor, self).__init__(dbname, user, password, host, port, timeout)
-        cqs_in_db = self.query("show continuous queries")
+        cqs_in_db = self.query("show continuous queries").get_points()
         self.cqs_in_db = [cq["name"] for cq in cqs_in_db]
+        self.to_write = []
 
-    def insert_data(self, tablename, stream, ts, result, casts = {},
-                    retention_policy=DEFAULT_RP):
+    def commit_data(self, retention_policy=DEFAULT_RP):
+        try:
+            self.client.write_points(self.to_write, time_precision="s",
+                                     retention_policy=retention_policy)
+            self.to_write = []
+        except Exception as e:
+            self.handler(e)
+
+        
+    def insert_data(self, tablename, stream, ts, result, casts = {}):
 
         for cast in casts:
             if cast in result.keys():
                 result[cast] = casts[cast](result[cast])
-        try:
-            self.client.write_points([
-                {
-                    "measurement": tablename,
-                    "tags":{
-                        "stream": stream
-                    },
-                    "time":ts,
-                    "fields": result
-                }
-            ],
-            time_precision="s",
-            retention_policy=retention_policy)
-        except Exception as e:
-            self.handler(e)
-
+        self.to_write.append(
+            {
+                "measurement": tablename,
+                "tags":{
+                    "stream": stream
+                },
+                "time":ts,
+                "fields": result
+            }
+        )
+        
     def build_cqs(self, postgresdb, retention_policy=DEFAULT_RP):
         build_cqs(self, retention_policy)
 
@@ -197,11 +215,10 @@ class InfluxSelector(InfluxConnection):
         self.streams = []
         self.table = ""
         self.rename = False
+        self.streams_to_labels = {}
 
     def select_data(self, table, labels, selectcols, start_time, stop_time):
-
         self.qb.reset()
-
         self.qb.add_clause("select", "select {}".format(", ".join(selectcols)))
         
         self.qb.add_clause("from", "from {}".format(table))
@@ -218,7 +235,7 @@ class InfluxSelector(InfluxConnection):
                 order = ["select","from","where"]
                 querystring, _ = self.qb.create_query(order)
                 try:
-                    results = self.query(querystring)
+                    results = self.query(querystring).get_points()
                 except DBQueryException as e:
                     yield(None, label, None, None, e)
 
@@ -229,7 +246,7 @@ class InfluxSelector(InfluxConnection):
                     result["timestamp"] = result["time"]
                     del result["time"]
                     rows.append(result)
-                    
+                
                 yield(rows, label, "timestamp", 0, None)
                 
         
@@ -238,30 +255,30 @@ class InfluxSelector(InfluxConnection):
         """
         Selects aggregated data from a given table, within parameters.
         """
+
         self.qb.reset()
         self._set_influx_binsize(binsize)
-
+        
         self.table = table
         self.aggcols = aggcols
+        # If there are aggregations on the same column we need to rename our response
         self._set_rename()
 
-        now = int(time.time())
-        lastbin = now - (now % binsize) - binsize
         # Check if we're requesting at least one bin, otherwise query
         # the raw data
+        lastbin = stop_time - (stop_time % binsize) - binsize
         if start_time >= lastbin:
             is_rollup = False
         else:
             # Also check if we have an appropriate rollup table
-            is_rollup = self._is_rollup()
-
-        columns = None
-        if is_rollup:
             self.cqs = get_cqs(self.table, self.influx_binsize)
-            columns = self._get_rollup_columns()            
+            if self.cqs:
+                columns = self._get_rollup_columns()
+                is_rollup = columns is not None
+            else:
+                is_rollup = False
 
-        if columns is None:
-            is_rollup = False
+        if not is_rollup:
             columns = self._get_rollup_functions()
             self.qb.add_clause("from", "from {}".format(table))
             self.qb.add_clause("group_by", "group by stream, time({})".format(self.influx_binsize))
@@ -269,7 +286,7 @@ class InfluxSelector(InfluxConnection):
             self.qb.add_clause("from", "from {}.{}_{}".format(
                 ROLLUP_RP, self.table, self.influx_binsize))
             self.qb.add_clause("group_by", "group by stream")
-            # Second query is for last bin of data which may not have been collected
+            # Second query is for last bin of data which may not have been collected by CQs
             self.qb2.add_clause("from", "from {}".format(table))
             self.qb2.add_clause("group_by", "group by stream, time({})".format(self.influx_binsize))
             columns2 = self._get_rollup_functions()
@@ -278,44 +295,59 @@ class InfluxSelector(InfluxConnection):
         self.qb.add_clause("select", "select {}".format(
             ", ".join(columns)))
 
+        self.streams_to_labels = {}
+        all_streams = []
+        labels_and_rows = {}
+        
         for label, streams in labels.iteritems():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
 
             else:
-                self.qb.add_clause("where", "where time > {}s and time < {}s and {}".format(
-                    start_time, lastbin if is_rollup else stop_time, " or ".join([
-                        "stream = '{}'".format(stream) for stream in streams])))
+                labels_and_rows[label] = []
+                for stream in streams:
+                    all_streams.append(stream)
+                    self.streams_to_labels[str(stream)] = label
 
-                order = ["select","from","where","group_by"]
-                querystring, _ = self.qb.create_query(order)
-                try:
-                    results = self.query(querystring)
-                except DBQueryException as e:
-                    yield(None, label, None, None, e)
-                
-                rows = []
-                for result in results:
-                    row = self._row_from_result(result, label)
-                    if row:
-                        rows.append(row)
+        if len(all_streams) == 0:
+            return
+        
+        self.qb.add_clause("where", "where time > {}s and time < {}s and {}".format(
+            start_time, lastbin if is_rollup else stop_time, " or ".join([
+                "stream = '{}'".format(stream) for stream in all_streams])))
 
-                if is_rollup:
-                    self.qb2.add_clause("where", "where time > {}s and time < {}s and {}".format(
-                        lastbin, stop_time, " or ".join([
-                            "stream = '{}'".format(stream) for stream in streams])))
-                    querystring, _ = self.qb2.create_query(order)
-                    try:
-                        results = self.query(querystring)
-                        row = self._row_from_result(results.next(), label)
+        order = ["select","from","where","group_by"]
+        querystring, _ = self.qb.create_query(order)
+
+        results = self.query(querystring)
+
+        for (series, tags), generator in results.items():
+            for result in generator:
+                label = self.streams_to_labels[tags["stream"]]
+                row = self._row_from_result(result, label)
+                if row:
+                    labels_and_rows[label].append(row)
+
+        if is_rollup:
+            self.qb2.add_clause("where", "where time > {}s and time < {}s and {}".format(
+                lastbin, stop_time, " or ".join([
+                    "stream = '{}'".format(stream) for stream in all_streams])))
+            querystring, _ = self.qb2.create_query(order)
+            try:
+                results = self.query(querystring)
+                for (series, tags), generator in results.items():
+                    label = self.streams_to_labels[tags["stream"]]
+                    for result in generator:
+                        row = self._row_from_result(result, label)
                         if row:
-                            rows.append(row)
-                    except DBQueryException as e:
-                        logger.log("Failed to collect last bin, using CQ data only")
-#                if len(rows) > 1:
-#                    logger.log("Result: [{},...]".format(rows[0]))
-#                else:
-#                    logger.log("Result: {}".format(rows))
+                            labels_and_rows[label].append(row)
+            except DBQueryException as e:
+                logger.log("Failed to collect last bin, using CQ data only")
+                
+        for label, rows in labels_and_rows.iteritems():
+            if len(rows) == 0:
+                yield(None, label, None, None, None)
+            else:
                 yield(rows, label, "binstart", binsize, None)
 
     def _set_rename(self):
@@ -378,9 +410,10 @@ class InfluxSelector(InfluxConnection):
         Fixes up the result to be ready to send by packing up any \
         smoke arrays and removing unwanted empty results
         """
+
         # Pack up the smoke array to be sent back
         aggs = [k[1] for k in self.aggcols]
-
+        
         if "count" in aggs:
             index = aggs.index("count")
             meas = self.aggcols[index][0]
@@ -403,7 +436,7 @@ class InfluxSelector(InfluxConnection):
             if len(smokearray) == 0:
                 smokearray = None
             result[meas] = smokearray
-        
+
         result["nntsclabel"] = nntsc_label
         result["timestamp"] = result["time"]
         result["binstart"] = result["time"]
@@ -426,11 +459,6 @@ class InfluxSelector(InfluxConnection):
                     return True
         return False
                 
-    def _is_rollup(self):
-        """Check to see if there is an aggregated table available"""
-        return bool(self.query("show measurements with measurement = {}_{}".format(
-                self.table, self.influx_binsize)).next())
-        
         
     def _set_influx_binsize(self, binsize):
         """Returns a string representing the binsize in largest unit possible"""
