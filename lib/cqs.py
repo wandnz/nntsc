@@ -3,6 +3,7 @@
 # Copyright (C) 2013 The University of Waikato, Hamilton, New Zealand
 # Authors: Shane Alcock
 #          Brendon Jones
+#          Nathan Overall
 #          Andy Bell
 #
 # All rights reserved.
@@ -27,6 +28,7 @@ from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 
 
 def get_parser(table_name):
+    """Returns a parser for the given table"""
     if table_name == "data_amp_icmp":
         parser = AmpIcmpParser(None)
     elif table_name == "data_amp_tcpping":
@@ -43,6 +45,7 @@ def get_parser(table_name):
     return parser
 
 def get_cqs(table_name, bin_size):
+    """Gets continuous queries for given table at given bin size"""
     parser = get_parser(table_name)
     if parser == None:
         return []
@@ -55,7 +58,7 @@ def get_cqs(table_name, bin_size):
     return []
         
 def build_cqs(influxdb, retention_policy="default"):
-    
+    """Builds continuous queries on influxdb"""
     parsers = []
     
     parsers.append(AmpIcmpParser(None, influxdb))

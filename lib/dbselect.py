@@ -230,7 +230,7 @@ class DBSelector(DatabaseCore):
         if influxdb and table not in traceroute_tables:
             for row in influxdb.select_aggregated_data(table, labels, aggcols,
                                                        start_time, stop_time,
-                                                       groupcols, binsize):
+                                                       binsize):
                 yield row
             return
 

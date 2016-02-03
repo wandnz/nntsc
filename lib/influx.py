@@ -3,6 +3,7 @@
 # Copyright (C) 2013 The University of Waikato, Hamilton, New Zealand
 # Authors: Shane Alcock
 #          Brendon Jones
+#          Nathan Overall
 #          Andy Bell
 #
 # All rights reserved.
@@ -32,8 +33,11 @@ import time
 
 DEFAULT_RP = "default"
 ROLLUP_RP = "rollups"
+# If binsize is < FILL_THRESH, fill empty slots with last result
+FILL_THRESH = 60
 
 class InfluxConnection(object):
+    """A class to represent a connection to an Influx Database"""
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost="localhost",
                  dbport="8086", timeout=None):
 
@@ -68,6 +72,10 @@ class InfluxConnection(object):
             self.handler(e)
 
     def query_timestamp(self, table, streamid, first_or_last="last"):
+        """
+        Returns either the first or last timestamp in database for
+        given table and stream
+        """
         if first_or_last == "max":
             first_or_last = "last"
         if first_or_last == "min":
@@ -81,18 +89,26 @@ class InfluxConnection(object):
         return ts.get_points().next()["time"]
             
     def handler(self, db_exception):
+        """
+        A basic error handler for queries to database
+        """
         try:
             raise db_exception
-        except InfluxDBClientError as e:
+        except InfluxDBClientError:
             #logger.log(e.message)
             raise DBQueryException(DB_GENERIC_ERROR)
-        except ConnectionError as e:
+        except ConnectionError:
             #logger.log(e.message)
             raise DBQueryException(DB_QUERY_TIMEOUT)
+        except KeyboardInterrupt:
+            raise DBQueryException(DB_INTERRUPTED)
         except Exception as e:
             raise e
 
 class InfluxInsertor(InfluxConnection):
+    """
+    A class for inserting data into the influx database
+    """
     def __init__(self, dbname, user, password, host, port, timeout=None):
         super(InfluxInsertor, self).__init__(dbname, user, password, host, port, timeout)
         cqs_in_db = self.query("show continuous queries").get_points()
@@ -100,6 +116,7 @@ class InfluxInsertor(InfluxConnection):
         self.to_write = []
 
     def commit_data(self, retention_policy=DEFAULT_RP):
+        """Send all data that has been observed"""
         try:
             self.client.write_points(self.to_write, time_precision="s",
                                      retention_policy=retention_policy)
@@ -109,7 +126,7 @@ class InfluxInsertor(InfluxConnection):
 
         
     def insert_data(self, tablename, stream, ts, result, casts = {}):
-
+        """Prepare data for sending to database"""
         for cast in casts:
             if cast in result.keys():
                 result[cast] = casts[cast](result[cast])
@@ -125,9 +142,11 @@ class InfluxInsertor(InfluxConnection):
         )
         
     def build_cqs(self, postgresdb, retention_policy=DEFAULT_RP):
+        """Build all continuous queries with given retention policy"""
         build_cqs(self, retention_policy)
 
-    def destroy_cqs(self, retention_policy=DEFAULT_RP):
+    def destroy_cqs(self):
+        """Destroy all continuous queries that have been created"""
         for query in self.cqs_in_db:
             try:
                 self.client.query("drop continuous query {} on {}".format(query, self.dbname))
@@ -136,6 +155,7 @@ class InfluxInsertor(InfluxConnection):
         self.cqs_in_db = []
         
     def create_cqs(self, cqs, measurement, retention_policy=DEFAULT_RP):
+        """Create continuous queries for measurement as specified"""
         for agg_group in cqs:
             for time in agg_group[0]:
                 try:
@@ -145,6 +165,8 @@ class InfluxInsertor(InfluxConnection):
                         measurement, time))
         
     def create_cq(self, aggregations, measurement, time, retention_policy=DEFAULT_RP):
+        """Create a particular continuous query with given aggregations at given time
+        frequency on given measurement"""
         cq_name = "{}_{}".format(measurement, time)
         if cq_name in self.cqs_in_db:
             # Drop continuous query if it already exists
@@ -161,6 +183,7 @@ class InfluxInsertor(InfluxConnection):
         self.cqs_in_db.append(cq_name)
 
     def create_retention_policies(self, keepdata, keeprollups):
+        """Create retention policies at given length"""
         try:
             rps = self.client.get_list_retention_policies()
             default_exists = False
@@ -196,6 +219,7 @@ class InfluxInsertor(InfluxConnection):
             self.handler(e)
 
     def new_db(self):
+        """Drop the database and start again"""
         try:
             self.client.drop_database(self.dbname)
             self.client.create_database(self.dbname)
@@ -204,6 +228,7 @@ class InfluxInsertor(InfluxConnection):
             self.handler(e)
         
 class InfluxSelector(InfluxConnection):
+    """A class for selecting things from influx database"""
     def __init__(self, thread_id, dbname, user, password, host, port, timeout):
         super(InfluxSelector, self).__init__(dbname, user, password, host, port, timeout)
         self.thread_id = thread_id
@@ -218,11 +243,33 @@ class InfluxSelector(InfluxConnection):
         self.streams_to_labels = {}
 
     def select_data(self, table, labels, selectcols, start_time, stop_time):
+        """
+        Selects time series data from influx with no aggregation
+
+        Parameters:
+                table -- the name of the table to query
+                labels -- a dictionary of labels with lists of stream ids to get data for
+                selectcols -- a list of data columns to select on. If not
+                              included, 'stream_id' and 'timestamp' will
+                              be added to this list before running the
+                              query
+                start_time -- a timestamp describing the start of the
+                              time period that data is required for. If
+                              None, this is set to 1 day before the stop
+                              time
+                stop_time -- a timestamp describing the end of the time
+                             period that data is required for. If None,
+                             this is set to the current time.
+
+        This is a generator function and yields a tuple. Assumes prior sanitation of selectcols
+        and is designed to be called by function of same name in dbselect
+
+        """
         self.qb.reset()
         self.qb.add_clause("select", "select {}".format(", ".join(selectcols)))
         
         self.qb.add_clause("from", "from {}".format(table))
-        
+
         for label, streams in labels.iteritems():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
@@ -251,9 +298,35 @@ class InfluxSelector(InfluxConnection):
                 
         
     def select_aggregated_data(self, table, labels, aggcols, start_time,
-                               stop_time, groupcols, binsize):
+                               stop_time, binsize):
         """
         Selects aggregated data from a given table, within parameters.
+
+            Parameters:
+                table -- the name of the table to query
+                labels -- a dictionary of labels and their corresponding
+                          stream ids
+                aggcols -- a list of tuples describing the columns to 
+                           aggregate and the aggregation function to apply to 
+                           that column
+                start_time -- a timestamp describing the start of the
+                              time period that data is required for. If
+                              None, this is set to 1 day before the stop
+                              time
+                stop_time -- a timestamp describing the end of the time
+                             period that data is required for. If None,
+                             this is set to the current time.
+                groupcols -- a list of data columns to group the results by.
+                             'stream_id' will always be added to this list
+                             if not present.
+                binsize -- the size of each time bin. If 0 (the default),
+                           the entire data series will aggregated into a
+                           single summary value.
+
+        This is a generator function and will yield a tuple each time it is iterated over.
+        The function is called by the select_aggregated_data in dbselect, and assumes that
+        column names have been sanitised and active streams have been filtered out already
+
         """
 
         self.qb.reset()
@@ -316,7 +389,12 @@ class InfluxSelector(InfluxConnection):
             start_time, lastbin if is_rollup else stop_time, " or ".join([
                 "stream = '{}'".format(stream) for stream in all_streams])))
 
-        order = ["select","from","where","group_by"]
+        if binsize <= FILL_THRESH:
+            self.qb.add_clause("fill", "fill(previous)")
+            self.qb2.add_clause("fill", "fill(previous)")
+            order = ["select","from","where","group_by", "fill"]
+        else:
+            order = ["select","from","where","group_by"]
         querystring, _ = self.qb.create_query(order)
 
         results = self.query(querystring)
@@ -329,6 +407,7 @@ class InfluxSelector(InfluxConnection):
                     labels_and_rows[label].append(row)
 
         if is_rollup:
+            # Catch the last bin, as this won't have been rolled up by the database
             self.qb2.add_clause("where", "where time > {}s and time < {}s and {}".format(
                 lastbin, stop_time, " or ".join([
                     "stream = '{}'".format(stream) for stream in all_streams])))
@@ -351,10 +430,12 @@ class InfluxSelector(InfluxConnection):
                 yield(rows, label, "binstart", binsize, None)
 
     def _set_rename(self):
+        """Decides whether response will need to be renamed or not"""
         columns = [k[0] for k in self.aggcols]
         self.rename = len(set(columns)) < len(columns)
     
     def _get_label(self, meas, agg):
+        """Gets label for response given measure and aggregation"""
         return meas + "_" + agg if self.rename else meas
                 
     def _get_rollup_functions(self):
@@ -451,6 +532,7 @@ class InfluxSelector(InfluxConnection):
         return result
         
     def _meas_duplicated(self, meas):
+        """True if one measure is being aggregated more than once"""
         count = 0
         for agg_meas, _ in self.aggcols:
             if agg_meas == meas:
