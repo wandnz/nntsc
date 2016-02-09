@@ -30,11 +30,10 @@ import libnntscclient.logger as logger
 from libnntsc.cqs import build_cqs, get_cqs, get_parser
 from requests import ConnectionError
 import time
+import threading
 
 DEFAULT_RP = "default"
 ROLLUP_RP = "rollups"
-# If binsize is < FILL_THRESH, fill empty slots with last result
-FILL_THRESH = 60
 
 class InfluxConnection(object):
     """A class to represent a connection to an Influx Database"""
@@ -94,26 +93,87 @@ class InfluxConnection(object):
         """
         try:
             raise db_exception
-        except InfluxDBClientError:
-            #logger.log(e.message)
+        except InfluxDBClientError as e:
+            logger.log(e)
             raise DBQueryException(DB_GENERIC_ERROR)
-        except ConnectionError:
-            #logger.log(e.message)
+        except ConnectionError as e:
+            logger.log(e)
             raise DBQueryException(DB_QUERY_TIMEOUT)
         except KeyboardInterrupt:
             raise DBQueryException(DB_INTERRUPTED)
         except Exception as e:
             raise e
 
+    def _get_influx_binsize(self, binsize):
+        """Returns a string representing the binsize in largest unit possible"""
+        if binsize % 86400 == 0:
+            # convert to days
+            return "{}d".format(binsize/86400)
+        elif binsize % 3600 == 0:
+            # convert to hours
+            return "{}h".format(binsize/3600)
+        elif binsize % 60 == 0:
+            # convert to minutes
+            return "{}m".format(binsize/60)
+        else:
+            # leave as seconds
+            return "{}s".format(binsize)
+
+    def _get_binsize(self, influx_binsize):
+        """Returns the number of seconds represented by influx binsize of form [0-9]+[dhms]"""
+        num = int(influx_binsize[:-1])
+        unit = influx_binsize[-1]
+
+        # convert to seconds
+        if unit == "d":
+            return num * 86400
+        elif unit == "h":
+            return num * 3600
+        elif unit == "m":
+            return num * 60
+        elif unit == "s":
+            return num
+
+class ContinuousQueryRerunner(threading.Thread):
+    def __init__(self, parent, table, influx_binsize, aggregations, start, end):
+        super(ContinuousQueryRerunner, self).__init__()
+        self.parent = parent
+        self.table = table
+        self.influx_binsize = influx_binsize
+        self.aggregations = aggregations
+        self.start_time = start
+        self.end_time = end
+        self.daemon = True
+        
+    def run(self):
+        """
+        Rerun a continuous query. These queries don't seem to work with raw timestamps in 
+        the WHERE clause, so we use now() - x, where x is the amount of time between now and 
+        the timestamp we want
+        """
+        agg_string = ",".join(
+            ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in self.aggregations])
+        query = """
+        SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time > {4}s and time < {5}s GROUP BY stream,time({3})
+        """.format(
+            agg_string, ROLLUP_RP, self.table, self.influx_binsize, self.start_time, self.end_time)
+        result = self.parent.query(query)
+        #logger.log("Rolled up table: {} for binsize: {} between: {} and {}".format(
+        #    self.table, self.influx_binsize, self.start_time, self.end_time
+        #))
+        #logger.log(result)
+        
 class InfluxInsertor(InfluxConnection):
     """
     A class for inserting data into the influx database
-    """
+    """            
     def __init__(self, dbname, user, password, host, port, timeout=None):
         super(InfluxInsertor, self).__init__(dbname, user, password, host, port, timeout)
         cqs_in_db = self.query("show continuous queries").get_points()
         self.cqs_in_db = [cq["name"] for cq in cqs_in_db]
         self.to_write = []
+        # A dictionary to keep track of the range of timestamps encountered for each table
+        self.points_windows = {}
 
     def commit_data(self, retention_policy=DEFAULT_RP):
         """Send all data that has been observed"""
@@ -124,6 +184,32 @@ class InfluxInsertor(InfluxConnection):
         except Exception as e:
             self.handler(e)
 
+        # Rerun any continuous queries that need running
+        now = int(time.time())
+
+        # Go through ranges of timestamps we just inserted and see if we need to run any
+        # continuous queries on them
+        for table, (first, last, last_binned) in self.points_windows.iteritems():
+            cqs = get_cqs(table)
+            for influx_binsizes, aggs in cqs:
+                for influx_binsize in influx_binsizes:
+                    binsize = self._get_binsize(influx_binsize)
+                    # wrap up not the last bin, but the bin before that
+                    # (find floor of first and last by binsize, then subtract binsize again)
+                    time_from = last_binned.get(
+                        influx_binsize, first - (first % binsize) - binsize)
+                    time_to = last - (last % binsize) - binsize
+                    last_auto_store = now - (now % binsize)
+                    if time_from < last_auto_store and time_to > time_from:
+                        # Subtract 60 from start_time and add 1 to end_time just to make sure
+                        # we catch the bin
+                        cqr = ContinuousQueryRerunner(
+                            self, table, influx_binsize, aggs, time_from - 60, time_to + 1)
+                        last_binned[influx_binsize] = time_to
+                        cqr.start()
+                    if time_to >= last_auto_store:
+                        last_binned[influx_binsize] = time_from + binsize
+                        
         
     def insert_data(self, tablename, stream, ts, result, casts = {}):
         """Prepare data for sending to database"""
@@ -140,9 +226,18 @@ class InfluxInsertor(InfluxConnection):
                 "fields": result
             }
         )
+
+        # Keep track of what time period we're collecting points for
+        if tablename not in self.points_windows:
+            self.points_windows[tablename] = (ts, ts, {})
+        else:
+            first, last, last_binned = self.points_windows[tablename]            
+            self.points_windows[tablename] = (min(first, ts), max(last, ts), last_binned)
+
         
     def build_cqs(self, postgresdb, retention_policy=DEFAULT_RP):
         """Build all continuous queries with given retention policy"""
+        # Calls function in lib/cqs.py
         build_cqs(self, retention_policy)
 
     def destroy_cqs(self):
@@ -287,7 +382,6 @@ class InfluxSelector(InfluxConnection):
                     yield(None, label, None, None, e)
 
                 rows = []
-                
                 for result in results:
                     result["nntsclabel"] = label
                     result["timestamp"] = result["time"]
@@ -330,32 +424,44 @@ class InfluxSelector(InfluxConnection):
         """
 
         self.qb.reset()
-        self._set_influx_binsize(binsize)
+        self.influx_binsize = self._get_influx_binsize(binsize)
         
         self.table = table
         self.aggcols = aggcols
+
+        # Change "smoke" to "smokearray", because dns asks for this
+        for i, (meas, agg) in enumerate(self.aggcols):
+            if agg == "smoke":
+                self.aggcols[i] = (meas, "smokearray")
+                
         # If there are aggregations on the same column we need to rename our response
         self._set_rename()
 
+        # Find the last bin that we're rolling up
+        lastbin = stop_time - (stop_time % binsize) - binsize
         # Check if we're requesting at least one bin, otherwise query
         # the raw data
-        lastbin = stop_time - (stop_time % binsize) - binsize
         if start_time >= lastbin:
             is_rollup = False
         else:
             # Also check if we have an appropriate rollup table
             self.cqs = get_cqs(self.table, self.influx_binsize)
             if self.cqs:
+                # Get the names of the columns in the pre-aggregated table
                 columns = self._get_rollup_columns()
+                # _get_rollup_columns() returns None if there are aggregations asked for
+                # that aren't in a rollup table
                 is_rollup = columns is not None
             else:
                 is_rollup = False
 
         if not is_rollup:
+            # We just construct aggregation functions and roll up the data ourselves
             columns = self._get_rollup_functions()
             self.qb.add_clause("from", "from {}".format(table))
             self.qb.add_clause("group_by", "group by stream, time({})".format(self.influx_binsize))
         else:
+            # Otherwise we'll use the pre-aggregated columns we found
             self.qb.add_clause("from", "from {}.{}_{}".format(
                 ROLLUP_RP, self.table, self.influx_binsize))
             self.qb.add_clause("group_by", "group by stream")
@@ -368,6 +474,8 @@ class InfluxSelector(InfluxConnection):
         self.qb.add_clause("select", "select {}".format(
             ", ".join(columns)))
 
+        # Collect all the streams together so we can do one big query, but take note of the
+        # labels associated with them
         self.streams_to_labels = {}
         all_streams = []
         labels_and_rows = {}
@@ -384,21 +492,18 @@ class InfluxSelector(InfluxConnection):
 
         if len(all_streams) == 0:
             return
-        
+
+        # Conditional is disjunction of all of the streams with conjunction of time period
         self.qb.add_clause("where", "where time > {}s and time < {}s and {}".format(
             start_time, lastbin if is_rollup else stop_time, " or ".join([
                 "stream = '{}'".format(stream) for stream in all_streams])))
-
-        if binsize <= FILL_THRESH:
-            self.qb.add_clause("fill", "fill(previous)")
-            self.qb2.add_clause("fill", "fill(previous)")
-            order = ["select","from","where","group_by", "fill"]
-        else:
-            order = ["select","from","where","group_by"]
+        
+        order = ["select","from","where","group_by"]
         querystring, _ = self.qb.create_query(order)
 
         results = self.query(querystring)
 
+        # Update the labels of the results
         for (series, tags), generator in results.items():
             for result in generator:
                 label = self.streams_to_labels[tags["stream"]]
@@ -407,13 +512,17 @@ class InfluxSelector(InfluxConnection):
                     labels_and_rows[label].append(row)
 
         if is_rollup:
-            # Catch the last bin, as this won't have been rolled up by the database
+            # Catch the last bin with a second query, as this won't have been rolled up by the database
+            # (Influx Continuous Queries only roll up bins that are completely in the past)
+            # This will just be a query that aggregates the raw data, starting from where the other
+            # query left off (lastbin)
             self.qb2.add_clause("where", "where time > {}s and time < {}s and {}".format(
                 lastbin, stop_time, " or ".join([
                     "stream = '{}'".format(stream) for stream in all_streams])))
             querystring, _ = self.qb2.create_query(order)
             try:
                 results = self.query(querystring)
+                # Append these results to the results we already got
                 for (series, tags), generator in results.items():
                     label = self.streams_to_labels[tags["stream"]]
                     for result in generator:
@@ -447,6 +556,8 @@ class InfluxSelector(InfluxConnection):
         
         for meas, agg in self.aggcols:
             if agg == 'smokearray':
+                if meas == "rtts":
+                    meas = '"median"'
                 col_names += ["percentile({0}, {1}) as \"{1}_percentile_rtt\"".format(
                     meas, i) for i in range(5,100,5)]
             else:
@@ -461,7 +572,6 @@ class InfluxSelector(InfluxConnection):
         """
         Returns a list of columns to select if there is a pre-aggregated table
         """
-        
         col_names = []
         for meas, agg in self.aggcols:
             label = self._get_label(meas, agg)
@@ -496,6 +606,7 @@ class InfluxSelector(InfluxConnection):
         aggs = [k[1] for k in self.aggcols]
         
         if "count" in aggs:
+            # Check we got any results
             index = aggs.index("count")
             meas = self.aggcols[index][0]
             label = self._get_label(meas, "count")
@@ -506,29 +617,50 @@ class InfluxSelector(InfluxConnection):
         if "smokearray" in aggs:
             index = aggs.index("smokearray")
             meas = self.aggcols[index][0]
+            num_results = result.get("results", 20)
+            if num_results is None or num_results <= 1:
+                ntile_range = range(0)
+            elif num_results < 20:
+                # Don't return more percentiles than we have results
+                # This is a bit of a hack.. Would be better to do this
+                # in the database if we could, but influx doesn't have the
+                # functionality for this
+                # We do this by sort of
+                # taking the 100/n, (100/n)*2, ... (100/n)*n percentiles
+                range_top = 100
+                range_step = range_top // num_results
+                range_step = range_step - (range_step % 5)
+                range_bottom = range_top - range_step * num_results + 5
+                ntile_range = range(range_bottom, range_top, range_step)
+            else:
+                ntile_range = range(5,100,5)
             percentiles = ["{}_percentile_rtt".format(
-                    i) for i in range(5,100,5)]
+                    i) for i in ntile_range]
             smokearray = []
             for percentile in percentiles:
                 if result[percentile] is not None:
                     smokearray.append(result[percentile])
                 del result[percentile]
-            
+
+            # Don't return smoke array if it is empty
             if len(smokearray) == 0:
                 smokearray = None
             result[meas] = smokearray
 
+        # Add nntsclabel, and other fields that some results need
+        # Cheating by using time (which is really binstart) as binstart, timestamp and
+        # min_timestamp, but this doesn't seem to break anything. Influx only offers one
+        # timestamp to work with, and times can't be queried, so this is our only option
         result["nntsclabel"] = nntsc_label
         result["timestamp"] = result["time"]
         result["binstart"] = result["time"]
         result["min_timestamp"] = result["time"]
         del result["time"]
 
-        # get rid of loss or result if they are empty
+        # get rid of loss or result if they are empty or ampweb gets upset
         for key in ["loss", "result"]:
             if key in result and result[key] is None:
                 del result[key]
-        
         return result
         
     def _meas_duplicated(self, meas):
@@ -540,19 +672,3 @@ class InfluxSelector(InfluxConnection):
                 if count == 2:
                     return True
         return False
-                
-        
-    def _set_influx_binsize(self, binsize):
-        """Returns a string representing the binsize in largest unit possible"""
-        if binsize % 86400 == 0:
-            # convert to days
-            self.influx_binsize = "{}d".format(binsize/86400)
-        elif binsize % 3600 == 0:
-            # convert to hours
-            self.influx_binsize = "{}h".format(binsize/3600)
-        elif binsize % 60 == 0:
-            # convert to minutes
-            self.influx_binsize = "{}m".format(binsize/60)
-        else:
-            # leave as seconds
-            self.influx_binsize = "{}s".format(binsize)

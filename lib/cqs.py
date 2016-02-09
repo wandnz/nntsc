@@ -44,13 +44,17 @@ def get_parser(table_name):
 
     return parser
 
-def get_cqs(table_name, bin_size):
-    """Gets continuous queries for given table at given bin size"""
+def get_cqs(table_name, bin_size=None):
+    """Gets continuous queries for given table at given bin size,
+    or all cqs if no bin size given"""
     parser = get_parser(table_name)
     if parser == None:
         return []
     
     cqs = parser.get_cqs()
+    if bin_size is None:
+        return cqs
+
     for times, cols in cqs:
         if bin_size in times:
             return cols

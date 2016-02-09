@@ -512,7 +512,7 @@ class DBSelector(DatabaseCore):
                     firstdict[sid] = None
 
                 if firstdict[sid] == None:
-                    if influxdb is not None:
+                    if influxdb is not None and table not in traceroute_tables:
                         firstts = influxdb.query_timestamp(table, sid, "first")
                     else:
                         firstts = self._query_timestamp(table, sid, "min")
@@ -526,8 +526,8 @@ class DBSelector(DatabaseCore):
                     lastdict[sid] = None
 
                 if lastdict[sid] == None:
-                    if influxdb is not None:
-                        firstts = influxdb.query_timestamp(table, sid, "last")
+                    if influxdb is not None and table not in traceroute_tables:
+                        lastts = influxdb.query_timestamp(table, sid, "last")
                     else:
                         lastts = self._query_timestamp(table, sid, "max", influxdb)
                     storerequiredlast = True
