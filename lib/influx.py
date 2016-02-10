@@ -189,25 +189,28 @@ class InfluxInsertor(InfluxConnection):
 
         # Go through ranges of timestamps we just inserted and see if we need to run any
         # continuous queries on them
-        for table, (first, last, last_binned) in self.points_windows.iteritems():
+        for table, (most_recent, last_binned) in self.points_windows.iteritems():
             cqs = get_cqs(table)
             for influx_binsizes, aggs in cqs:
                 for influx_binsize in influx_binsizes:
                     binsize = self._get_binsize(influx_binsize)
-                    # wrap up not the last bin, but the bin before that
-                    # (find floor of first and last by binsize, then subtract binsize again)
-                    time_from = last_binned.get(
-                        influx_binsize, first - (first % binsize) - binsize)
-                    time_to = last - (last % binsize) - binsize
+                    # wrap up the last bin
+                    time_from = last_binned[influx_binsize]
+                    time_to = most_recent - (most_recent % binsize)
                     last_auto_store = now - (now % binsize)
+                    # If we've filled a whole bin and we're not overlapping with influx continuous query
+                    # auto stores...
                     if time_from < last_auto_store and time_to > time_from:
                         # Subtract 60 from start_time and add 1 to end_time just to make sure
                         # we catch the bin
                         cqr = ContinuousQueryRerunner(
                             self, table, influx_binsize, aggs, time_from - 60, time_to + 1)
+                        # Adjust 'last binned' to match the fact we're making a bin now
                         last_binned[influx_binsize] = time_to
                         cqr.start()
-                    if time_to >= last_auto_store:
+                    if time_from >= last_auto_store:
+                        # This means we're overlapping with the automatic continuous queries, so we don't need
+                        # to keep binning stuff up
                         last_binned[influx_binsize] = time_from + binsize
                         
         
@@ -229,10 +232,24 @@ class InfluxInsertor(InfluxConnection):
 
         # Keep track of what time period we're collecting points for
         if tablename not in self.points_windows:
-            self.points_windows[tablename] = (ts, ts, {})
+            # This is the first timestamp we've encountered, so make the last_binned dictionary up
+            cqs = get_cqs(tablename)
+            last_binned = {}
+            for influx_binsizes, aggs in cqs:
+                for influx_binsize in influx_binsizes:
+                    binsize = self._get_binsize(influx_binsize)
+                    last_binned[influx_binsize] = ts - (ts % binsize)
+            # Store the most recent point inserted and the last completed bin for each bin
+            self.points_windows[tablename] = (ts, last_binned)
         else:
-            first, last, last_binned = self.points_windows[tablename]            
-            self.points_windows[tablename] = (min(first, ts), max(last, ts), last_binned)
+            most_recent, last_binned = self.points_windows[tablename]
+            # Check that we haven't got any data from an already binned up time. If so, we need
+            # to set the 'last_binned' time to before our new 'old' data so that it'll get binned up
+            for influx_binsize, last_bin_time in last_binned.iteritems():
+                if ts < last_bin_time:
+                    binsize = self._get_binsize(influx_binsize)
+                    last_binned[influx_binsize] = ts - (ts % binsize)
+            self.points_windows[tablename] = (ts, last_binned)
 
         
     def build_cqs(self, postgresdb, retention_policy=DEFAULT_RP):
@@ -377,16 +394,17 @@ class InfluxSelector(InfluxConnection):
                 order = ["select","from","where"]
                 querystring, _ = self.qb.create_query(order)
                 try:
-                    results = self.query(querystring).get_points()
+                    results = self.query(querystring)
                 except DBQueryException as e:
                     yield(None, label, None, None, e)
 
                 rows = []
-                for result in results:
-                    result["nntsclabel"] = label
-                    result["timestamp"] = result["time"]
-                    del result["time"]
-                    rows.append(result)
+                for (table, tags), results in results.items():
+                    for result in results:
+                        result["nntsclabel"] = label
+                        result["timestamp"] = result["time"]
+                        del result["time"]
+                        rows.append(result)
                 
                 yield(rows, label, "timestamp", 0, None)
                 
@@ -559,7 +577,8 @@ class InfluxSelector(InfluxConnection):
                 if meas == "rtts":
                     meas = '"median"'
                 col_names += ["percentile({0}, {1}) as \"{1}_percentile_rtt\"".format(
-                    meas, i) for i in range(5,100,5)]
+                    meas, i) for i in range(5,100,5)] + ["max({}) as \"max_rtt\"".format(
+                        meas)]
             else:
                 label = self._get_label(meas, agg)
                 if agg == 'avg':
@@ -585,6 +604,9 @@ class InfluxSelector(InfluxConnection):
                     if func == 'percentile':
                         col_names.append(col_name)
                         found_col_name = True
+                    # We also want the max_rtt, so that we can get the 100th percentile
+                    if col_name == 'max_rtt':
+                        col_names.append(col_name)    
                 elif meas == original_col and agg == func:
                     col_names.append("{} AS \"{}\"".format(col_name, label))
                     found_col_name = True
@@ -630,17 +652,28 @@ class InfluxSelector(InfluxConnection):
                 range_top = 100
                 range_step = range_top // num_results
                 range_step = range_step - (range_step % 5)
-                range_bottom = range_top - range_step * num_results + 5
+                range_bottom = range_top - range_step * (num_results - 1)
                 ntile_range = range(range_bottom, range_top, range_step)
+                second_bottom = range_bottom + range_step
             else:
                 ntile_range = range(5,100,5)
+                range_bottom = 5
+                second_bottom = 10
+
+            # Also take the max_rtt, as this acts as the 100 percentile
             percentiles = ["{}_percentile_rtt".format(
-                    i) for i in ntile_range]
+                    i) for i in ntile_range] + ["max_rtt"]
             smokearray = []
             for percentile in percentiles:
-                if result[percentile] is not None:
+                if result.get(percentile, None) is not None:
                     smokearray.append(result[percentile])
+
+            for percentile in ["{}_percentile_rtt".format(
+                    i) for i in range(5, 100, 5)]:
                 del result[percentile]
+
+            #if len(smokearray) > 0 and num_results < 20:
+            #    logger.log("num results: {}, smokearray: {}".format(num_results, smokearray))
 
             # Don't return smoke array if it is empty
             if len(smokearray) == 0:

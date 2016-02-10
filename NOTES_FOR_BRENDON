@@ -1,4 +1,4 @@
-To the config file, I have added the following section:
+To the config file (myconf.conf), I have added the following section:
 
 # Options for connection settings and database info of influxdb 
 [influx]
