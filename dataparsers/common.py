@@ -25,10 +25,15 @@ class NNTSCParser(object):
 
         self.cqs = []
 
-    def get_random_field(self):
-        """Get a random field to aggregate. Used by influx to find last timestamp"""
+    def get_random_field(self, rollup=None):
+        """Get a random field to aggregate. Used by influx to find last timestamp
+        Rollup must be an influx binsize"""
         if len(self.datacolumns) == 0:
             return None
+        elif rollup is not None:
+            for times, aggs in self.cqs:
+                if rollup in times:
+                    return aggs[0][0]
         else:
             return self.datacolumns[0]["name"]
 

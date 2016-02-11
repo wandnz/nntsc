@@ -70,10 +70,10 @@ class InfluxConnection(object):
         except Exception as e:
             self.handler(e)
 
-    def query_timestamp(self, table, streamid, first_or_last="last"):
+    def query_timestamp(self, table, streamid=None, first_or_last="last", rollup=None):
         """
         Returns either the first or last timestamp in database for
-        given table and stream
+        given table and stream, or just table if no stream is given
         """
         if first_or_last == "max":
             first_or_last = "last"
@@ -81,11 +81,22 @@ class InfluxConnection(object):
             first_or_last = "first"    
         if first_or_last not in ["first", "last"]:
             return
-        field = get_parser(table).get_random_field()
-        query = "select {}({}) from {} where stream = '{}'".format(
-            first_or_last, field, table, streamid)
+        # All queries need a field, but we only care about the time, so this can be anything
+        field = get_parser(table).get_random_field(rollup)
+        if rollup is not None:
+            # We need to query a rollup table
+            table = "{}.{}_{}".format(ROLLUP_RP, table, rollup)
+            
+        # select {first|last}(<random_field>) from <table> {where stream = '<stream>'}
+        query = "select {}({}) from {}{}".format(
+            first_or_last, field, table, " where stream = '{}'".format(streamid) if streamid is not None else "")
         ts = self.query(query)
-        return ts.get_points().next()["time"]
+        point = ts.get_points().next()
+        if point is None:
+            # Nothing in this table!
+            return 0
+        else:
+            return point["time"]
             
     def handler(self, db_exception):
         """
@@ -236,8 +247,9 @@ class InfluxInsertor(InfluxConnection):
             last_binned = {}
             for influx_binsizes, aggs in cqs:
                 for influx_binsize in influx_binsizes:
+                    # Find the last bin that was created and start rollups from 1 bin after that
                     binsize = self._get_binsize(influx_binsize)
-                    last_binned[influx_binsize] = ts - (ts % binsize)
+                    last_binned[influx_binsize] = self.query_timestamp(tablename, rollup=influx_binsize) + binsize
             # Store the most recent point inserted and the last completed bin for each bin
             self.points_windows[tablename] = (ts, last_binned)
         else:
@@ -247,7 +259,7 @@ class InfluxInsertor(InfluxConnection):
             for influx_binsize, last_bin_time in last_binned.iteritems():
                 if ts < last_bin_time:
                     binsize = self._get_binsize(influx_binsize)
-                    last_binned[influx_binsize] = ts - (ts % binsize)
+1                    last_binned[influx_binsize] = ts - (ts % binsize)
             self.points_windows[tablename] = (ts, last_binned)
 
         

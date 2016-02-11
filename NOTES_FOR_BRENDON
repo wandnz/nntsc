@@ -148,4 +148,14 @@ help:
 	Well yeah, you can probably work out what this does :)
 
 
+TODO:
+	The ContinuousQueryRerunner in influx.py keeps on spawning threads as it needs. As we discussed, you may want to create some sort of object for limiting the number of threads it can spawn at once. These are all created in the commit_data method of InfluxInsertor(). L216 of influx.py at the time of writing. When it runs out of connections it gives this warning:
+	WARNING:requests.packages.urllib3.connectionpool:Connection pool is full, discarding connection: localhost
+
+	Figure out why the binning doesn't start at the same points on influx and postgres
+
+	Do some refactoring so that postgres doesn't call influx functionality. (Create some other object that will do the common functions then call the appropriate database)
+
+	Seems to still be some gaps in the data for some reason. Often around restarting nntsc. Investigate
+
 Any other questions, my email is andy.belltree@gmail.com.
