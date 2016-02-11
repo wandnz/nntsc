@@ -143,7 +143,6 @@ class ContinuousQueryRerunner(threading.Thread):
         self.aggregations = aggregations
         self.start_time = start
         self.end_time = end
-        self.daemon = True
         
     def run(self):
         """
