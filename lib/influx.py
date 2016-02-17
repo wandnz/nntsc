@@ -32,8 +32,12 @@ from requests import ConnectionError
 import time
 import threading
 
+from multiprocessing import Pipe, Queue
+import Queue as StdQueue
+
 DEFAULT_RP = "default"
 ROLLUP_RP = "rollups"
+MAX_CQWORKERS = 10
 
 class InfluxConnection(object):
     """A class to represent a connection to an Influx Database"""
@@ -68,6 +72,7 @@ class InfluxConnection(object):
         try:
             return self.client.query(query, epoch='s')
         except Exception as e:
+            print query
             self.handler(e)
 
     def query_timestamp(self, table, streamid=None, first_or_last="last", rollup=None):
@@ -91,7 +96,11 @@ class InfluxConnection(object):
         query = "select {}({}) from {}{}".format(
             first_or_last, field, table, " where stream = '{}'".format(streamid) if streamid is not None else "")
         ts = self.query(query)
-        point = ts.get_points().next()
+        try:
+            point = ts.get_points().next()
+        except StopIteration:
+            return 0
+
         if point is None:
             # Nothing in this table!
             return 0
@@ -146,33 +155,49 @@ class InfluxConnection(object):
             return num
 
 class ContinuousQueryRerunner(threading.Thread):
-    def __init__(self, parent, table, influx_binsize, aggregations, start, end):
+    def __init__(self, jobqueue, parent): 
         super(ContinuousQueryRerunner, self).__init__()
+        self.jobqueue = jobqueue
         self.parent = parent
-        self.table = table
-        self.influx_binsize = influx_binsize
-        self.aggregations = aggregations
-        self.start_time = start
-        self.end_time = end
-        
-    def run(self):
+
+    def rerun_cq(self, job):
         """
         Rerun a continuous query. These queries don't seem to work with raw timestamps in 
         the WHERE clause, so we use now() - x, where x is the amount of time between now and 
         the timestamp we want
         """
+
+        table = job[0]
+        binsize = job[1]
+        aggs = job[2]
+        start = job[3]
+        end = job[4]
+
         agg_string = ",".join(
-            ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in self.aggregations])
+            ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in aggs])
         query = """
         SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time > {4}s and time < {5}s GROUP BY stream,time({3})
-        """.format(
-            agg_string, ROLLUP_RP, self.table, self.influx_binsize, self.start_time, self.end_time)
+        """.format(agg_string, ROLLUP_RP, table, binsize, start, end)
         result = self.parent.query(query)
         #logger.log("Rolled up table: {} for binsize: {} between: {} and {}".format(
         #    self.table, self.influx_binsize, self.start_time, self.end_time
         #))
         #logger.log(result)
-        
+
+    def run(self):
+        running = 1
+
+        while running:
+            try:
+                job = self.jobqueue.get(True)
+            except StdQueue.Empty:
+                continue
+            except EOFError:
+                break
+
+            self.rerun_cq(job)
+
+
 class InfluxInsertor(InfluxConnection):
     """
     A class for inserting data into the influx database
@@ -184,6 +209,15 @@ class InfluxInsertor(InfluxConnection):
         self.to_write = []
         # A dictionary to keep track of the range of timestamps encountered for each table
         self.points_windows = {}
+
+        self.cqrs = []
+        self.cqjobs = Queue(10000)
+
+        for i in range(0, MAX_CQWORKERS):
+            worker = ContinuousQueryRerunner(self.cqjobs, self)
+            worker.daemon = True
+            worker.start()
+            self.cqrs.append(worker)
 
     def commit_data(self, retention_policy=DEFAULT_RP):
         """Send all data that has been observed"""
@@ -213,11 +247,16 @@ class InfluxInsertor(InfluxConnection):
                     if time_from < last_auto_store and time_to > time_from:
                         # Subtract 60 from start_time and add 1 to end_time just to make sure
                         # we catch the bin
-                        cqr = ContinuousQueryRerunner(
-                            self, table, influx_binsize, aggs, time_from - 60, time_to + 1)
+                        try:
+                            self.cqjobs.put((table, influx_binsize, aggs, \
+                                    time_from - 60, time_to + 1))
+                        except StdQueue.Full:
+                            logger.log("Too many CQ jobs queued!")
+                            raise
+
                         # Adjust 'last binned' to match the fact we're making a bin now
                         last_binned[influx_binsize] = time_to
-                        cqr.start()
+
                     if time_from >= last_auto_store:
                         # This means we're overlapping with the automatic continuous queries, so we don't need
                         # to keep binning stuff up
@@ -249,17 +288,27 @@ class InfluxInsertor(InfluxConnection):
                 for influx_binsize in influx_binsizes:
                     # Find the last bin that was created and start rollups from 1 bin after that
                     binsize = self._get_binsize(influx_binsize)
-                    last_binned[influx_binsize] = self.query_timestamp(tablename, rollup=influx_binsize) + binsize
+                    mints = self.query_timestamp(tablename, rollup=influx_binsize) 
+                    if mints == 0:
+                        last_binned[influx_binsize] = ts + binsize
+                    else:
+                        last_binned[influx_binsize] = mints + binsize
             # Store the most recent point inserted and the last completed bin for each bin
             self.points_windows[tablename] = (ts, last_binned)
         else:
+            now = time.time()
             most_recent, last_binned = self.points_windows[tablename]
             # Check that we haven't got any data from an already binned up time. If so, we need
             # to set the 'last_binned' time to before our new 'old' data so that it'll get binned up
             for influx_binsize, last_bin_time in last_binned.iteritems():
+                binsize = self._get_binsize(influx_binsize)
                 if ts < last_bin_time:
-                    binsize = self._get_binsize(influx_binsize)
-1                    last_binned[influx_binsize] = ts - (ts % binsize)
+                    last_binned[influx_binsize] = ts - (ts % binsize)
+
+                # Update last binned if we just passed what would have been
+                # the most recent automatic continuous query
+                if ts >= (now - (now % binsize)) and last_binned[influx_binsize] < now - (now % binsize):
+                    last_binned[influx_binsize] = now - (now % binsize)
             self.points_windows[tablename] = (ts, last_binned)
 
         
@@ -398,7 +447,7 @@ class InfluxSelector(InfluxConnection):
                 yield(None, label, None, None, None)
 
             else:
-                self.qb.add_clause("where", "where time > {}s and time < {}s and {}".format(
+                self.qb.add_clause("where", "where time >= {}s and time < {}s and {}".format(
                     start_time, stop_time, " or ".join([
                         "stream = '{}'".format(stream) for stream in streams])))
 
@@ -523,7 +572,7 @@ class InfluxSelector(InfluxConnection):
             return
 
         # Conditional is disjunction of all of the streams with conjunction of time period
-        self.qb.add_clause("where", "where time > {}s and time < {}s and {}".format(
+        self.qb.add_clause("where", "where time >= {}s and time < {}s and {}".format(
             start_time, lastbin if is_rollup else stop_time, " or ".join([
                 "stream = '{}'".format(stream) for stream in all_streams])))
         
@@ -545,7 +594,7 @@ class InfluxSelector(InfluxConnection):
             # (Influx Continuous Queries only roll up bins that are completely in the past)
             # This will just be a query that aggregates the raw data, starting from where the other
             # query left off (lastbin)
-            self.qb2.add_clause("where", "where time > {}s and time < {}s and {}".format(
+            self.qb2.add_clause("where", "where time >= {}s and time < {}s and {}".format(
                 lastbin, stop_time, " or ".join([
                     "stream = '{}'".format(stream) for stream in all_streams])))
             querystring, _ = self.qb2.create_query(order)
@@ -716,3 +765,5 @@ class InfluxSelector(InfluxConnection):
                 if count == 2:
                     return True
         return False
+
+# vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
