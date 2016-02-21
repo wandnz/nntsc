@@ -29,6 +29,7 @@ from libnntsc.querybuilder import QueryBuilder
 import libnntscclient.logger as logger
 from libnntsc.cqs import build_cqs, get_cqs, get_parser
 from requests import ConnectionError
+from requests.packages.urllib3 import disable_warnings
 import time
 import threading
 
@@ -66,6 +67,8 @@ class InfluxConnection(object):
                 dbhost, dbport, dbuser, dbpass, self.dbname, timeout=timeout)
         except Exception as e:
             self.handler(e)
+
+        disable_warnings()
 
     def query(self, query):
         """Returns ResultSet object"""
@@ -176,13 +179,14 @@ class ContinuousQueryRerunner(threading.Thread):
         agg_string = ",".join(
             ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in aggs])
         query = """
-        SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time > {4}s and time < {5}s GROUP BY stream,time({3})
+        SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
         """.format(agg_string, ROLLUP_RP, table, binsize, start, end)
         result = self.parent.query(query)
-        #logger.log("Rolled up table: {} for binsize: {} between: {} and {}".format(
-        #    self.table, self.influx_binsize, self.start_time, self.end_time
-        #))
-        #logger.log(result)
+        if table == "data_amp_icmp":
+            logger.log("Rolled up table: {} for binsize: {} between: {} and {}".format(
+                table, binsize, start, end 
+            ))
+            logger.log(result)
 
     def run(self):
         running = 1
@@ -219,6 +223,8 @@ class InfluxInsertor(InfluxConnection):
             worker.start()
             self.cqrs.append(worker)
 
+        self.started = time.time()
+
     def commit_data(self, retention_policy=DEFAULT_RP):
         """Send all data that has been observed"""
         try:
@@ -239,7 +245,8 @@ class InfluxInsertor(InfluxConnection):
                 for influx_binsize in influx_binsizes:
                     binsize = self._get_binsize(influx_binsize)
                     # wrap up the last bin
-                    time_from = last_binned[influx_binsize]
+                    time_from = last_binned[influx_binsize][0]
+                    force_cq = last_binned[influx_binsize][1]
                     time_to = most_recent - (most_recent % binsize)
                     last_auto_store = now - (now % binsize)
                     # If we've filled a whole bin and we're not overlapping with influx continuous query
@@ -247,20 +254,23 @@ class InfluxInsertor(InfluxConnection):
                     if time_from < last_auto_store and time_to > time_from:
                         # Subtract 60 from start_time and add 1 to end_time just to make sure
                         # we catch the bin
-                        try:
-                            self.cqjobs.put((table, influx_binsize, aggs, \
-                                    time_from - 60, time_to + 1))
-                        except StdQueue.Full:
-                            logger.log("Too many CQ jobs queued!")
-                            raise
+
+                        if time_to < self.started or last_auto_store - time_to > binsize or force_cq:
+
+                            try:
+                                self.cqjobs.put((table, influx_binsize, aggs, \
+                                        time_from, time_to - 1))
+                            except StdQueue.Full:
+                                logger.log("Too many CQ jobs queued!")
+                                raise
 
                         # Adjust 'last binned' to match the fact we're making a bin now
-                        last_binned[influx_binsize] = time_to
+                        last_binned[influx_binsize] = (time_to, False)
 
-                    if time_from >= last_auto_store:
+                    #if time_from >= last_auto_store:
                         # This means we're overlapping with the automatic continuous queries, so we don't need
                         # to keep binning stuff up
-                        last_binned[influx_binsize] = time_from + binsize
+                    #    last_binned[influx_binsize] = time_from + binsize
                         
         
     def insert_data(self, tablename, stream, ts, result, casts = {}):
@@ -279,6 +289,8 @@ class InfluxInsertor(InfluxConnection):
             }
         )
 
+        now = time.time()
+
         # Keep track of what time period we're collecting points for
         if tablename not in self.points_windows:
             # This is the first timestamp we've encountered, so make the last_binned dictionary up
@@ -290,25 +302,20 @@ class InfluxInsertor(InfluxConnection):
                     binsize = self._get_binsize(influx_binsize)
                     mints = self.query_timestamp(tablename, rollup=influx_binsize) 
                     if mints == 0:
-                        last_binned[influx_binsize] = ts + binsize
+                        last_binned[influx_binsize] = (ts - (ts % binsize) - binsize, False)
                     else:
-                        last_binned[influx_binsize] = mints + binsize
+                        last_binned[influx_binsize] = (mints - (mints % binsize), False)
             # Store the most recent point inserted and the last completed bin for each bin
             self.points_windows[tablename] = (ts, last_binned)
         else:
-            now = time.time()
             most_recent, last_binned = self.points_windows[tablename]
             # Check that we haven't got any data from an already binned up time. If so, we need
             # to set the 'last_binned' time to before our new 'old' data so that it'll get binned up
-            for influx_binsize, last_bin_time in last_binned.iteritems():
+            for influx_binsize, (last_bin_time, force) in last_binned.iteritems():
                 binsize = self._get_binsize(influx_binsize)
-                if ts < last_bin_time:
-                    last_binned[influx_binsize] = ts - (ts % binsize)
+                if ts > self.started and now > last_bin_time + binsize and ts < now - (now % binsize):
+                    last_binned[influx_binsize] = (ts - (ts % binsize), True)
 
-                # Update last binned if we just passed what would have been
-                # the most recent automatic continuous query
-                if ts >= (now - (now % binsize)) and last_binned[influx_binsize] < now - (now % binsize):
-                    last_binned[influx_binsize] = now - (now % binsize)
             self.points_windows[tablename] = (ts, last_binned)
 
         
