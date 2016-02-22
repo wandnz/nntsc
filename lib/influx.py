@@ -182,11 +182,6 @@ class ContinuousQueryRerunner(threading.Thread):
         SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
         """.format(agg_string, ROLLUP_RP, table, binsize, start, end)
         result = self.parent.query(query)
-        if table == "data_amp_icmp":
-            logger.log("Rolled up table: {} for binsize: {} between: {} and {}".format(
-                table, binsize, start, end 
-            ))
-            logger.log(result)
 
     def run(self):
         running = 1
