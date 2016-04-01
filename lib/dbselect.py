@@ -529,7 +529,7 @@ class DBSelector(DatabaseCore):
                     if influxdb is not None and table not in traceroute_tables:
                         lastts = influxdb.query_timestamp(table, sid, "last")
                     else:
-                        lastts = self._query_timestamp(table, sid, "max", influxdb)
+                        lastts = self._query_timestamp(table, sid, "max")
                     storerequiredlast = True
                     lastdict[sid] = lastts
                 else:
