@@ -29,7 +29,7 @@ from libnntsc.querybuilder import QueryBuilder
 import libnntscclient.logger as logger
 from libnntsc.cqs import build_cqs, get_cqs, get_parser
 from requests import ConnectionError
-from requests.packages.urllib3 import disable_warnings
+import requests
 import time
 import threading
 
@@ -39,6 +39,8 @@ import Queue as StdQueue
 DEFAULT_RP = "default"
 ROLLUP_RP = "rollups"
 MAX_CQWORKERS = 10
+
+requests.packages.urllib3.disable_warnings()
 
 class InfluxConnection(object):
     """A class to represent a connection to an Influx Database"""
@@ -68,7 +70,6 @@ class InfluxConnection(object):
         except Exception as e:
             self.handler(e)
 
-        disable_warnings()
 
     def query(self, query):
         """Returns ResultSet object"""
@@ -250,14 +251,12 @@ class InfluxInsertor(InfluxConnection):
                         # Subtract 60 from start_time and add 1 to end_time just to make sure
                         # we catch the bin
 
-                        if time_to < self.started or last_auto_store - time_to > binsize or force_cq:
-
-                            try:
-                                self.cqjobs.put((table, influx_binsize, aggs, \
-                                        time_from, time_to - 1))
-                            except StdQueue.Full:
-                                logger.log("Too many CQ jobs queued!")
-                                raise
+                        try:
+                            self.cqjobs.put((table, influx_binsize, aggs, \
+                                time_from, time_to - 1))
+                        except StdQueue.Full:
+                            logger.log("Too many CQ jobs queued!")
+                            raise
 
                         # Adjust 'last binned' to match the fact we're making a bin now
                         last_binned[influx_binsize] = (time_to, False)
