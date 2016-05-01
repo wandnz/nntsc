@@ -148,7 +148,9 @@ class AmpTcppingParser(AmpIcmpParser):
 
         observed[streamid]["results"] += 1
 
-        if 'reply' in datapoint and datapoint['reply'] == 2:
+        # reply is deprecated, but we'll need it for backwards compatibility
+        if ('reply' in datapoint and datapoint['reply'] == 2) or \
+                ('icmptype' in datapoint and datapoint['icmptype'] is not None):
             observed[streamid]["icmperrors"] += 1
 
         if 'loss' in datapoint:
