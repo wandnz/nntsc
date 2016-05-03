@@ -20,82 +20,160 @@
 # $Id$
 
 
-from sqlalchemy import create_engine, Table, Column, Integer, \
-    String, MetaData, ForeignKey, UniqueConstraint, Index
-from sqlalchemy.types import Integer, String, Float, Boolean
-from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.dialects import postgresql
-from sqlalchemy.sql.expression import select, join, outerjoin, func, label
-from libnntsc.partition import PartitionedTable
+from libnntsc.dberrorcodes import *
+from libnntsc.parsers.common import NNTSCParser
 import libnntscclient.logger as logger
 
-STREAM_TABLE_NAME = "streams_amp_udpstream"
-DATA_VIEW_NAME = "data_amp_udpstream"
+class AmpUdpstreamParser(NNTSCParser):
 
-def stream_table(db):
+    def __init__(self, db, influxdb=None):
+        super(AmpUdpstreamParser, self).__init__(db, influxdb)
 
-    if STREAM_TABLE_NAME in db.metadata.tables:
-        return STREAM_TABLE_NAME
+        self.streamtable = "streams_amp_udpstream"
+        self.datatable = "data_amp_udpstream"
+        self.colname = "amp_udpstream"
+        self.source = "amp"
+        self.module = "udpstream"
 
-    st = Table(STREAM_TABLE_NAME, db.metadata,
-        Column('stream_id', Integer, ForeignKey("streams.id"),
-                primary_key=True),
-        Column('source', String, nullable=False),
-        Column('destination', String, nullable=False),
-        Column('packetsize', Integer, nullable=False),
-        Column('packetspacing', Integer, nullable=False),
-        UniqueConstraint('source', 'destination', 'packetsize',
-                'packetspacing'),
-        extend_existing=True,
-    )
+        self.streamcolumns = [
+            {"name":"source", "type":"varchar", "null":False},
+            {"name":"destination", "type":"varchar", "null":False},
+            {"name":"address", "type":"inet", "null":False},
+            {"name":"direction", "type":"varchar", "null":False},
+            {"name":"packet_size", "type":"smallint", "null":False},
+            {"name":"packet_spacing", "type":"integer", "null":False},
+            {"name":"packet_count", "type": "integer", "null":False},
+            {"name":"dscp", "type":"smallint", "null": False},
+        ]
 
-    Index('index_amp_udpstream_source', st.c.source)
-    Index('index_amp_udpstream_destination', st.c.destination)
-    Index('index_amp_udpstream_packetsize', st.c.packetsize)
-    Index('index_amp_udpstream_packetspacing', st.c.packetspacing)
+        self.uniquecolumns = [
+            'source', 'destination', 'address', 'direction', 'packet_size', \
+            'packet_spacing', 'packet_count', 'dscp'
+        ]
 
-    return STREAM_TABLE_NAME
+        self.streamindexes = [
+            {"name": "", "columns": ['source']},
+            {"name": "", "columns": ['destination']}
+        ]
 
-def data_tables(db):
+        self.datacolumns = [
+            {"name": "mean_rtt", "type": "integer", "null": True},
+            {"name": "mean_jitter", "type": "integer", "null": True},
+            {"name": "jitter_percentile_10", "type": "integer", "null": True},
+            {"name": "jitter_percentile_20", "type": "integer", "null": True},
+            {"name": "jitter_percentile_30", "type": "integer", "null": True},
+            {"name": "jitter_percentile_40", "type": "integer", "null": True},
+            {"name": "jitter_percentile_50", "type": "integer", "null": True},
+            {"name": "jitter_percentile_60", "type": "integer", "null": True},
+            {"name": "jitter_percentile_70", "type": "integer", "null": True},
+            {"name": "jitter_percentile_80", "type": "integer", "null": True},
+            {"name": "jitter_percentile_90", "type": "integer", "null": True},
+            {"name": "jitter_percentile_100", "type": "integer", "null": True},
+            {"name": "packets_sent", "type": "integer", "null": False},
+            {"name": "packets_recvd", "type": "integer", "null": False},
+            #{"name": "loss_periods", "type": "varchar", "null": True},
+            {"name": "itu_mos", "type": "float", "null": True},
 
-    if DATA_VIEW_NAME in db.metadata.tables:
-        return DATA_VIEW_NAME
+        ]
 
-    testtable = Table('internal_amp_udpstream_test', db.metadata,
-        Column('test_id', Integer, primary_key=True),
-        Column('stream_id', Integer, nullable=False),
-        Column('test_starttime', postgresql.DOUBLE_PRECISION, nullable=False),
-        UniqueConstraint('stream_id', 'test_starttime'),
-        extend_existing=True,
-    )
+        # Not strictly correct to take the mean of the means, but hard to do
+        # much else without some custom functions
+        aggs = [("mean_rtt", "mean", "mean_rtt"),
+                ("mean_jitter", "mean", "mean_jitter"),
+                ("jitter_percentile_10", "mean", "jitter_percentile_10"),
+                ("jitter_percentile_20", "mean", "jitter_percentile_20"),
+                ("jitter_percentile_30", "mean", "jitter_percentile_30"),
+                ("jitter_percentile_40", "mean", "jitter_percentile_40"),
+                ("jitter_percentile_50", "mean", "jitter_percentile_50"),
+                ("jitter_percentile_60", "mean", "jitter_percentile_60"),
+                ("jitter_percentile_70", "mean", "jitter_percentile_70"),
+                ("jitter_percentile_80", "mean", "jitter_percentile_80"),
+                ("jitter_percentile_90", "mean", "jitter_percentile_90"),
+                ("jitter_percentile_100", "mean", "jitter_percentile_100"),
+                ("packets_sent", "sum", "packets_sent"),
+                ("packets_recvd", "sum", "packets_recvd"),
+                ("itu_mos", "mean", "itu_mos")
+               ]
 
-    Index('index_amp_udpstream_teststart', testtable.c.test_starttime)
-    Index('index_amp_udpstream_teststream', testtable.c.stream_id)
+        self.cqs = [
+            (['5m', '10m', '20m', '40m', '80m', '4h'],
+            aggs)
+        ]
 
-    pkttable = Table('internal_amp_udpstream_packets', db.metadata,
-        Column('test_id', Integer,
-            ForeignKey('internal_amp_udpstream_test.test_id',
-                    ondelete="CASCADE"),
-            nullable=False),
-        Column('packet_order', Integer, nullable=False),
-        Column('arrivaltime', postgresql.DOUBLE_PRECISION, nullable=False),
-        UniqueConstraint('test_id', 'packet_order'),
-        extend_existing=True,
-    )
+    def create_existing_stream(self, stream_data):
+        key = self._construct_key(stream_data)
+        streamid = stream_data["stream_id"]
+        self.streams[key] = streamid
 
-    Index('index_amp_udpstream_packettestid', pkttable.c.test_id)
+    def _construct_key(self, streamdata):
+        src = str(streamdata["source"])
+        dest = str(streamdata["destination"])
+        address = streamdata["address"]
+        direction  = str(streamdata["direction"])
+        packet_size = str(streamdata["packet_size"])
+        packet_spacing = str(streamdata["packet_spacing"])
+        packet_count = str(streamdata["packet_count"])
+        dscp = str(streamdata["dscp"])
 
-    viewquery = testtable.join(pkttable).select().reduce_columns()
-    dataview = db.create_view(DATA_VIEW_NAME, viewquery)
-
-    return DATA_VIEW_NAME
+        return (src, dest, address, direction, packet_size, packet_spacing, \
+                packet_count, dscp)
 
 
+    def _process_single_result(self, timestamp, resdict):
+        key = self._construct_key(resdict)
 
-def register(db):
-    st_name = stream_table(db)
-    dt_name = data_tables(db)
+        if key in self.streams:
+            stream_id = self.streams[key]
+        else:
+            stream_id = self.create_new_stream(resdict, timestamp)
 
-    db.register_collection("amp", "udpstream", st_name, dt_name)
+            if stream_id < 0:
+                logger.log("AMPModule: Cannot create new UDPstream stream")
+                logger.log("AMPModule: %s:%s:%s" % (\
+                        resdict['source'], resdict['destination'],
+                        resdict['direction']))
+                return stream_id
+            else:
+                self.streams[key] = stream_id
+        self.insert_data(stream_id, timestamp, resdict)
+        return stream_id
+
+    def process_data(self, timestamp, data, source):
+        done = {}
+
+        for result in data['results']:
+            resdict = {}
+            resdict['source'] = source
+            resdict['destination'] = data['target']
+            resdict['address'] = data['address']
+            resdict['direction'] = result['direction']
+            resdict['packet_size'] = data['packet_size']
+            resdict['packet_spacing'] = data['packet_spacing']
+            resdict['packet_count'] = data['packet_count']
+            resdict['dscp'] = data['dscp']
+
+            resdict['mean_rtt'] = result['rtt']['mean']
+            resdict['mean_jitter'] = result['jitter']['mean']
+            resdict['packets_recvd'] = result['packets_received']
+            resdict['packets_sent'] = data['packet_count']
+            resdict['itu_mos' ] = result['voip']['itu_mos']
+
+            resdict['jitter_percentile_10'] = result['percentiles'][0]
+            resdict['jitter_percentile_20'] = result['percentiles'][1]
+            resdict['jitter_percentile_30'] = result['percentiles'][2]
+            resdict['jitter_percentile_40'] = result['percentiles'][3]
+            resdict['jitter_percentile_50'] = result['percentiles'][4]
+            resdict['jitter_percentile_60'] = result['percentiles'][5]
+            resdict['jitter_percentile_70'] = result['percentiles'][6]
+            resdict['jitter_percentile_80'] = result['percentiles'][7]
+            resdict['jitter_percentile_90'] = result['percentiles'][8]
+            resdict['jitter_percentile_100'] = result['percentiles'][9]
+
+            streamid = self._process_single_result(timestamp, resdict)
+            if streamid < 0:
+                return
+            done[streamid] = 0
+
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
