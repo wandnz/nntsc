@@ -90,15 +90,23 @@ class InfluxConnection(object):
             first_or_last = "first"    
         if first_or_last not in ["first", "last"]:
             return
-        # All queries need a field, but we only care about the time, so this can be anything
-        field = get_parser(table).get_random_field(rollup)
+            return
+
         if rollup is not None:
-            # We need to query a rollup table
             table = "{}.{}_{}".format(ROLLUP_RP, table, rollup)
-            
-        # select {first|last}(<random_field>) from <table> {where stream = '<stream>'}
-        query = "select {}({}) from {}{}".format(
-            first_or_last, field, table, " where stream = '{}'".format(streamid) if streamid is not None else "")
+
+        if first_or_last == "first":
+            orderby = "asc"
+        else:
+            orderby = "desc"
+        
+        if streamid is None:
+            streamclause = ""
+        else:
+            streamclause = "where stream = '%s'" % (streamid)
+
+        query = "select * from %s %s order by time %s limit 1" % (table, streamclause, orderby)
+
         ts = self.query(query)
         try:
             point = ts.get_points().next()
