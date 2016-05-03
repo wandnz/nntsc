@@ -43,7 +43,7 @@ class AmpUdpstreamParser(NNTSCParser):
             {"name":"packet_size", "type":"smallint", "null":False},
             {"name":"packet_spacing", "type":"integer", "null":False},
             {"name":"packet_count", "type": "integer", "null":False},
-            {"name":"dscp", "type":"smallint", "null": False},
+            {"name":"dscp", "type":"varchar", "null": False},
         ]
 
         self.uniquecolumns = [
