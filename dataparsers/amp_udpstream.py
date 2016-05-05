@@ -152,22 +152,42 @@ class AmpUdpstreamParser(NNTSCParser):
             resdict['packet_count'] = data['packet_count']
             resdict['dscp'] = data['dscp']
 
-            resdict['mean_rtt'] = result['rtt']['mean']
-            resdict['mean_jitter'] = result['jitter']['mean']
-            resdict['packets_recvd'] = result['packets_received']
+            if 'rtt' in result and result['rtt'] is not None:
+                resdict['mean_rtt'] = result['rtt']['mean']
+            if 'jitter' in result and result['jitter'] is not None:
+                resdict['mean_jitter'] = result['jitter']['mean']
+            if 'packets_received' in result:
+                resdict['packets_recvd'] = result['packets_received']
             resdict['packets_sent'] = data['packet_count']
-            resdict['itu_mos' ] = result['voip']['itu_mos']
+            if 'voip' in result and result['voip'] is not None:
+                resdict['itu_mos' ] = result['voip']['itu_mos']
 
-            resdict['jitter_percentile_10'] = result['percentiles'][0]
-            resdict['jitter_percentile_20'] = result['percentiles'][1]
-            resdict['jitter_percentile_30'] = result['percentiles'][2]
-            resdict['jitter_percentile_40'] = result['percentiles'][3]
-            resdict['jitter_percentile_50'] = result['percentiles'][4]
-            resdict['jitter_percentile_60'] = result['percentiles'][5]
-            resdict['jitter_percentile_70'] = result['percentiles'][6]
-            resdict['jitter_percentile_80'] = result['percentiles'][7]
-            resdict['jitter_percentile_90'] = result['percentiles'][8]
-            resdict['jitter_percentile_100'] = result['percentiles'][9]
+            if len(result['percentiles']) < 10:
+                step = len(result['percentiles']) / 10.0
+
+                ind = 0.0
+               
+                for i in range(10, 110, 10):
+
+                    pctname = 'jitter_percentile_%d' % i
+                    if step > 0:
+                        pctval = result['percentiles'][int(ind)]
+                    else:
+                        pctval = None
+
+                    resdict[pctname] = pctval
+                    ind += step
+            else:
+                resdict['jitter_percentile_10'] = result['percentiles'][0]
+                resdict['jitter_percentile_20'] = result['percentiles'][1]
+                resdict['jitter_percentile_30'] = result['percentiles'][2]
+                resdict['jitter_percentile_40'] = result['percentiles'][3]
+                resdict['jitter_percentile_50'] = result['percentiles'][4]
+                resdict['jitter_percentile_60'] = result['percentiles'][5]
+                resdict['jitter_percentile_70'] = result['percentiles'][6]
+                resdict['jitter_percentile_80'] = result['percentiles'][7]
+                resdict['jitter_percentile_90'] = result['percentiles'][8]
+                resdict['jitter_percentile_100'] = result['percentiles'][9]
 
             streamid = self._process_single_result(timestamp, resdict)
             if streamid < 0:
