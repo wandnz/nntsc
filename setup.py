@@ -11,7 +11,7 @@ except ImportError:
 
 requires = [ \
         'python-rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12', 'python-daemon', \
-	'libnntsc-client', 'pywandevent', 'pylibmc', 'influxdb' \
+	'libnntsc-client', 'pywandevent', 'pylibmc', 'influxdb', 'psutil' \
 ]
 
 if sys.version_info < (2, 7):
