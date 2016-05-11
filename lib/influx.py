@@ -123,7 +123,7 @@ class InfluxConnection(object):
                 x = time.time()
             if ((x % (60 * 60 * 24)) < (60 * 60 * 4)):
                 x -= (60 * 60 * 5)
-            return int(x - (x % (60 * 60 * 24)))
+            return int(x - (x % (60 * 60 * 2)))
 
         return point["time"]
             
@@ -602,6 +602,12 @@ class InfluxSelector(InfluxConnection):
         for i, (meas, agg) in enumerate(self.aggcols):
             if agg == "smoke":
                 self.aggcols[i] = (meas, "smokearray")
+            # Dirty hack to deal with the fact that influx doesn't let us to
+            # the aggregation on the timestamp column that we used to use in
+            # postgres. Once we switch over to influx properly, we can update
+            # ampy to ask for 'requests' directly.
+            if meas == "timestamp" and agg == "count":
+                self.aggcols[i] = ("requests", agg)
                 
         # If there are aggregations on the same column we need to rename our response
         self._set_rename()

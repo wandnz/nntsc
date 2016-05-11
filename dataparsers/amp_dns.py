@@ -76,6 +76,7 @@ class AmpDnsParser(NNTSCParser):
             {"name":"flag_cd", "type":"boolean", "null":True},
             {"name":"flag_ad", "type":"boolean", "null":True},
             {"name":"flag_ra", "type":"boolean", "null":True},
+            {"name":"requests", "type":"smallint", "null":False},
         ]
 
         self.dataindexes = [
@@ -91,7 +92,8 @@ class AmpDnsParser(NNTSCParser):
                     ("mean_rtt","mean","rtt"),
                     ("stddev_rtt","stddev","rtt"),
                     ("max_rtt","max","rtt"),
-                    ("min_rtt","min","rtt")
+                    ("min_rtt","min","rtt"),
+                    ("num_requests","count","requests"),
                 ]
             )
         ]
@@ -134,6 +136,7 @@ class AmpDnsParser(NNTSCParser):
                     return stream_id
                 self.streams[key] = stream_id
 
+            dataresult['requests'] = 1
             self.insert_data(stream_id, timestamp, dataresult)
             done[stream_id] = 0
 
