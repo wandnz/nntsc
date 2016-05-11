@@ -39,6 +39,7 @@ import daemon, lockfile, signal
 class DataCollector():
     def start_module(self, name, mod, conf):
         try:
+            self.db.connect_db(15)
             streams = self.db.select_streams_by_module(name)
         except DBQueryException as e:
             logger.log(e)
@@ -92,7 +93,6 @@ class DataCollector():
                 dbconf["host"])
 
         logger.log("Connecting to NNTSC database %s on host %s with user %s" % (dbconf["name"], dbconf["host"], dbconf["user"]))
-        self.db.connect_db(15);
 
         influxconf = get_influx_config(nntsc_conf)
         if influxconf == {}:
@@ -101,9 +101,6 @@ class DataCollector():
         if influxconf["useinflux"]:
             logger.log("Connecting to Influx database {} on host {} with user {}".format(
                 influxconf["name"], influxconf["host"], influxconf["user"]))
-            self.influxdb = InfluxInsertor(
-                influxconf["name"], influxconf["user"], influxconf["pass"],
-                influxconf["host"], influxconf["port"])
         
         self.processes = []
         
