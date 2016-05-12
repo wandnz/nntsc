@@ -123,6 +123,8 @@ class InfluxConnection(object):
                 x = time.time()
             if ((x % (60 * 60 * 24)) < (60 * 60 * 4)):
                 x -= (60 * 60 * 5)
+            if first_or_last == "first":
+                return int(x - (x % (60 * 60 * 12)))
             return int(x - (x % (60 * 60 * 2)))
 
         return point["time"]
@@ -633,7 +635,11 @@ class InfluxSelector(InfluxConnection):
             # We just construct aggregation functions and roll up the data ourselves
             columns = self._get_rollup_functions()
             self.qb.add_clause("from", "from {}".format(table))
-            self.qb.add_clause("group_by", "group by stream, time({})".format(self.influx_binsize))
+            if stop_time - start_time > binsize:
+                self.qb.add_clause("group_by", "group by stream, time({})".format(self.influx_binsize))
+            else:
+                self.qb.add_clause("group_by", "group by stream".format(self.influx_binsize))
+
         else:
             # Otherwise we'll use the pre-aggregated columns we found
             self.qb.add_clause("from", "from {}.{}_{}".format(
@@ -659,7 +665,7 @@ class InfluxSelector(InfluxConnection):
                 yield(None, label, None, None, None)
 
             else:
-                labels_and_rows[label] = []
+                labels_and_rows[label] = {}
                 for stream in streams:
                     all_streams.append(stream)
                     self.streams_to_labels[str(stream)] = label
@@ -683,7 +689,16 @@ class InfluxSelector(InfluxConnection):
                 label = self.streams_to_labels[tags["stream"]]
                 row = self._row_from_result(result, label)
                 if row:
-                    labels_and_rows[label].append(row)
+                    ts = row['timestamp']
+                    if ts not in labels_and_rows[label]:
+                        labels_and_rows[label][ts] = row
+                    else:
+                        for k,v in row.iteritems():
+                            if k not in labels_and_rows[label][ts]:
+                                labels_and_rows[label][ts][k] = v
+                            elif labels_and_rows[label][ts][k] is None:
+                                labels_and_rows[label][ts][k] = row[k]
+                    #labels_and_rows[label].append(row)
 
         if is_rollup:
             # Catch the last bin with a second query, as this won't have been rolled up by the database
@@ -702,7 +717,16 @@ class InfluxSelector(InfluxConnection):
                     for result in generator:
                         row = self._row_from_result(result, label)
                         if row:
-                            labels_and_rows[label].append(row)
+                            ts = row['timestamp']
+                            if ts not in labels_and_rows[label]:
+                                labels_and_rows[label][ts] = row
+                            else:
+                                for k,v in row.iteritems():
+                                    if k not in labels_and_rows[label][ts]:
+                                        labels_and_rows[label][ts][k] = v
+                                    elif labels_and_rows[label][ts][k] is None:
+                                        labels_and_rows[label][ts][k] = row[k]
+                        #    labels_and_rows[label].append(row)
             except DBQueryException as e:
                 logger.log("Failed to collect last bin, using CQ data only")
                 
@@ -710,7 +734,8 @@ class InfluxSelector(InfluxConnection):
             if len(rows) == 0:
                 yield(None, label, None, None, None)
             else:
-                yield(rows, label, "binstart", binsize, None)
+                yielding = [v for (k, v) in sorted(rows.items())]
+                yield(yielding, label, "binstart", binsize, None)
 
     def _set_rename(self):
         """Decides whether response will need to be renamed or not"""
