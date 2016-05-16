@@ -17,6 +17,6 @@ setup(name="libnntsc-client",
 	url="http://www.wand.net.nz",
 	packages=['libnntscclient'],
 	package_dir = {
-		'libnntscclient':'src'
+		'libnntscclient':'libnntscclient'
 	}
 )
