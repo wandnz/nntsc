@@ -59,6 +59,8 @@ class AmpUdpstreamParser(NNTSCParser):
         self.datacolumns = [
             {"name": "mean_rtt", "type": "integer", "null": True},
             {"name": "mean_jitter", "type": "integer", "null": True},
+            {"name": "min_jitter", "type": "integer", "null": True},
+            {"name": "max_jitter", "type": "integer", "null": True},
             {"name": "jitter_percentile_10", "type": "integer", "null": True},
             {"name": "jitter_percentile_20", "type": "integer", "null": True},
             {"name": "jitter_percentile_30", "type": "integer", "null": True},
@@ -80,6 +82,9 @@ class AmpUdpstreamParser(NNTSCParser):
         # much else without some custom functions
         aggs = [("mean_rtt", "mean", "mean_rtt"),
                 ("mean_jitter", "mean", "mean_jitter"),
+                ("min_min_jitter", "min", "min_jitter"),
+                ("max_jitter", "max", "max_jitter"),
+                ("mean_min_jitter", "mean", "min_jitter"),
                 ("jitter_percentile_10", "mean", "jitter_percentile_10"),
                 ("jitter_percentile_20", "mean", "jitter_percentile_20"),
                 ("jitter_percentile_30", "mean", "jitter_percentile_30"),
@@ -156,6 +161,8 @@ class AmpUdpstreamParser(NNTSCParser):
                 resdict['mean_rtt'] = result['rtt']['mean']
             if 'jitter' in result and result['jitter'] is not None:
                 resdict['mean_jitter'] = result['jitter']['mean']
+                resdict['min_jitter'] = result['jitter']['minimum']
+                resdict['max_jitter'] = result['jitter']['maximum']
             if 'packets_received' in result:
                 resdict['packets_recvd'] = result['packets_received']
             resdict['packets_sent'] = data['packet_count']
