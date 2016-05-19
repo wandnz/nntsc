@@ -3,6 +3,7 @@ NNTSC 2.8
 Deployment dates:
   skeptic: TBD
   lamp: TBD
+  VF: TBD
 
 Major Changes:
  * InfluxDB is now used for storing and aggregating data for many collections,
@@ -11,3 +12,4 @@ Major Changes:
    will need to be added to the config file (see README and example config
    file for details). To have access to old data for those collections, the
    data will need to be migrated across to the Influx database.
+ * Added support for storing results from the amp-udpstream test.
