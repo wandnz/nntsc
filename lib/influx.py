@@ -530,6 +530,11 @@ class InfluxSelector(InfluxConnection):
         and is designed to be called by function of same name in dbselect
 
         """
+        if table == "data_amp_dns":
+            for i, col in enumerate(selectcols):
+                if col == "timestamp":
+                    selectcols[i] = "requests"
+
         self.qb.reset()
         self.qb.add_clause("select", "select {}".format(", ".join(selectcols)))
         

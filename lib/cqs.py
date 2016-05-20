@@ -25,6 +25,7 @@ from libnntsc.parsers.amp_dns import AmpDnsParser
 from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
+from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 
 
 def get_parser(table_name):
@@ -39,6 +40,8 @@ def get_parser(table_name):
         parser = AmpThroughputParser(None)
     elif table_name == "data_amp_http":
         parser = AmpHttpParser(None)
+    elif table_name == "data_amp_udpstream":
+        parser = AmpUdpstreamParser(None)
     else:
         parser = None
 
@@ -70,6 +73,7 @@ def build_cqs(influxdb, retention_policy="default"):
     parsers.append(AmpDnsParser(None, influxdb))
     parsers.append(AmpThroughputParser(None, influxdb))
     parsers.append(AmpHttpParser(None, influxdb))
+    parsers.append(AmpUdpstreamParser(None, influxdb))
     
     for parser in parsers:
         parser.build_cqs(retention_policy)

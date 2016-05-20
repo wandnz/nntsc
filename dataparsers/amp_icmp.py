@@ -180,7 +180,8 @@ class AmpIcmpParser(NNTSCParser):
                 return DB_DATA_ERROR
 
             if key not in self.streams:
-                streamid = self.create_new_stream(streamparams, timestamp)
+                streamid = self.create_new_stream(streamparams, timestamp,
+                        not self.have_influx)
                 if streamid < 0:
                     logger.log("Failed to create new %s stream" % \
                             (self.colname))

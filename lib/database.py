@@ -715,7 +715,8 @@ class DBInsert(DatabaseCore):
         return row[0]
 
 
-    def insert_stream(self, tablename, datatable, timestamp, streamprops):
+    def insert_stream(self, tablename, datatable, timestamp, streamprops,
+            createdatatable=True):
 
         # insert stream into our stream table
         colstr = "(stream_id"
@@ -750,7 +751,8 @@ class DBInsert(DatabaseCore):
 
         # Create a new data table for this stream, using the "base" data
         # table as a template
-        self.clone_table(datatable, newid)
+        if (createdatatable):
+            self.clone_table(datatable, newid)
  
         # Resist the urge to commit streams or do any live exporting here!
         #

@@ -36,6 +36,7 @@ from libnntsc.parsers.amp_dns import AmpDnsParser
 from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
+from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 from libnntsc.dberrorcodes import *
 from google.protobuf.message import DecodeError
 import time, signal
@@ -93,6 +94,7 @@ class AmpModule:
             "throughput":AmpThroughputParser(self.db, self.influxdb),
             "dns":AmpDnsParser(self.db, self.influxdb),
             "http":AmpHttpParser(self.db, self.influxdb),
+            "udpstream":AmpUdpstreamParser(self.db, self.influxdb),
             "tcpping":AmpTcppingParser(self.db, self.influxdb)
         }
 
@@ -331,6 +333,9 @@ def tables(db):
     parser.register()
     
     parser = AmpHttpParser(db)
+    parser.register()
+
+    parser = AmpUdpstreamParser(db)
     parser.register()
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
