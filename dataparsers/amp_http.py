@@ -150,7 +150,8 @@ class AmpHttpParser(NNTSCParser):
         if key in self.streams:
             stream_id = self.streams[key]
         else:
-            stream_id = self.create_new_stream(mangled, timestamp)
+            stream_id = self.create_new_stream(mangled, timestamp,
+                    not self.have_influx)
             if stream_id < 0:
                 logger.log("AMPModule: Cannot create stream for: ")
                 logger.log("AMPModule: dns %s %s\n", source, \

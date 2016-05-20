@@ -7,6 +7,11 @@ class NNTSCParser(object):
         self.db = db
         self.influxdb = influxdb
         
+        if influxdb is not None:
+            self.have_influx = True
+        else:
+            self.have_influx = False
+
         self.streamtable = None
         self.datatable = None
         self.colname = "Unspecified"
@@ -131,7 +136,7 @@ class NNTSCParser(object):
 
         return self.collectionid
 
-    def create_new_stream(self, result, timestamp):
+    def create_new_stream(self, result, timestamp, createdatatable):
 
         streamprops = {}
         for col in self.streamcolumns:
@@ -141,8 +146,8 @@ class NNTSCParser(object):
                 streamprops[col['name']] = None
 
         try:
-            streamid = self.db.insert_stream(self.streamtable, 
-                    self.datatable, timestamp, streamprops)
+            streamid = self.db.insert_stream(self.streamtable,
+                    self.datatable, timestamp, streamprops, createdatatable)
         except DBQueryException as e:
             logger.log("Failed to insert new stream into database for %s" \
                     % (self.colname))

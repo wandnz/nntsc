@@ -130,7 +130,8 @@ class AmpUdpstreamParser(NNTSCParser):
         if key in self.streams:
             stream_id = self.streams[key]
         else:
-            stream_id = self.create_new_stream(resdict, timestamp)
+            stream_id = self.create_new_stream(resdict, timestamp,
+                    not self.have_influx)
 
             if stream_id < 0:
                 logger.log("AMPModule: Cannot create new UDPstream stream")
