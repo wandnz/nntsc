@@ -328,6 +328,7 @@ class DBSelector(DatabaseCore):
             if influxdb is None or table in traceroute_tables:
                 continue
 
+        if influxdb is not None and table not in traceroute_tables:
             for row in influxdb.select_aggregated_data(table, labels, aggcols,
                         start_time, stop_time, binsize):
                 yield row
