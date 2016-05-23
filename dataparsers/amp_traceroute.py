@@ -161,7 +161,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         # Don't forget to set the 'first' timestamp (just like insert_stream
         # does).
         self.db.update_timestamp("data_amp_astraceroute", [streamid], 
-                timestamp, timestamp) 
+                timestamp, timestamp, False) 
 
         try:
             self.db.clone_table("data_amp_traceroute_aspaths", 
@@ -492,8 +492,10 @@ class AmpTracerouteParser(AmpIcmpParser):
             self.insert_aspath(sid, timestamp, streamdata)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.ipdatatable, ipobserved.keys(), timestamp)
-        self.db.update_timestamp(self.asdatatable, asobserved.keys(), timestamp)
+        self.db.update_timestamp(self.ipdatatable, ipobserved.keys(),
+                timestamp, False)
+        self.db.update_timestamp(self.asdatatable, asobserved.keys(),
+                timestamp, False)
 
     def insert_aspath(self, stream, ts, result):
         filtered = {}

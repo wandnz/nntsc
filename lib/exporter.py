@@ -177,17 +177,6 @@ class DBWorker(threading.Thread):
 
         aggs = self._merge_aggregators(aggcols, aggfunc)
 
-        # Don't filter streams if the request period is less than the cache
-        # update frequency!
-        if stoppoint - start > 300:
-            try:
-                labels = self.db.filter_active_streams(colid, labels, start, 
-                                                       stoppoint, self.influxdb)
-            except DBQueryException as e:
-                log("Failed to filter active streams for collection %s" \
-                        % (colid))
-                return DBWORKER_ERROR
-
         while start < stoppoint:
             # Temporary fix to allow heavy aggregation over long time
             # periods. TODO get rid of need for MAX_HISTORY_QUERY
@@ -261,20 +250,6 @@ class DBWorker(threading.Thread):
 
         if aggs != []:
             aggcols = self._merge_aggregators(columns, aggs)
-            
-
-        # Only query for historical data for streams that were active
-        # during that time period
-
-        # Don't filter streams if the request period is less than the cache
-        # update frequency!
-        if stoppoint - start > 300:
-            try:
-                labels = self.db.filter_active_streams(colid, labels, start, 
-                        stoppoint)
-            except DBQueryException as e:
-                return DBWORKER_ERROR
-
 
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY

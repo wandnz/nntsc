@@ -26,6 +26,7 @@ from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError
 from libnntsc.dberrorcodes import *
 from libnntsc.querybuilder import QueryBuilder
+from libnntsc.streamcache import StreamCache
 import libnntscclient.logger as logger
 from libnntsc.cqs import build_cqs, get_cqs, get_parser
 from requests import ConnectionError
@@ -46,7 +47,7 @@ requests.packages.urllib3.disable_warnings()
 class InfluxConnection(object):
     """A class to represent a connection to an Influx Database"""
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost="localhost",
-                 dbport="8086", timeout=None):
+                 dbport="8086", timeout=None, cachetime=0):
 
         self.dbname = dbname
         
@@ -72,6 +73,7 @@ class InfluxConnection(object):
             self.handler(e)
 
         self.started = 0
+        self.streamcache = StreamCache(dbname, cachetime)
 
 
     def query(self, query):
@@ -537,36 +539,81 @@ class InfluxSelector(InfluxConnection):
 
         self.qb.reset()
         self.qb.add_clause("select", "select {}".format(", ".join(selectcols)))
-        
+
         self.qb.add_clause("from", "from {}".format(table))
 
         for label, streams in labels.iteritems():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
+                continue
 
-            else:
-                self.qb.add_clause("where", "where time >= {}s and time < {}s and {}".format(
-                    start_time, stop_time, " or ".join([
-                        "stream = '{}'".format(stream) for stream in streams])))
+            fluxstreams = []
+            for sid in streams:
+                if self._was_stream_active(sid, table, start_time, stop_time):
+                    fluxstreams.append(sid)
 
-                order = ["select","from","where"]
-                querystring, _ = self.qb.create_query(order)
-                try:
-                    results = self.query(querystring)
-                except DBQueryException as e:
-                    yield(None, label, None, None, e)
+            if len(fluxstreams) == 0:
+                continue
 
-                rows = []
-                for (table, tags), results in results.items():
-                    for result in results:
-                        result["nntsclabel"] = label
-                        result["timestamp"] = result["time"]
-                        del result["time"]
-                        rows.append(result)
-                
-                yield(rows, label, "timestamp", 0, None)
-                
-        
+            self.qb.add_clause(
+                    "where", "where time >= {}s and time < {}s and {}".format(
+                            start_time, stop_time, " or ".join([
+                            "stream = '{}'".format(s) for s in fluxstreams])))
+
+            order = ["select","from","where"]
+            querystring, _ = self.qb.create_query(order)
+            try:
+                results = self.query(querystring)
+            except DBQueryException as e:
+                yield(None, label, None, None, e)
+
+            rows = []
+            for (table, tags), results in results.items():
+                for result in results:
+                    result["nntsclabel"] = label
+                    result["timestamp"] = result["time"]
+                    del result["time"]
+                    rows.append(result)
+
+            yield(rows, label, "timestamp", 0, None)
+    
+
+    def _was_stream_active(self, sid, table, start, end):
+
+        firststamps = self.streamcache.fetch_all_first_timestamps("influx",
+            table)
+        laststamps = self.streamcache.fetch_all_last_timestamps("influx",
+            table)
+
+        if sid not in firststamps:
+            firststamps[sid] = None
+        if firststamps[sid] == None:
+            f = self.query_timestamp(table, sid, "first")
+            if f != 0:
+                firststamps[sid] = f
+                self.streamcache.set_first_timestamps("influx", table,
+                        firststamps)
+
+        if sid not in laststamps:
+            laststamps[sid] = None
+        if laststamps[sid] == None:
+            l = self.query_timestamp(table, sid, "last")
+            if l != 0:
+                laststamps[sid] = l
+                self.streamcache.set_last_timestamps("influx", table,
+                        laststamps)
+
+        if firststamps[sid] is None or laststamps[sid] is None:
+            return False
+
+        if firststamps[sid] > end:
+            return False
+        if laststamps[sid] >= start and laststamps[sid] < time.time() - 600:
+            return False
+
+        return True
+
+
     def select_aggregated_data(self, table, labels, aggcols, start_time,
                                stop_time, binsize):
         """
@@ -604,6 +651,7 @@ class InfluxSelector(InfluxConnection):
         
         self.table = table
         self.aggcols = aggcols
+        lastbin = 0
 
         # Change "smoke" to "smokearray", because dns asks for this
         for i, (meas, agg) in enumerate(self.aggcols):
@@ -618,8 +666,6 @@ class InfluxSelector(InfluxConnection):
                 
         # If there are aggregations on the same column we need to rename our response
         self._set_rename()
-        # Find the last bin that we're rolling up
-        lastbin = stop_time - (stop_time % binsize) - binsize
         # Check if we're requesting at least one bin, otherwise query
         # the raw data
         if start_time >= lastbin:
@@ -649,6 +695,7 @@ class InfluxSelector(InfluxConnection):
             # Otherwise we'll use the pre-aggregated columns we found
             self.qb.add_clause("from", "from {}.{}_{}".format(
                 ROLLUP_RP, self.table, self.influx_binsize))
+            lastbin = self.query_timestamp(self.table, None, "last", True)
             self.qb.add_clause("group_by", "group by stream")
             # Second query is for last bin of data which may not have been collected by CQs
             self.qb2.add_clause("from", "from {}".format(table))
@@ -665,6 +712,7 @@ class InfluxSelector(InfluxConnection):
         all_streams = []
         labels_and_rows = {}
         
+
         for label, streams in labels.iteritems():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
@@ -672,6 +720,8 @@ class InfluxSelector(InfluxConnection):
             else:
                 labels_and_rows[label] = {}
                 for stream in streams:
+
+
                     all_streams.append(stream)
                     self.streams_to_labels[str(stream)] = label
 
@@ -705,14 +755,20 @@ class InfluxSelector(InfluxConnection):
                                 labels_and_rows[label][ts][k] = row[k]
                     #labels_and_rows[label].append(row)
 
-        if is_rollup:
-            # Catch the last bin with a second query, as this won't have been rolled up by the database
-            # (Influx Continuous Queries only roll up bins that are completely in the past)
-            # This will just be a query that aggregates the raw data, starting from where the other
-            # query left off (lastbin)
-            self.qb2.add_clause("where", "where time >= {}s and time < {}s and {}".format(
-                lastbin, stop_time, " or ".join([
-                    "stream = '{}'".format(stream) for stream in all_streams])))
+        if is_rollup and lastbin > 0:
+            # Catch the last bin(s) with a second query, as this won't have
+            # been rolled up by the database yet.
+            # (Influx Continuous Queries only roll up bins that are completely
+            # in the past and to avoid overusing memory, we often delay
+            # the aggregation until there is sufficient free memory).
+            # This will just be a query that aggregates the raw data, starting
+            # from where the other query left off (lastbin)
+
+            self.qb2.add_clause("where", 
+                    "where time >= {}s and time < {}s and {}".format(
+                        lastbin, stop_time, " or ".join([
+                        "stream = '{}'".format(stream)
+                        for stream in all_streams])))
             querystring, _ = self.qb2.create_query(order)
             try:
                 results = self.query(querystring)

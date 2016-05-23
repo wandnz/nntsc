@@ -227,12 +227,12 @@ class DBSelector(DatabaseCore):
         aggcols = self._filter_aggregation_columns(table, columns, aggcols)
         uniquecols = list(set([k[0] for k in aggcols] + groupcols))
         
-        if influxdb and table not in traceroute_tables:
-            for row in influxdb.select_aggregated_data(table, labels, aggcols,
-                                                       start_time, stop_time,
-                                                       binsize):
-                yield row
-            return
+        #if influxdb and table not in traceroute_tables:
+        #   for row in influxdb.select_aggregated_data(table, labels, aggcols,
+        #                                               start_time, stop_time,
+        #                                               binsize):
+        #        yield row
+        #    return
 
         self.qb.reset()
 
@@ -297,29 +297,40 @@ class DBSelector(DatabaseCore):
                 yield(None, label, None, None, None)
                 continue
 
-            self._generate_from(table, label, streams, streamtable)
+            # Fetch any available postgres data
+            pgstreams = []
+            for sid in streams:
+                if self._was_stream_active(table, sid, start_time, stop_time):
+                    pgstreams.append(sid)
 
-            order = ["outsel", "innersel", "activestreams", "activejoin", 
-                    "union", "joincondition", "wheretime", "outselend",
-                    "outgroup"]
-            query, params = self.qb.create_query(order)
-            #print query %params
+            if len(pgstreams) > 0:
+                self._generate_from(table, label, pgstreams, streamtable)
 
-            try:
-                self._dataquery(query, params)
-            except DBQueryException as e:
-                yield(None, label, None, None, e)
+                order = ["outsel", "innersel", "activestreams", "activejoin", 
+                        "union", "joincondition", "wheretime", "outselend",
+                        "outgroup"]
+                query, params = self.qb.create_query(order)
+
+                try:
+                    self._dataquery(query, params)
+                except DBQueryException as e:
+                    yield(None, label, None, None, e)
  
-            fetched = self._query_data_generator()
-            for row, errcode in fetched:
-                if errcode != DB_NO_ERROR:
-                    yield(None, label, None, None, DBQueryException(errcode))
-                else:
-#                    if len(row) > 1:
-#                        log("Result: [{},...]".format(row[0]))
-#                    else:
-#                        log("Result: {}".format(row))
-                    yield (row, label, tscol, binsize, None)
+                fetched = self._query_data_generator()
+                for row, errcode in fetched:
+                    if errcode != DB_NO_ERROR:
+                        yield(None, label, None, None,
+                                DBQueryException(errcode))
+                    else:
+                        yield (row, label, tscol, binsize, None)
+
+            # Fetch any available influx data
+            if influxdb is None or table in traceroute_tables:
+                continue
+
+            for row in influxdb.select_aggregated_data(table, labels, aggcols,
+                        start_time, stop_time, binsize):
+                yield row
 
 
     def select_data(self, col, labels, selectcols, start_time=None,
@@ -379,30 +390,25 @@ class DBSelector(DatabaseCore):
         # stream ids into the label dictionary format that we want
         assert(type(labels) is dict)
 
-        if influxdb and table not in traceroute_tables:
-            for row in influxdb.select_data(table, labels, selectcols,
-                                                       start_time, stop_time):
-                yield row
-            return
 
-
+        pg_selectcols = selectcols[:]
         # These columns are important so include them regardless
-        if 'timestamp' not in selectcols:
-            selectcols.append('timestamp')
-        while 'stream_id' in selectcols:
-            selectcols.remove('stream_id')
+        if 'timestamp' not in pg_selectcols:
+            pg_selectcols.append('timestamp')
+        while 'stream_id' in pg_selectcols:
+            pg_selectcols.remove('stream_id')
         
-        selectcols.append("activestreams.stream_id")
-        selectcols.append("nntsclabel")
+        pg_selectcols.append("activestreams.stream_id")
+        pg_selectcols.append("nntsclabel")
 
         self.qb.reset()
         order = []
 
         selclause = "SELECT "
-        for i in range(0, len(selectcols)):
-            selclause += selectcols[i]
+        for i in range(0, len(pg_selectcols)):
+            selclause += pg_selectcols[i]
 
-            if i != len(selectcols) - 1:
+            if i != len(pg_selectcols) - 1:
                 selclause += ", "
 
         self.qb.add_clause("select", selclause, [])
@@ -417,24 +423,121 @@ class DBSelector(DatabaseCore):
             if len(streams) == 0:
                 yield(None, label, None, None, None)
                 continue
-                
-            self._generate_from(table, label, streams, streamtable)
-            
-            order = ["select", "activestreams", "activejoin", "union",
-                    "joincondition", "wheretime", "order"]
-            sql, params = self.qb.create_query(order)
 
-            try:
-                self._dataquery(sql, params)
-            except DBQueryException as e:
-                yield(None, label, None, None, e)
+            # Fetch any available postgres data
+            pgstreams = []
+            for sid in streams:
+                if self._was_stream_active(table, sid, start_time, stop_time):
+                    pgstreams.append(sid)
 
-            fetched = self._query_data_generator()
-            for row, errcode in fetched:
-                if errcode != DB_NO_ERROR:
-                    yield(None, label, None, None, DBQueryException(errcode))
-                else:
-                    yield (row, label, "timestamp", 0, None)
+            if len(pgstreams) > 0:
+                self._generate_from(table, label, pgstreams, streamtable)
+
+                order = ["select", "activestreams", "activejoin", "union",
+                        "joincondition", "wheretime", "order"]
+                sql, params = self.qb.create_query(order)
+
+                try:
+                    self._dataquery(sql, params)
+                except DBQueryException as e:
+                    yield(None, label, None, None, e)
+
+                fetched = self._query_data_generator()
+                for row, errcode in fetched:
+                    if errcode != DB_NO_ERROR:
+                        yield(None, label, None, None,
+                                DBQueryException(errcode))
+                    else:
+                        yield (row, label, "timestamp", 0, None)
+
+            # Fetch any available influx data
+            if influxdb is None or table in traceroute_tables:
+                continue
+
+            for row in influxdb.select_data(table, labels, selectcols,
+                                                       start_time, stop_time):
+                yield row
+
+    def _datatable_exists(self, table, sid):
+        
+        query = """SELECT EXISTS ( SELECT 1 FROM pg_catalog.pg_class c
+                   WHERE c.relname = %s )"""
+        tname = table + "_" + str(sid)
+
+        try:
+            self._basicquery(query, (tname,))
+        except DBQueryException as e:
+            return False
+
+        row = self.basic.cursor.fetchone()
+        if row == None:
+            return False
+
+        result = row[0]
+        self._releasebasic()
+        return result
+
+    def query_timestamp(self, table, sid, first_or_last):
+
+        tname = table + "_" + str(sid)
+        if first_or_last == "max":
+            default = time.time()
+        else:
+            default = time.time() - (7 * 24 * 60 * 60)
+
+        query = """SELECT %s(timestamp) FROM %s""" % (first_or_last, tname)
+        try:
+            self._basicquery(query, (tname,))
+        except DBQueryException as e:
+            return default
+
+        row = self.basic.cursor.fetchone()
+        if row == None:
+            return default
+
+        result = row[0]
+        self._releasebasic()
+        return result
+
+
+    def _was_stream_active(self, table, sid, start, end):
+
+        if not self._datatable_exists(table, sid):
+            return False
+
+        firststamps = self.streamcache.fetch_all_first_timestamps("postgres",
+            table)
+        laststamps = self.streamcache.fetch_all_last_timestamps("postgres",
+            table)
+
+        if sid not in firststamps:
+            firststamps[sid] = None
+        if firststamps[sid] == None:
+            f = self.query_timestamp(table, sid, "min")
+            if f != 0:
+                firststamps[sid] = f
+                self.streamcache.set_first_timestamps("postgres", table,
+                        firststamps)
+
+        if sid not in laststamps:
+            laststamps[sid] = None
+        if laststamps[sid] == None:
+            l = self.query_timestamp(table, sid, "max")
+            if l != 0:
+                laststamps[sid] = l
+                self.streamcache.set_last_timestamps("postgres", table,
+                        laststamps)
+
+        if firststamps[sid] is None or laststamps[sid] is None:
+            return False
+
+        if firststamps[sid] > end:
+            return False
+        if laststamps[sid] < start and laststamps[sid] < time.time() - 600:
+            return False
+
+        return True
+
 
 
     def _generate_label_case(self, label, stream_ids):
@@ -478,11 +581,13 @@ class DBSelector(DatabaseCore):
 
         self._basicquery(query, (sid,))
 
-        if self.basic.cursor.rowcount != 1:
+        if self.basic.cursor.rowcount == 0:
+            row = [None]
+        elif self.basic.cursor.rowcount != 1:
             log("Unexpected number of results when querying for %s timestamp: %d" % (agg, self.basic.cursor.rowcount))
             raise DBQueryException(DB_CODING_ERROR)
-
-        row = self.basic.cursor.fetchone()
+        else:
+            row = self.basic.cursor.fetchone()
         
         if row[0] == None:
             ts = 0
@@ -493,60 +598,6 @@ class DBSelector(DatabaseCore):
         self.dbqueries += 1
         return ts
 
-    def filter_active_streams(self, collection, labels, start, end, influxdb=None):
-        filteredlabels = {}
-        storerequiredlast = False
-        storerequiredfirst = False
-
-        table, columns, streamtable = self._get_data_table(collection)
-        firstdict = self.streamcache.fetch_all_first_timestamps(table)
-        lastdict = self.streamcache.fetch_all_last_timestamps(table)
-        
-        for lab, streams in labels.iteritems():
-            self.cachehits = 0
-            self.dbqueries = 0
-        
-            filtered = []
-            for sid in streams:
-                if sid not in firstdict:
-                    firstdict[sid] = None
-
-                if firstdict[sid] == None:
-                    if influxdb is not None and table not in traceroute_tables:
-                        firstts = influxdb.query_timestamp(table, sid, "first")
-                    else:
-                        firstts = self._query_timestamp(table, sid, "min")
-                    firstdict[sid] = firstts
-                    storerequiredfirst = True
-                else:
-                    self.cachehits += 1
-                    firstts = firstdict[sid]
-
-                if sid not in lastdict:
-                    lastdict[sid] = None
-
-                if lastdict[sid] == None:
-                    if influxdb is not None and table not in traceroute_tables:
-                        lastts = influxdb.query_timestamp(table, sid, "last")
-                    else:
-                        lastts = self._query_timestamp(table, sid, "max")
-                    storerequiredlast = True
-                    lastdict[sid] = lastts
-                else:
-                    self.cachehits += 1
-                    lastts = lastdict[sid]
-
-                if firstts <= end and lastts >= start:
-                    filtered.append(sid)
-            filteredlabels[lab] = filtered
-            #print len(streams), len(filtered), self.cachehits, self.dbqueries
-        
-        if storerequiredfirst:
-            self.streamcache.set_first_timestamps(table, firstdict)
-        if storerequiredlast:
-            self.streamcache.set_last_timestamps(table, lastdict)
-
-        return filteredlabels
 
     # It looks like restricting the number of stream ids that are checked for
     # in the data table helps significantly with performance, so if we can

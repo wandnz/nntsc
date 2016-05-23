@@ -159,7 +159,8 @@ class AmpHttpParser(NNTSCParser):
             self.streams[key] = stream_id
 
         self.insert_data(stream_id, timestamp, mangled)
-        self.db.update_timestamp(self.datatable, [stream_id], timestamp)
+        self.db.update_timestamp(self.datatable, [stream_id], timestamp,
+                self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

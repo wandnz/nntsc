@@ -141,7 +141,8 @@ class AmpDnsParser(NNTSCParser):
             self.insert_data(stream_id, timestamp, dataresult)
             done[stream_id] = 0
 
-        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp,
+                self.have_influx)
 
 
     def _split_result(self, alldata, result):

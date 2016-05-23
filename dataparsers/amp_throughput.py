@@ -140,7 +140,8 @@ class AmpThroughputParser(NNTSCParser):
                 return
             done[streamid] = 0
 
-        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp,
+                self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
