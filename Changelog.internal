@@ -1,4 +1,4 @@
-NNTSC 2.8
+NNTSC 2.9
 
 Deployment dates:
   skeptic: TBD
@@ -10,6 +10,17 @@ Major Changes:
    e.g. amp-latency, amp-http. Obviously, this requires an InfluxDB database
    to be created and build_nntsc_db to be re-run. Appropriate config options
    will need to be added to the config file (see README and example config
-   file for details). To have access to old data for those collections, the
-   data will need to be migrated across to the Influx database.
+   file for details). Old data in the postgresql data tables will still be
+   queryable, but no new data should be inserted for collections that support
+   Influx (i.e. everything except amp-traceroute). 
  * Added support for storing results from the amp-udpstream test.
+
+----------------
+NNTSC 2.8
+
+Deployment dates:
+  skeptic: TBD
+  lamp: TBD
+  VF: TBD
+
+
