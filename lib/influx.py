@@ -113,12 +113,10 @@ class InfluxConnection(object):
         try:
             point = ts.get_points().next()
         except StopIteration:
+            print "No timestamp for %s" % (table)
             return 0
 
-        if point is None:
-            # Nothing in this table!
-            return 0
-        elif "time" not in point or point["time"] == 0:
+        if point is None or "time" not in point or point["time"] == 0:
             if self.started != 0:
                 x = self.started
             else:
@@ -364,6 +362,7 @@ class InfluxInsertor(InfluxConnection):
                     binsize = self._get_binsize(influx_binsize)
                     mints = self.query_timestamp(tablename, rollup=influx_binsize) 
                     if mints == 0:
+                        print tablename, influx_binsize
                         last_binned[influx_binsize] = (ts - (ts % binsize) \
                                 - binsize, False)
                     else:
@@ -668,7 +667,7 @@ class InfluxSelector(InfluxConnection):
         self._set_rename()
         # Check if we're requesting at least one bin, otherwise query
         # the raw data
-        if start_time >= lastbin:
+        if start_time >= time.time() - binsize:
             is_rollup = False
         else:
             # Also check if we have an appropriate rollup table
@@ -695,7 +694,7 @@ class InfluxSelector(InfluxConnection):
             # Otherwise we'll use the pre-aggregated columns we found
             self.qb.add_clause("from", "from {}.{}_{}".format(
                 ROLLUP_RP, self.table, self.influx_binsize))
-            lastbin = self.query_timestamp(self.table, None, "last", True)
+            lastbin = self.query_timestamp(self.table, None, "last", self.influx_binsize)
             self.qb.add_clause("group_by", "group by stream")
             # Second query is for last bin of data which may not have been collected by CQs
             self.qb2.add_clause("from", "from {}".format(table))
