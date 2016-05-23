@@ -226,15 +226,24 @@ class DBSelector(DatabaseCore):
         groupcols = self._sanitise_columns(table, columns, groupcols)
         aggcols = self._filter_aggregation_columns(table, columns, aggcols)
         uniquecols = list(set([k[0] for k in aggcols] + groupcols))
-        
-        #if influxdb and table not in traceroute_tables:
-        #   for row in influxdb.select_aggregated_data(table, labels, aggcols,
-        #                                               start_time, stop_time,
-        #                                               binsize):
-        #        yield row
-        #    return
-
         self.qb.reset()
+
+        # Little shortcut designed to speed up fetching matrix data -- we
+        # know that the most recent 10 mins will almost always be in Influx,
+        # so we can avoid having to query for each label one at a time (which
+        # we have to do if dealing with the possibility of the query
+        # overlapping with postgres data).
+        #
+        # Eventually postgresql data will become irrelevant and we can simply
+        # take this "shortcut" for all Influx collections and only fall
+        # through to postgres for traceroute data, but for now this hack
+        # might be helpful.
+        if influxdb is not None and table not in traceroute_tables and \
+                start_time >= int(time.time()) - 600:
+            for row in influxdb.select_aggregated_data(table, labels,
+                    aggcols, start_time, stop_time, binsize):
+                yield row
+            return
 
         # Convert our column and aggregator lists into useful bits of SQL
         labeled_aggcols = self._apply_aggregation(aggcols, groupcols)
@@ -328,9 +337,8 @@ class DBSelector(DatabaseCore):
             if influxdb is None or table in traceroute_tables:
                 continue
 
-        if influxdb is not None and table not in traceroute_tables:
-            for row in influxdb.select_aggregated_data(table, labels, aggcols,
-                        start_time, stop_time, binsize):
+            for row in influxdb.select_aggregated_data(table, 
+                    {label:streams}, aggcols, start_time, stop_time, binsize):
                 yield row
 
 
@@ -390,6 +398,23 @@ class DBSelector(DatabaseCore):
         # XXX for now, lets try to munge graph types that give a list of
         # stream ids into the label dictionary format that we want
         assert(type(labels) is dict)
+
+        # Little shortcut designed to speed up fetching recent data -- we
+        # know that the most recent 10 mins will almost always be in Influx,
+        # so we can avoid having to query for each label one at a time (which
+        # we have to do if dealing with the possibility of the query
+        # overlapping with postgres data).
+        #
+        # Eventually postgresql data will become irrelevant and we can simply
+        # take this "shortcut" for all Influx collections and only fall
+        # through to postgres for traceroute data, but for now this hack
+        # might be helpful.
+        if influxdb is not None and table not in traceroute_tables and \
+                start_time >= int(time.time()) - 600:
+            for row in influxdb.select_data(table, labels, selectcols,
+                    start_time, stop_time):
+                yield row
+            return
 
 
         pg_selectcols = selectcols[:]
@@ -455,8 +480,8 @@ class DBSelector(DatabaseCore):
             if influxdb is None or table in traceroute_tables:
                 continue
 
-            for row in influxdb.select_data(table, labels, selectcols,
-                                                       start_time, stop_time):
+            for row in influxdb.select_data(table, {label:streams},
+                    selectcols, start_time, stop_time):
                 yield row
 
     def _datatable_exists(self, table, sid):
