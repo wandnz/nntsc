@@ -113,7 +113,6 @@ class InfluxConnection(object):
         try:
             point = ts.get_points().next()
         except StopIteration:
-            print "No timestamp for %s" % (table)
             return 0
 
         if point is None or "time" not in point or point["time"] == 0:
@@ -362,7 +361,6 @@ class InfluxInsertor(InfluxConnection):
                     binsize = self._get_binsize(influx_binsize)
                     mints = self.query_timestamp(tablename, rollup=influx_binsize) 
                     if mints == 0:
-                        print tablename, influx_binsize
                         last_binned[influx_binsize] = (ts - (ts % binsize) \
                                 - binsize, False)
                     else:
@@ -527,8 +525,9 @@ class InfluxSelector(InfluxConnection):
                              period that data is required for. If None,
                              this is set to the current time.
 
-        This is a generator function and yields a tuple. Assumes prior sanitation of selectcols
-        and is designed to be called by function of same name in dbselect
+        This is a generator function and yields a tuple. Assumes prior
+        sanitation of selectcols and is designed to be called by function of
+        same name in dbselect
 
         """
         if table == "data_amp_dns":
@@ -620,8 +619,9 @@ class InfluxSelector(InfluxConnection):
 
             Parameters:
                 table -- the name of the table to query
-                labels -- a dictionary of labels and their corresponding
-                          stream ids
+                labels -- a dictionary of label to streams mappings, describing
+                         which streams to query and what labels to assign to
+                         the results.
                 aggcols -- a list of tuples describing the columns to 
                            aggregate and the aggregation function to apply to 
                            that column
@@ -639,9 +639,9 @@ class InfluxSelector(InfluxConnection):
                            the entire data series will aggregated into a
                            single summary value.
 
-        This is a generator function and will yield a tuple each time it is iterated over.
-        The function is called by the select_aggregated_data in dbselect, and assumes that
-        column names have been sanitised and active streams have been filtered out already
+        This is a generator function and will yield a tuple each time it is
+        iterated over. The function is called by the select_aggregated_data in
+        dbselect, and assumes that column names have been sanitised already.
 
         """
 
@@ -705,12 +705,13 @@ class InfluxSelector(InfluxConnection):
         self.qb.add_clause("select", "select {}".format(
             ", ".join(columns)))
 
-        # Collect all the streams together so we can do one big query, but take note of the
-        # labels associated with them
+
+
+        # Collect all the streams together so we can do one big query, but
+        # take note of the labels associated with them
         self.streams_to_labels = {}
         all_streams = []
         labels_and_rows = {}
-        
 
         for label, streams in labels.iteritems():
             if len(streams) == 0:
@@ -719,8 +720,6 @@ class InfluxSelector(InfluxConnection):
             else:
                 labels_and_rows[label] = {}
                 for stream in streams:
-
-
                     all_streams.append(stream)
                     self.streams_to_labels[str(stream)] = label
 
@@ -731,7 +730,7 @@ class InfluxSelector(InfluxConnection):
         self.qb.add_clause("where", "where time >= {}s and time < {}s and {}".format(
             start_time, lastbin if is_rollup else stop_time, " or ".join([
                 "stream = '{}'".format(stream) for stream in all_streams])))
-        
+
         order = ["select","from","where","group_by"]
         querystring, _ = self.qb.create_query(order)
 
@@ -801,18 +800,18 @@ class InfluxSelector(InfluxConnection):
         """Decides whether response will need to be renamed or not"""
         columns = [k[0] for k in self.aggcols]
         self.rename = len(set(columns)) < len(columns)
-    
+
     def _get_label(self, meas, agg):
         """Gets label for response given measure and aggregation"""
         return meas + "_" + agg if self.rename else meas
-                
+
     def _get_rollup_functions(self):
         """
         Returns a list of columns to select if ther is no pre-aggregated table
         """
-        
+
         col_names = []
-       
+
         for meas, agg in self.aggcols:
             if agg == 'smokearray':
                 if meas == "rtts":
