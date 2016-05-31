@@ -9,12 +9,12 @@ nntsc \- Collector for network time series measurements
 [ \fB\-b \fR | \fB\-\-background \fR ]
 
 .SH DESCRIPTION
-Starts the NNTSC data collector, which will periodically collect measurements 
+Starts the NNTSC data collector, which will periodically collect measurements
 from the data sources described in the configuration file and store them into
 a postgresql database for subsequent analysis.
 
 NNTSC will simultaneously run a data exporter which clients can connect to
-and query for any data stored in the NNTSC database. 
+and query for any data stored in the NNTSC database.
 
 .SH OPTIONS
 
@@ -24,7 +24,7 @@ read configuration from <filename>.
 
 .TP
 \fB\-p\fR port
-the port number that the exporter should listen on for incoming client 
+the port number that the exporter should listen on for incoming client
 connections \-\- defaults to 61234.
 
 .TP
@@ -49,7 +49,7 @@ otherwise it will report them directly to standard error.
 
 NNTSC will open up a TCP port to allow clients to connect and query the
 database using a custom NNTSC protocol. You may wish to take steps to ensure
-only hosts that you want accessing your network measurement database can 
+only hosts that you want accessing your network measurement database can
 connect to the NNTSC host on that port.
 
 
