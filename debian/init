@@ -22,6 +22,7 @@ USER=cuz
 GROUP=cuz
 CONF=/etc/nntsc/nntsc.conf
 PIDDIR=/var/run/$NAME
+LOGDIR=/var/log/$NAME
 PIDFILE=$PIDDIR/$NAME.pid
 SCRIPTNAME=/etc/init.d/$NAME
 
@@ -48,6 +49,12 @@ do_start()
         if [ ! -d $PIDDIR ]; then
             mkdir -p $PIDDIR
             chown -R $USER:$USER $PIDDIR
+        fi
+
+        # Make sure that the log dir exists
+        if [ ! -d $LOGDIR ]; then
+            mkdir -p $LOGDIR
+            chown -R $USER:$USER $LOGDIR
         fi
 
 	# Return

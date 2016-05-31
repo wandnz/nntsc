@@ -1,4 +1,4 @@
-.TH NNTSC "1" "Jun 2013", "nntsc (NNTSC)" "User Commands"
+.TH NNTSC "1" "May 2016", "nntsc (NNTSC)" "User Commands"
 .SH NAME
 nntsc \- Collector for network time series measurements
 .SH SYNOPSIS
@@ -44,8 +44,8 @@ documented in both the README and the example configuration file included with
 NNTSC.
 
 If run as a daemon, NNTSC writes error and log messages to a logfile (by
-default, this is /tmp/nntsc.log), otherwise it will report them directly to
-standard error. 
+default this is /var/log/nntsc/nntsc.log on Debian, else /tmp/nntsc.log),
+otherwise it will report them directly to standard error.
 
 NNTSC will open up a TCP port to allow clients to connect and query the
 database using a custom NNTSC protocol. You may wish to take steps to ensure
