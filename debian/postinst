@@ -20,6 +20,8 @@ set -e
 
 case "$1" in
     configure)
+        CONF=/etc/nntsc/nntsc.conf
+
         # ensure the cuz system user exists
         if ! getent passwd cuz > /dev/null; then
             adduser --quiet --system --group --no-create-home cuz
@@ -33,7 +35,17 @@ case "$1" in
             createdb -O cuz nntsc"
 
         # apply the schema and config to the nntsc database
-        su cuz -s /bin/bash -c "build_nntsc_db -C /etc/nntsc/nntsc.conf"
+        su cuz -s /bin/bash -c "build_nntsc_db -C $CONF"
+
+        # ensure the nntsc rabbitmq user exists and the password matches the
+        # configuration file
+        PASSWD=`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1`
+        /usr/sbin/rabbitmqctl list_users | cut -f 1 | grep -qx nntsc || \
+            (/usr/sbin/rabbitmqctl add_user nntsc $PASSWD && \
+             sudo rabbitmqctl set_permissions nntsc ".*" ".*" ".*" && \
+             sed -i "s/username = guest/username = nntsc/" $CONF && \
+             sed -i "s/password = guest/password = $PASSWD/" $CONF)
+
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
