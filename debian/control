@@ -13,7 +13,7 @@ Architecture: any
 # XXX temporarily remove python dependencies, as Debian doesn't package most
 # of the ones that we use
 #Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}
-Depends: ${shlibs:Depends}, ${misc:Depends}, python, rabbitmq-server (>= 3.1.5), libnntsc-client, postgresql, postgresql-client, amplet2-server, python-rrdtool, python-pika, python-daemon
+Depends: ${shlibs:Depends}, ${misc:Depends}, python, rabbitmq-server (>= 3.1.5), libnntsc-client, postgresql, postgresql-client, amplet2-server, python-rrdtool, python-pika, python-daemon, python-psycopg2, python-pylibmc
 Description: Collects, stores and examines network time series data
  NNTSC is a system designed for collecting, storing and examining network
  time series data. Unlike RRDs, NNTSC does not attempt to aggregate
