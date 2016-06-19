@@ -55,10 +55,17 @@ class PikaBasicAsync(object):
 
     def reconnect(self):
         self._connection.ioloop.stop()
-        if not self._closing:
-            self._connection = self._pikaConnect(self._host, self._port, 
+        while not self._closing:
+            self._connection = self._pikaConnect(self._host, self._port,
                     self._ssl, self._credentials)
-            self._connection.ioloop.start()
+
+            try:
+                self._connection.ioloop.start()
+            except EOFError as e:
+                time.sleep(5)
+                continue
+
+            break
     
     def close_channel(self):
         if self._channel:
