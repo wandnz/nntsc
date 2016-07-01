@@ -40,7 +40,7 @@ import Queue as StdQueue
 
 DEFAULT_RP = "default"
 ROLLUP_RP = "rollups"
-MAX_CQWORKERS = 2
+MAX_CQWORKERS = 1
 
 requests.packages.urllib3.disable_warnings()
 
@@ -193,14 +193,19 @@ class ContinuousQueryRerunner(threading.Thread):
         aggs = job[2]
         start = job[3]
         end = job[4]
+        binsecs = job[5]
 
         agg_string = ",".join(
             ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in aggs])
-        query = """
-        SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
-        """.format(agg_string, ROLLUP_RP, table, binsize, start, end)
-        result = self.parent.query(query)
-        result = None
+
+        while start < end:
+            query = """
+            SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
+            """.format(agg_string, ROLLUP_RP, table, binsize, start, start + (10 * binsecs))
+            print query
+            result = self.parent.query(query)
+            result = None
+            start += (10 * binsecs)
         
     def run(self):
         running = 1
@@ -208,9 +213,9 @@ class ContinuousQueryRerunner(threading.Thread):
         while running:
 
             mem = psutil.virtual_memory()
-            if mem.percent > 70.0:
-                time.sleep(5)
-                continue
+            #if mem.percent > 50.0:
+            #    time.sleep(5)
+            #    continue
 
             try:
                 job = self.jobqueue.get(True, 60)
@@ -273,14 +278,14 @@ class InfluxInsertor(InfluxConnection):
                     time_to = most_recent - (most_recent % binsize)
                     last_auto_store = now - (now % binsize)
 
-
                     # If we've filled a whole bin and we're not overlapping
                     # with influx continuous query auto stores...
                     if time_from < last_auto_store and time_to > time_from:
 
                         # still catching up on historical data -- don't run
                         # cqs until we catch up
-                        if time_to < last_auto_store:
+                        if time_to < last_auto_store and \
+                                time_to - time_from < (5 * binsize):
 
                             if influx_binsize not in self.pending_cqs:
                                 self.pending_cqs[influx_binsize] = {}
@@ -313,7 +318,7 @@ class InfluxInsertor(InfluxConnection):
 
     def _queue_cqs(self, start, end, table, aggs, influx_binsize):
 
-        binsize = self._get_binsize(influx_binsize) * 20
+        binsize = self._get_binsize(influx_binsize)
         while start < end:
 
             nextend = end
@@ -322,7 +327,7 @@ class InfluxInsertor(InfluxConnection):
             #else:
             #    nextend = start + binsize - 1
             try:
-                self.cqjobs.put((table, influx_binsize, aggs, start, nextend))
+                self.cqjobs.put((table, influx_binsize, aggs, start, nextend, binsize))
             except StdQueue.Full:
                 logger.log("Too many CQ jobs queued!")
                 raise
