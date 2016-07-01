@@ -153,7 +153,7 @@ class AmpTcppingParser(AmpIcmpParser):
                 ('icmptype' in datapoint and datapoint['icmptype'] is not None):
             observed[streamid]["icmperrors"] += 1
 
-        if 'loss' in datapoint:
+        if 'loss' in datapoint and datapoint['loss'] is not None:
             observed[streamid]["loss"] += datapoint['loss']
 
         if 'rtt' in datapoint and datapoint['rtt'] is not None:
