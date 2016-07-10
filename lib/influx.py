@@ -137,6 +137,9 @@ class InfluxConnection(object):
         except InfluxDBClientError as e:
             logger.log(e)
             raise DBQueryException(DB_GENERIC_ERROR)
+        except InfluxDBServerError as e:
+            logger.log(e)
+            raise DBQueryException(DB_QUERY_TIMEOUT)
         except ConnectionError as e:
             logger.log(e)
             raise DBQueryException(DB_QUERY_TIMEOUT)
@@ -202,7 +205,6 @@ class ContinuousQueryRerunner(threading.Thread):
             query = """
             SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
             """.format(agg_string, ROLLUP_RP, table, binsize, start, start + (10 * binsecs))
-            print query
             result = self.parent.query(query)
             result = None
             start += (10 * binsecs)
