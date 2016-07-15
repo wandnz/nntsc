@@ -23,7 +23,7 @@
 
 
 from influxdb import InfluxDBClient
-from influxdb.exceptions import InfluxDBClientError
+from influxdb.exceptions import InfluxDBClientError, InfluxDBServerError
 from libnntsc.dberrorcodes import *
 from libnntsc.querybuilder import QueryBuilder
 from libnntsc.streamcache import StreamCache
@@ -84,50 +84,41 @@ class InfluxConnection(object):
             print query
             self.handler(e)
 
-    def query_timestamp(self, table, streamid=None, first_or_last="last", rollup=None):
-        """
-        Returns either the first or last timestamp in database for
-        given table and stream, or just table if no stream is given
-        """
-        if first_or_last == "max":
-            first_or_last = "last"
-        if first_or_last == "min":
-            first_or_last = "first"    
-        if first_or_last not in ["first", "last"]:
-            return
+    def _find_last_rollup_bin(self, table, binsize):
 
-        field = get_parser(table).get_random_field(rollup)
+        field = get_parser(table).get_random_field(binsize)
 
-        if rollup is not None:
-            table = "{}.{}_{}".format(ROLLUP_RP, table, rollup)
+        table = "{}.{}_{}".format(ROLLUP_RP, table, binsize)
 
-        if streamid is None:
-            streamclause = ""
+        found = False
+        endts = time.time()
+
+        while not found and endts >= time.time() - (60 * 60 * 24 * 100):
+            startts = endts - (60 * 60 * 24)
+
+            query = "SELECT count(%s) FROM %s WHERE time > %ds AND time <= %ds GROUP BY time(%s) fill(none) ORDER BY time DESC LIMIT 1" % \
+                    (field, table, startts, endts, binsize)
+
+
+            result = self.query(query)
+            try:
+                r = result.get_points().next()
+            except StopIteration:
+                endts = startts
+                continue
+
+            if r is not None and "time" in r and r['time'] is not None:
+                return r['time']
+            endts = startts
+
+        if self.started != 0:
+            x = self.started
         else:
-            streamclause = "WHERE stream = '%s'" % (streamid)
+            x = time.time()
+        if ((x % (60 * 60 * 24)) < (60 * 60 * 4)):
+            x -= (60 * 60 * 5)
+        return int(x - (x % (60 * 60 * 2))) 
 
-        query = "SELECT %s(%s) FROM %s %s" % (first_or_last, field, table, \
-                streamclause)
-
-        ts = self.query(query)
-        try:
-            point = ts.get_points().next()
-        except StopIteration:
-            return 0
-
-        if point is None or "time" not in point or point["time"] == 0:
-            if self.started != 0:
-                x = self.started
-            else:
-                x = time.time()
-            if ((x % (60 * 60 * 24)) < (60 * 60 * 4)):
-                x -= (60 * 60 * 5)
-            if first_or_last == "first":
-                return int(x - (x % (60 * 60 * 12)))
-            return int(x - (x % (60 * 60 * 2)))
-
-        return point["time"]
-            
     def handler(self, db_exception):
         """
         A basic error handler for queries to database
@@ -185,12 +176,6 @@ class ContinuousQueryRerunner(threading.Thread):
         self.parent = parent
 
     def rerun_cq(self, job):
-        """
-        Rerun a continuous query. These queries don't seem to work with raw timestamps in 
-        the WHERE clause, so we use now() - x, where x is the amount of time between now and 
-        the timestamp we want
-        """
-
         table = job[0]
         binsize = job[1]
         aggs = job[2]
@@ -201,13 +186,14 @@ class ContinuousQueryRerunner(threading.Thread):
         agg_string = ",".join(
             ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in aggs])
 
+        increment = min(12 * 60, (10 * binsecs))
         while start < end:
             query = """
             SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
-            """.format(agg_string, ROLLUP_RP, table, binsize, start, start + (10 * binsecs))
+            """.format(agg_string, ROLLUP_RP, table, binsize, start, start + increment)
             result = self.parent.query(query)
             result = None
-            start += (10 * binsecs)
+            start += increment
         
     def run(self):
         running = 1
@@ -366,7 +352,7 @@ class InfluxInsertor(InfluxConnection):
                     # Find the last bin that was created and start rollups
                     # from 1 bin after that
                     binsize = self._get_binsize(influx_binsize)
-                    mints = self.query_timestamp(tablename, rollup=influx_binsize) 
+                    mints = self._find_last_rollup_bin(tablename, influx_binsize)
                     if mints == 0:
                         last_binned[influx_binsize] = (ts - (ts % binsize) \
                                 - binsize, False)
@@ -387,7 +373,6 @@ class InfluxInsertor(InfluxConnection):
                     last_binned[influx_binsize] = (ts - (ts % binsize), True)
 
             self.points_windows[tablename] = (ts, last_binned)
-
 
     def _rewind_last_bin_time(self, ts, last_bin_time, binsize, now):
 
@@ -554,7 +539,7 @@ class InfluxSelector(InfluxConnection):
 
             fluxstreams = []
             for sid in streams:
-                if self._was_stream_active(sid, table, start_time, stop_time):
+                #if self._was_stream_active(sid, table, start_time, stop_time):
                     fluxstreams.append(sid)
 
             if len(fluxstreams) == 0:
@@ -585,38 +570,22 @@ class InfluxSelector(InfluxConnection):
 
     def _was_stream_active(self, sid, table, start, end):
 
-        firststamps = self.streamcache.fetch_all_first_timestamps("influx",
-            table)
-        laststamps = self.streamcache.fetch_all_last_timestamps("influx",
-            table)
+        field = get_parser(table).get_random_field(None)
 
-        if sid not in firststamps:
-            firststamps[sid] = None
-        if firststamps[sid] == None:
-            f = self.query_timestamp(table, sid, "first")
-            if f != 0:
-                firststamps[sid] = f
-                self.streamcache.set_first_timestamps("influx", table,
-                        firststamps)
+        querystring = "SELECT count({}) FROM {} WHERE stream='{}' AND time >= {}s AND time <= {}s GROUP BY time(1h) fill(none) LIMIT 1".format( \
+                field, table, sid, start, end)
 
-        if sid not in laststamps:
-            laststamps[sid] = None
-        if laststamps[sid] == None:
-            l = self.query_timestamp(table, sid, "last")
-            if l != 0:
-                laststamps[sid] = l
-                self.streamcache.set_last_timestamps("influx", table,
-                        laststamps)
-
-        if firststamps[sid] is None or laststamps[sid] is None:
+        try:
+            results = self.query(querystring)
+        except DBQueryException as e:
             return False
 
-        if firststamps[sid] > end:
-            return False
-        if laststamps[sid] >= start and laststamps[sid] < time.time() - 600:
-            return False
+        for (table, tags), results in results.items():
+            for r in results:
+                if r['count'] > 0:
+                    return True
 
-        return True
+        return False
 
 
     def select_aggregated_data(self, table, labels, aggcols, start_time,
@@ -701,7 +670,7 @@ class InfluxSelector(InfluxConnection):
             # Otherwise we'll use the pre-aggregated columns we found
             self.qb.add_clause("from", "from {}.{}_{}".format(
                 ROLLUP_RP, self.table, self.influx_binsize))
-            lastbin = self.query_timestamp(self.table, None, "last", self.influx_binsize)
+            lastbin = self._find_last_rollup_bin(self.table, self.influx_binsize)
             self.qb.add_clause("group_by", "group by stream")
             # Second query is for last bin of data which may not have been collected by CQs
             self.qb2.add_clause("from", "from {}".format(table))
@@ -734,7 +703,7 @@ class InfluxSelector(InfluxConnection):
             return
 
         # Conditional is disjunction of all of the streams with conjunction of time period
-        self.qb.add_clause("where", "where time >= {}s and time < {}s and {}".format(
+        self.qb.add_clause("where", "where time >= {}s and time < {}s and ({})".format(
             start_time, lastbin if is_rollup else stop_time, " or ".join([
                 "stream = '{}'".format(stream) for stream in all_streams])))
 
