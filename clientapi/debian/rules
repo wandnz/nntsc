@@ -9,8 +9,6 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-export PYBUILD_NAME = libnntsc-client
-
 %:
-	dh $@ --with python2 --buildsystem=pybuild
+	dh $@ --with python2
 

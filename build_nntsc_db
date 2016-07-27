@@ -9,13 +9,13 @@
 #
 # All rights reserved.
 #
-# This code has been developed by the WAND Network Research Group at the 
-# University of Waikato. For more information, please see 
+# This code has been developed by the WAND Network Research Group at the
+# University of Waikato. For more information, please see
 # http://www.wand.net.nz/
 #
 # This source code is proprietary to the University of Waikato and may not be
 # redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group. 
+# University of Waikato and the WAND Network Research Group.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
@@ -122,13 +122,13 @@ if 'rrd' in enabled_modules:
     rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')
     if rrd_conf == "NNTSCConfigError" or rrd_conf == "NNTSCConfigMissing":
         sys.exit(0)
-    
+
     try:
-        insert_rrd_streams(db, rrd_conf) 
+        insert_rrd_streams(db, rrd_conf)
     except DBQueryException as e:
         if e.code == DB_DATA_ERROR:
             logger.log("Failed to create RRD streams -- check RRD List for invalid content")
-            sys.exit(1)        
+            sys.exit(1)
 
         if e.code == DB_GENERIC_ERROR:
             logger.log("Database error while creating RRD streams -- may need to manually check database")
@@ -137,4 +137,3 @@ if 'rrd' in enabled_modules:
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
-

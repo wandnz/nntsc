@@ -27,8 +27,8 @@ setup(name="nntsc",
 	packages=['libnntsc', 'libnntsc.parsers'],
 	install_requires = requires,
 	package_dir = { \
-		'libnntsc':'lib', \
-		'libnntsc.parsers':'dataparsers', \
+		'libnntsc':'libnntsc', \
+		'libnntsc.parsers':'libnntsc/parsers', \
 	},
         # XXX these appear to be completely ignored now and so we have to use
         # the manifest file?

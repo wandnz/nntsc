@@ -1,3 +1,10 @@
+libnntsc-client (1.6-2) unstable; urgency=low
+
+  * Move directories around to allow "develop" installs from source.
+  * Remove extraneous commands from debian/rules.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Fri, 20 May 2016 11:09:55 +1200
+
 libnntsc-client (1.6-1) unstable; urgency=low
 
   * Initial release
