@@ -282,7 +282,17 @@ class AmpModule:
         if processed > 0:
             self.db.commit_data()
             if self.influxdb:
-                self.influxdb.commit_data()
+                try:
+                    self.influxdb.commit_data()
+                except DBQueryException as e:
+                    if e.code == DB_QUERY_TIMEOUT:
+                        logger.log("Database timeout while committing AMP data")
+                        channel.close()
+                        return
+                    else:
+                        logger.log("Unexpected error while committing AMP data")
+                        channel.close()
+                        return
 
         # ack all data up to and including the most recent message
         channel.basic_ack(method.delivery_tag, True)
