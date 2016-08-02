@@ -588,6 +588,42 @@ class InfluxSelector(InfluxConnection):
         return False
 
 
+    def get_last_timestamp(self, table, sid):
+
+        lasthour = None
+        field = get_parser(table).get_random_field(None)
+
+        querystring = "SELECT count({}) FROM {} WHERE stream='{}' AND time >= now() - 3d GROUP BY time(1h) fill(none)".format( \
+                field, table, sid)
+
+        try:
+            results = self.query(querystring)
+        except DBQueryException as e:
+            return None
+
+        for (tbl, tags), results in results.items():
+            for r in results:
+                if r['count'] > 0:
+                    if lasthour is None or r['time'] > lasthour:
+                        lasthour = r['time']
+
+        if lasthour is None:
+            return None
+
+        querystring = "SELECT last({}) from {} WHERE stream='{}' AND time >= {}".format( \
+                field, table, sid, lasthour)
+
+        try:
+            results = self.query(querystring)
+        except DBQueryException as e:
+            return None
+
+        for (tbl, tags), results in results.items():
+            for r in results:
+                return r['time'] / 1000000000
+
+        return None
+
     def select_aggregated_data(self, table, labels, aggcols, start_time,
                                stop_time, binsize):
         """

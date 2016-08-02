@@ -105,7 +105,7 @@ class RRDModule:
 
         startts = endts - (r['highrows'] * r['minres'])
 
-        if (r["lasttimestamp"] > startts):
+        if (r['lasttimestamp'] is not None and r["lasttimestamp"] > startts):
             startts = r["lasttimestamp"]
 
         # XXX Occasionally we manage to push our endts back past our last
@@ -156,7 +156,7 @@ class RRDModule:
             if datatable is None:
                 datatable = parser.get_data_table_name()
             
-            if current > r['lasttimestamp']:
+            if r['lasttimestamp'] is None or current > r['lasttimestamp']:
                 r['lasttimestamp'] = current
                 update_needed = True
                 

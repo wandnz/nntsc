@@ -52,8 +52,10 @@ class NNTSCParser(object):
         return self.streamtable
 
     def get_last_timestamp(self, stream):
-        lastts = self.db.get_last_timestamp(self.datatable, stream, self.influxdb)
-        return lastts
+        if self.influxdb:
+            return self.influxdb.get_last_timestamp(self.datatable, stream)
+        else:
+            return self.db.get_last_timestamp(self.datatable, stream)
 
     def build_cqs(self, retention_policy="default"):
         if not self.influxdb:

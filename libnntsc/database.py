@@ -648,9 +648,9 @@ class DBInsert(DatabaseCore):
             is_influx, first=None):
         
         if is_influx:
-            dbkey = "influx"
-        else:
-            dbkey = "postgres"
+            return
+
+        dbkey = "postgres"
         
         for sid in stream_ids:
             self.streamcache.update_timestamps(dbkey, datatable, sid,
@@ -659,13 +659,9 @@ class DBInsert(DatabaseCore):
         
         return
 
-    def get_last_timestamp(self, table, streamid, influxdb = None):
-        if influxdb:
-            lastdict = self.streamcache.fetch_all_last_timestamps("influx",
-                    table)
-        else:
-            lastdict = self.streamcache.fetch_all_last_timestamps("postgres",
-                    table)
+    def get_last_timestamp(self, table, streamid):
+        lastdict = self.streamcache.fetch_all_last_timestamps("postgres",
+                table)
         
         if streamid not in lastdict:            
             # Nothing useful in cache, query data table for max timestamp
@@ -689,7 +685,7 @@ class DBInsert(DatabaseCore):
 
                 lastts = int(row[0])
             lastdict[streamid] = lastts
-            self.streamcache.set_last_timestamps(table, lastdict)
+            self.streamcache.set_last_timestamps("postgres", table, lastdict)
             
             self._releasebasic()
         else:
@@ -761,7 +757,7 @@ class DBInsert(DatabaseCore):
             dbkey = "influx"
 
         # Cache the observed timestamp as the first timestamp
-        if timestamp != 0:
+        if timestamp != 0 and dbkey == "postgres":
             self.streamcache.update_timestamps(dbkey, datatable, newid,
                     timestamp, timestamp)
 
