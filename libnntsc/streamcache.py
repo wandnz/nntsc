@@ -1,5 +1,6 @@
 import time
 import pylibmc
+import cPickle, zlib
 
 from libnntscclient.logger import *
 
@@ -77,7 +78,8 @@ class StreamCache(object):
         with self.mcpool.reserve() as mc:
             try:
                 if key in mc:
-                    coldict = mc.get(key)
+                    fetched = mc.get(key)
+                    coldict = cPickle.loads(zlib.decompress(fetched))
             except pylibmc.SomeErrors as e:
                 log("Warning: pylibmc error while fetching collection timestamps")
                 log(e)
@@ -92,11 +94,12 @@ class StreamCache(object):
 
     def _set_timestamps(self, db, collection, coldict, style):
         key = self._dict_cache_key(db, collection, style)
-        
+    
+        tostore = zlib.compress(cPickle.dumps(coldict), 1)
         #print "Storing using key", key, time.time() 
         with self.mcpool.reserve() as mc:
             try:
-                mc.set(key, coldict, self.cachetime)
+                mc.set(key, tostore, self.cachetime)
             except pylibmc.SomeErrors as e:
                 log("Warning: pylibmc error while storing collection timestamps")
                 log(e)
