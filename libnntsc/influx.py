@@ -186,11 +186,14 @@ class ContinuousQueryRerunner(threading.Thread):
         agg_string = ",".join(
             ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in aggs])
 
-        increment = min(12 * 60, (10 * binsecs))
+        increment = min(12 * 60 * 60, (10 * binsecs))
+        if increment < binsecs:
+            increment = binsecs
         while start < end:
             query = """
             SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
             """.format(agg_string, ROLLUP_RP, table, binsize, start, start + increment)
+
             result = self.parent.query(query)
             result = None
             start += increment
