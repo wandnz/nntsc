@@ -933,7 +933,8 @@ class InfluxSelector(InfluxConnection):
             # Don't return smoke array if it is empty
             if len(smokearray) == 0:
                 smokearray = None
-            result[meas] = smokearray
+            label = self._get_label(meas, "smoke")
+            result[label] = smokearray
 
         # Add nntsclabel, and other fields that some results need
         # Cheating by using time (which is really binstart) as binstart, timestamp and
