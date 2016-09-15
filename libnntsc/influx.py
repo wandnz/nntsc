@@ -169,6 +169,8 @@ class InfluxConnection(object):
         elif unit == "s":
             return num
 
+AGGSTREAMS = 1000
+
 class ContinuousQueryRerunner(threading.Thread):
     def __init__(self, jobqueue, parent): 
         super(ContinuousQueryRerunner, self).__init__()
@@ -182,6 +184,7 @@ class ContinuousQueryRerunner(threading.Thread):
         start = job[3]
         end = job[4]
         binsecs = job[5]
+        maxstream = job[6]
 
         agg_string = ",".join(
             ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in aggs])
@@ -190,12 +193,20 @@ class ContinuousQueryRerunner(threading.Thread):
         if increment < binsecs:
             increment = binsecs
         while start < end:
-            query = """
-            SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s GROUP BY stream,time({3})
-            """.format(agg_string, ROLLUP_RP, table, binsize, start, start + increment)
+            for i in range(0, (maxstream / 1000) + 1):
+                if i == 0:
+                    streamcond = """(stream =~ /^...$/ OR stream =~ /^..$/ OR stream =~ /^.$/)"""
+                else:
+                    streamcond = """(stream =~ /^{0}...$/)""".format(i)
 
-            result = self.parent.query(query)
-            result = None
+
+                query = """
+                SELECT {0} INTO "{1}".{2}_{3} FROM {2} WHERE time >= {4}s and time < {5}s and {6} GROUP BY stream,time({3})
+                """.format(agg_string, ROLLUP_RP, table, binsize, start, start + increment,\
+                        streamcond)
+
+                result = self.parent.query(query)
+                result = None
             start += increment
         
     def run(self):
@@ -233,6 +244,7 @@ class InfluxInsertor(InfluxConnection):
         self.cqjobs = Queue(10000)
 
         self.pending_cqs = {}
+        self.maxstreamid = 0
 
         for i in range(0, MAX_CQWORKERS):
             worker = ContinuousQueryRerunner(self.cqjobs, self)
@@ -318,7 +330,7 @@ class InfluxInsertor(InfluxConnection):
             #else:
             #    nextend = start + binsize - 1
             try:
-                self.cqjobs.put((table, influx_binsize, aggs, start, nextend, binsize))
+                self.cqjobs.put((table, influx_binsize, aggs, start, nextend, binsize, self.maxstreamid))
             except StdQueue.Full:
                 logger.log("Too many CQ jobs queued!")
                 raise
@@ -339,6 +351,9 @@ class InfluxInsertor(InfluxConnection):
                 "fields": result
             }
         )
+
+        if int(stream) > self.maxstreamid:
+            self.maxstreamid = int(stream)
 
         now = time.time()
         if self.started == 0:
