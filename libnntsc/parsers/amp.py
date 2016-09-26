@@ -28,7 +28,6 @@ from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
         PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
 import pika
 from ampsave.importer import import_data_functions
-from ampsave.exceptions import AmpTestVersionMismatch
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
 from libnntsc.parsers.amp_dns import AmpDnsParser
@@ -184,23 +183,9 @@ class AmpModule:
             try:
                 data = self.amp_modules[test].get_data(body)
             except DecodeError as e:
-                # TODO restore this error message once clients updated >= 0.5.0
                 # we got something that wasn't a valid protocol buffer message
-                #logger.log("Failed to decode result from %s for %s test: %s" %(
-                #properties.user_id, test, e))
-
-                # TODO remove these once all clients use amplet-client >= 0.5.0
-                # temporarily try old data parsing functions
-                try:
-                    data = self.amp_modules[test].get_old_data(body)
-                except AmpTestVersionMismatch as e:
-                    logger.log("Old %s test (Version mismatch): %s" % (test, e))
-                    data = None
-                except AssertionError as e:
-                    logger.log("Old %s test (assert failure): %s" % (test, e))
-                    data = None
-            except AmpTestVersionMismatch as e:
-                logger.log("Ignoring AMP result for %s test (Version mismatch): %s" % (test, e))
+                logger.log("Failed to decode result from %s for %s test: %s" % (
+                            properties.user_id, test, e))
                 data = None
             except AssertionError as e:
                 # A lot of ampsave functions assert fail if something goes
