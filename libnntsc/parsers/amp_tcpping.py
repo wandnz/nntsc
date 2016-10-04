@@ -81,7 +81,8 @@ class AmpTcppingParser(AmpIcmpParser):
 # Uncomment to aggregate data for tooltips... Doesn't seem to be helpful though            
 #            (['1h','1d'],
 #            aggs),
-            (['5m','10m','20m','40m','80m','4h'],
+            ([('5m', '1h'),('10m','1h'),('20m','1h'),('40m','80m'),
+                    ('80m','160m'),('4h', '8h')],
              aggs_w_ntile)
             ]
 

@@ -60,7 +60,7 @@ class AmpThroughputParser(NNTSCParser):
 
         self.cqs = [
             (
-                ['1h','4h','12h','24h'],
+                [('1h','2h'),('4h','8h'),('12h','24h'),('24h','48h')],
                 [
                     ('bytes','sum','bytes'),
                     ('packets','sum','packets'),

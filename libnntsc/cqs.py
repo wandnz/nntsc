@@ -59,7 +59,7 @@ def get_cqs(table_name, bin_size=None):
         return cqs
 
     for times, cols in cqs:
-        if bin_size in times:
+        if bin_size in [x[0] for x in times]:
             return cols
 
     return []

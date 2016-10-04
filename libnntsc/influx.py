@@ -273,7 +273,7 @@ class InfluxInsertor(InfluxConnection):
         for table, (most_recent, last_binned) in self.points_windows.iteritems():
             cqs = get_cqs(table)
             for influx_binsizes, aggs in cqs:
-                for influx_binsize in influx_binsizes:
+                for influx_binsize in [x[0] for x in influx_binsizes]:
                     binsize = self._get_binsize(influx_binsize)
                     # wrap up the last bin
                     time_from = last_binned[influx_binsize][0]
@@ -321,6 +321,8 @@ class InfluxInsertor(InfluxConnection):
 
     def _queue_cqs(self, start, end, table, aggs, influx_binsize):
 
+        return
+
         binsize = self._get_binsize(influx_binsize)
         while start < end:
 
@@ -366,7 +368,7 @@ class InfluxInsertor(InfluxConnection):
             cqs = get_cqs(tablename)
             last_binned = {}
             for influx_binsizes, aggs in cqs:
-                for influx_binsize in influx_binsizes:
+                for influx_binsize in [x[0] for x in influx_binsizes]:
                     # Find the last bin that was created and start rollups
                     # from 1 bin after that
                     binsize = self._get_binsize(influx_binsize)
@@ -431,14 +433,14 @@ class InfluxInsertor(InfluxConnection):
     def create_cqs(self, cqs, measurement, retention_policy=DEFAULT_RP):
         """Create continuous queries for measurement as specified"""
         for agg_group in cqs:
-            for time in agg_group[0]:
+            for time, repeat in agg_group[0]:
                 try:
-                    self.create_cq(agg_group[1], measurement, time, retention_policy)
+                    self.create_cq(agg_group[1], measurement, time, repeat, retention_policy)
                 except DBQueryException as e:
                     logger.log("Failed to create CQ {}_{}. May already exist".format(
                         measurement, time))
         
-    def create_cq(self, aggregations, measurement, time, retention_policy=DEFAULT_RP):
+    def create_cq(self, aggregations, measurement, time, repeat, retention_policy=DEFAULT_RP):
         """Create a particular continuous query with given aggregations at given time
         frequency on given measurement"""
         cq_name = "{}_{}".format(measurement, time)
@@ -449,10 +451,11 @@ class InfluxInsertor(InfluxConnection):
         agg_string = ",".join(
             ["{}({}) AS {}".format(agg, col, name) for (name, agg, col) in aggregations])
         query = """
-        CREATE CONTINUOUS QUERY {0}_{1} ON {2} BEGIN
+        CREATE CONTINUOUS QUERY {0}_{1} ON {2} RESAMPLE FOR {5} BEGIN
         SELECT {3} INTO "{4}".{0}_{1} FROM {0} GROUP BY stream,time({1}) END
         """.format(
-            measurement, time, self.dbname, agg_string, retention_policy)
+            measurement, time, self.dbname, agg_string, retention_policy,
+            repeat)
         self.query(query)
         self.cqs_in_db.append(cq_name)
 

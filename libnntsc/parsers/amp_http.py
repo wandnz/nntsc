@@ -67,7 +67,7 @@ class AmpHttpParser(NNTSCParser):
 
         self.cqs = [
             (
-                ['15m','1h','3h','6h'],
+                [('15m', '1h'),('1h','2h'),('3h','6h'),('6h','12h')],
                 [
                     ('server_count','max','server_count'),
                     ('object_count','max','object_count'),
