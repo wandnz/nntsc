@@ -793,8 +793,9 @@ class InfluxSelector(InfluxConnection):
             # from where the other query left off (lastbin)
 
             self.qb2.add_clause("where", 
-                    "where time >= {}s and time < {}s and {}".format(
-                        lastbin, stop_time, " or ".join([
+                    "where time >= {}s and time < {}s and ({})".format(
+                        lastbin if lastbin > start_time else start_time,
+                        stop_time, " or ".join([
                         "stream = '{}'".format(stream)
                         for stream in all_streams])))
             querystring, _ = self.qb2.create_query(order)
