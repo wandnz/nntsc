@@ -421,7 +421,7 @@ class InfluxSelector(InfluxConnection):
                 cq  = (cq[0].replace('"', ''), cq[1], cq[2].replace('"', ''))
                 if cq[2] not in v:
                     continue
-                if cq[1] == "sum":
+                if cq[1] in ["sum", "count"]:
                     total = 0
                     for i in range(0, len(v[cq[2]])):
                         if v[cq[2]][i] is not None:
