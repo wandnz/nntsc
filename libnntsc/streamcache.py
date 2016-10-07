@@ -21,12 +21,12 @@ class StreamCache(object):
     def __del__(self):
         self.mcpool.relinquish()
 
-    def update_timestamps(self, db, collection, streamid, last, first=None):
+    def update_timestamps(self, db, collection, streamids, last, first=None):
         if first == None and last == None:
             return
        
         if last is not None:
-            self._update_last_timestamp(db, collection, streamid, last)
+            self._update_last_timestamp(db, collection, streamids, last)
 
         # Don't bother trying to update 'first' -- if anyone wants it
         # and it is uncached, it's probably less effort to do the query
@@ -41,23 +41,25 @@ class StreamCache(object):
         coldict[streamid] = first
         self.set_first_timestamps(db, collection, coldict)
 
-    def _update_last_timestamp(self, db, collection, streamid, last):    
+    def _update_last_timestamp(self, db, collection, streamids, last):    
         if collection not in self.collections:
             coldict = self._fetch_dict(db, collection, "last")
             self.collections[collection] = {"streams":coldict}
         else:
             coldict = self.collections[collection]['streams']
 
-        if streamid not in coldict or last > coldict[streamid]:
-            coldict[streamid] = last
+        for s in streamids:
+            if s not in coldict or last > coldict[s]:
+                coldict[s] = last
 
         now = time.time()
         if 'laststore' not in self.collections[collection]:
+            self.set_last_timestamps(db, collection, coldict)
             self.collections[collection]['laststore'] = time.time()
 
         # Write timestamps back to the cache every 5 mins rather than 
         # every time we update a stream, otherwise this gets very slow
-        if now - self.collections[collection]['laststore'] >= 300:
+        if now - self.collections[collection]['laststore'] >= 60:
             self.set_last_timestamps(db, collection, coldict)
             self.collections[collection]['laststore'] = now
 

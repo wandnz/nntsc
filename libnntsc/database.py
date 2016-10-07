@@ -652,10 +652,10 @@ class DBInsert(DatabaseCore):
 
         dbkey = "postgres"
         
-        for sid in stream_ids:
-            self.streamcache.update_timestamps(dbkey, datatable, sid,
-                    lasttimestamp)
-            # log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
+        self.streamcache.update_timestamps(dbkey, datatable, stream_ids,
+                lasttimestamp)
+        #log("Updated timestamp for %d streams to %d" % (len(stream_ids),
+        #            lasttimestamp))
         
         return
 
@@ -758,7 +758,7 @@ class DBInsert(DatabaseCore):
 
         # Cache the observed timestamp as the first timestamp
         if timestamp != 0 and dbkey == "postgres":
-            self.streamcache.update_timestamps(dbkey, datatable, newid,
+            self.streamcache.update_timestamps(dbkey, datatable, [newid],
                     timestamp, timestamp)
 
         # Create a new data table for this stream, using the "base" data
