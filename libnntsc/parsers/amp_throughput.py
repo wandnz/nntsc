@@ -58,15 +58,10 @@ class AmpThroughputParser(NNTSCParser):
             {"name":"runtime", "type":"integer", "null":True}
         ]
 
-        self.cqs = [
-            (
-                [('1h','2h'),('4h','8h'),('12h','24h'),('24h','48h')],
-                [
-                    ('bytes','sum','bytes'),
-                    ('packets','sum','packets'),
-                    ('runtime','sum','runtime')
-                ]
-            )
+        self.matrix_cq = [
+            ('bytes', 'sum', 'bytes'),
+            ('packets', 'sum', 'packets'),
+            ('runtime', 'sum', 'runtime')
         ]
 
     def _construct_key(self, stream_data):

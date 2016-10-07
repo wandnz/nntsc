@@ -61,28 +61,14 @@ class AmpIcmpParser(NNTSCParser):
         self.dataindexes = [
         ]
 
-        aggs  =  [
-            ("loss","sum","loss"),
-            ("num_results","sum","results"),
-            ("mean_rtt", "mean", "median"),
-            ("stddev_rtt", "stddev", "median"),
-            ("max_rtt", "max", "median"),
-            ("min_rtt","min","median")
-          ]
 
-        aggs_w_ntile = deepcopy(aggs)
-        aggs_w_ntile += (
-              [("\"{}_percentile_rtt\"".format(
-                      i), "percentile", "median, {}".format(i)) for i in range(5,100,5)]
-        )
-        
-        self.cqs = [
-#            (['1h','1d'],
-#            aggs),
-            ([('5m', '1h'),('10m', '1h'),('20m', '1h'),('40m', '80m'), \
-                    ('80m', '160m'), ('4h', '8h')],
-             aggs_w_ntile)
-            ]
+        self.matrix_cq = [
+            ("median", "mean", "median_avg"),
+            ("median", "stddev", "median_stddev"),
+            ("median", "count", "median_count"),
+            ("loss", "sum", "loss_sum"),
+            ("results", "sum", "results_sum")
+        ]
 
     def create_existing_stream(self, stream_data):
         """Extract the stream key from the stream data provided by NNTSC

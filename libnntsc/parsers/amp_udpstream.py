@@ -100,10 +100,12 @@ class AmpUdpstreamParser(NNTSCParser):
                 ("itu_mos", "mean", "itu_mos")
                ]
 
-        self.cqs = [
-            ([('5m','1h'), ('10m','1h'), ('20m','1h'), ('40m','80m'),
-                    ('80m','160m'), ('4h','8h')],
-            aggs)
+        self.matrix_cq = [
+            ('packets_sent', 'sum', 'packets_sent'),
+            ('packets_recvd', 'sum', 'packets_recvd'),
+            ('mean_rtt', 'mean', 'mean_rtt_avg'),
+            ('mean_rtt', 'stddev', 'mean_rtt'),
+            ('mean_rtt', 'count', 'count_mean_rtt')
         ]
 
     def create_existing_stream(self, stream_data):

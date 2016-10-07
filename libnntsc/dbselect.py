@@ -148,6 +148,33 @@ class DBSelector(DatabaseCore):
         self._releasebasic()
         return selected
 
+    def select_matrix_data(self, col, aggcols, labels, start_time, stop_time,
+            influxdb=None):
+
+        # Set default time boundaries
+        if stop_time == None:
+            stop_time = int(time.time())
+        if start_time == None:
+            start_time = stop_time - (24 * 60 * 60)
+
+        assert(type(labels) is dict)
+
+        try:
+            table, columns, streamtable = self._get_data_table(col)
+        except DBQueryException as e:
+            yield(None, None, None, None, e)
+
+        if influxdb is not None and table not in traceroute_tables:
+            for row in influxdb.select_matrix_data(table, labels,
+                    start_time, stop_time):
+                yield row
+            return
+
+        for row in self.select_aggregated_data(col, labels, aggcols,
+                start_time, stop_time, [], int(stop_time-start_time), None):
+            yield row
+
+
     def select_aggregated_data(self, col, labels, aggcols,
             start_time = None, stop_time = None, groupcols = None,
                                binsize = 0, influxdb = None):
@@ -228,23 +255,6 @@ class DBSelector(DatabaseCore):
         uniquecols = list(set([k[0] for k in aggcols] + groupcols))
         self.qb.reset()
 
-        # Little shortcut designed to speed up fetching matrix data -- we
-        # know that the most recent 10 mins will almost always be in Influx,
-        # so we can avoid having to query for each label one at a time (which
-        # we have to do if dealing with the possibility of the query
-        # overlapping with postgres data).
-        #
-        # Eventually postgresql data will become irrelevant and we can simply
-        # take this "shortcut" for all Influx collections and only fall
-        # through to postgres for traceroute data, but for now this hack
-        # might be helpful.
-        if influxdb is not None and table not in traceroute_tables and \
-                start_time >= int(time.time()) - 600:
-            for row in influxdb.select_aggregated_data(table, labels,
-                    aggcols, start_time, stop_time, binsize):
-                yield row
-            return
-
         # Convert our column and aggregator lists into useful bits of SQL
         labeled_aggcols = self._apply_aggregation(aggcols, groupcols)
         labeled_groupcols = list(groupcols)
@@ -324,6 +334,7 @@ class DBSelector(DatabaseCore):
                     self._dataquery(query, params)
                 except DBQueryException as e:
                     yield(None, label, None, None, e)
+
  
                 fetched = self._query_data_generator()
                 for row, errcode in fetched:

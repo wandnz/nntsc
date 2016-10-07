@@ -324,7 +324,14 @@ def run_module(tests, config, key, exchange, queueid):
 
     if amp.pubthread:
         amp.pubthread.join()
-    
+
+def create_cqs(db, influxdb):
+
+    for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
+                AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser]:
+        parser = p(db, influxdb)
+        parser.build_cqs()
+
 def tables(db):
 
     parser = AmpIcmpParser(db)

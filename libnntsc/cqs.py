@@ -47,6 +47,10 @@ def get_parser(table_name):
 
     return parser
 
+def getMatrixCQ(table_name):
+    parser = get_parser(table_name)
+    return parser.get_matrix_cq()
+
 def get_cqs(table_name, bin_size=None):
     """Gets continuous queries for given table at given bin size,
     or all cqs if no bin size given"""

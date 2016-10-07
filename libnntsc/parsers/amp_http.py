@@ -65,16 +65,8 @@ class AmpHttpParser(NNTSCParser):
         self.dataindexes = [
         ]
 
-        self.cqs = [
-            (
-                [('15m', '1h'),('1h','2h'),('3h','6h'),('6h','12h')],
-                [
-                    ('server_count','max','server_count'),
-                    ('object_count','max','object_count'),
-                    ('"duration"','max','"duration"'),
-                    ('bytes','max','bytes')
-                ]
-            )
+        self.matrix_cq = [
+            ('"duration"', 'mean', '"duration"')
         ]
 
 

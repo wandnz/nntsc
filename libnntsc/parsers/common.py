@@ -29,6 +29,7 @@ class NNTSCParser(object):
         self.collectionid = None
 
         self.cqs = []
+        self.matrix_cq = []
 
     def get_random_field(self, rollup=None):
         """Get a random field to aggregate. Used by influx to find last timestamp
@@ -61,8 +62,11 @@ class NNTSCParser(object):
         if not self.influxdb:
             logger.log("Tried to build Continuous Queries without InfluxDB")
             return
-        
-        self.influxdb.create_cqs(self.cqs, self.datatable, retention_policy)
+        if len(self.matrix_cq) > 0:
+            self.influxdb.create_matrix_cq(self.matrix_cq, self.datatable)
+
+    def get_matrix_cq(self):
+        return self.matrix_cq
 
     def get_cqs(self):
         return self.cqs

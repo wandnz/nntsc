@@ -83,21 +83,13 @@ class AmpDnsParser(NNTSCParser):
             {"name": "", "columns":['rtt']}
         ]
 
-        self.cqs = [
-            (
-                [('5m', '1h'),('10m','1h'),('20m','1h'),('40m','80m'),
-                        ('80m','160m'),('4h','8h')],
-                [
-                    # ("loss", "sum", "loss")
-                    ("num_results","count","rtt"),
-                    ("mean_rtt","mean","rtt"),
-                    ("stddev_rtt","stddev","rtt"),
-                    ("max_rtt","max","rtt"),
-                    ("min_rtt","min","rtt"),
-                    ("num_requests","count","requests"),
-                ]
-            )
+        self.matrix_cq = [
+            ('rtt', 'mean', 'rtt_avg'),
+            ('rtt', 'stddev', 'rtt_stddev'),
+            ('rtt', 'count', 'rtt_count'),
+            ('requests', 'sum', 'requests_count')
         ]
+
 
     def _result_to_key(self, res):
         key = (str(res['source']), str(res['destination']), 

@@ -105,18 +105,14 @@ if influxconf["useinflux"] and "amp" in modules.keys():
             logger.log("Failed to empty InfluxDB")
             sys.exit(1)
     try:
-        influxdb.create_retention_policies(influxconf["keepdata"],
-                                           influxconf["keeprollups"])
+        influxdb.create_retention_policies(influxconf["keepdata"])
     except DBQueryException as e:
         logger.log("Failed to create retention policies for influx")
         sys.exit(1)
-    try:
-        influxdb.build_cqs(db, "rollups")
-    except DBQueryException as e:
-        logger.log("Failed to build continuous queries for influx")
-        sys.exit(1)
 
-        
+    for base, mod in modules.items():
+        mod.create_cqs(db, influxdb)
+
 if 'rrd' in enabled_modules:
 
     rrd_conf = get_nntsc_config(nntsc_conf, 'rrd', 'rrdlist')

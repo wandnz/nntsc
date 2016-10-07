@@ -123,6 +123,9 @@ class DBWorker(threading.Thread):
         if jobtype == NNTSC_AGGREGATE:
             return self.aggregate(jobdata)
 
+        if jobtype == NNTSC_MATRIX:
+            return self.fetchmatrix(jobdata)
+
         if jobtype == NNTSC_PERCENTILE:
             # XXX can we inform the client they asked for something we
             # don't support?
@@ -222,6 +225,44 @@ class DBWorker(threading.Thread):
             return DBWORKER_ERROR
 
         return DBWORKER_SUCCESS
+
+    def fetchmatrix(self, matmsg):
+        colid, start, end, labels, aggcols, aggfunc = pickle.loads(matmsg)
+
+        now = int(time.time())
+        aggs = self._merge_aggregators(aggcols, aggfunc)
+
+        if start == None or start >= now:
+            # No historical data, send empty history for all streams
+            for lab, streams in labels.items():
+                err = self._enqueue_history(colid, lab, [], False, 0, now)
+                if err != DBWORKER_SUCCESS:
+                    return err 
+            return DBWORKER_SUCCESS
+
+
+        while 1:
+            generator = self.db.select_matrix_data(colid, aggs, labels,
+                    start, end, self.influxdb)
+
+            more = False
+            error = self._query_history(generator, colid, labels, more, start,
+                    end)
+
+            if error == DBWORKER_RETRY:
+                continue
+            if error != DBWORKER_SUCCESS:
+                return error
+            break
+
+
+        try:
+            self.db.release_data()
+        except DBQueryException as e:
+            return DBWORKER_ERROR
+
+        return DBWORKER_SUCCESS
+
 
     def subscribe(self, submsg):
         colid, start, end, columns, labels, aggs = pickle.loads(submsg)
