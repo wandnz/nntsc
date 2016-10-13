@@ -32,6 +32,7 @@ from ampsave.importer import import_data_functions
 from ampsave.exceptions import AmpTestVersionMismatch
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
+from libnntsc.parsers.amp_traceroute_pathlen import AmpTraceroutePathlenParser
 from libnntsc.parsers.amp_dns import AmpDnsParser
 from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
@@ -89,13 +90,15 @@ class AmpModule:
                 self.collections[c['modsubtype']] = c['id']
 
         self.parsers = {
-            "icmp":AmpIcmpParser(self.db, self.influxdb),
-            "traceroute":AmpTracerouteParser(self.db),
-            "throughput":AmpThroughputParser(self.db, self.influxdb),
-            "dns":AmpDnsParser(self.db, self.influxdb),
-            "http":AmpHttpParser(self.db, self.influxdb),
-            "udpstream":AmpUdpstreamParser(self.db, self.influxdb),
-            "tcpping":AmpTcppingParser(self.db, self.influxdb)
+            "icmp": [AmpIcmpParser(self.db, self.influxdb)],
+            "traceroute": [AmpTracerouteParser(self.db),
+                    AmpTraceroutePathlenParser(self.db, self.influxdb)
+                    ],
+            "throughput": [AmpThroughputParser(self.db, self.influxdb)],
+            "dns": [AmpDnsParser(self.db, self.influxdb)],
+            "http": [AmpHttpParser(self.db, self.influxdb)],
+            "udpstream": [AmpUdpstreamParser(self.db, self.influxdb)],
+            "tcpping": [AmpTcppingParser(self.db, self.influxdb)]
         }
 
         # set all the streams that we already know about for easy lookup of
@@ -104,7 +107,8 @@ class AmpModule:
 
             testtype = i["modsubtype"]
             if testtype in self.parsers:
-                key = self.parsers[testtype].create_existing_stream(i)
+                for p in self.parsers[testtype]:
+                    key = p.create_existing_stream(i)
 
         self.initSource(nntsc_config)
         
@@ -121,8 +125,9 @@ class AmpModule:
                     initExportPublisher(nntsc_config, routekey, exchange, \
                     queueid)
 
-            for k, parser in self.parsers.iteritems():
-                parser.add_exporter(self.exporter)
+            for k, parsers in self.parsers.iteritems():
+                for p in parsers:
+                    p.add_exporter(self.exporter)
 
     def initSource(self, nntsc_config):
         # Parse connection info
@@ -228,8 +233,9 @@ class AmpModule:
 
             try:
                 # pass the message off to the test specific code
-                self.parsers[test].process_data(properties.timestamp, data,
-                        properties.user_id)
+                for p in self.parsers[test]:
+                    p.process_data(properties.timestamp, data,
+                            properties.user_id)
                 processed += 1
             except DBQueryException as e:
                 if e.code == DB_OPERATIONAL_ERROR:
@@ -328,31 +334,17 @@ def run_module(tests, config, key, exchange, queueid):
 def create_cqs(db, influxdb):
 
     for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
-                AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser]:
+                AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
+                AmpTraceroutePathlenParser]:
         parser = p(db, influxdb)
         parser.build_cqs()
 
 def tables(db):
 
-    parser = AmpIcmpParser(db)
-    parser.register()
-        
-    parser = AmpTracerouteParser(db)
-    parser.register()
-
-    parser = AmpDnsParser(db)
-    parser.register()
-
-    parser = AmpThroughputParser(db)
-    parser.register()
-    
-    parser = AmpTcppingParser(db)
-    parser.register()
-    
-    parser = AmpHttpParser(db)
-    parser.register()
-
-    parser = AmpUdpstreamParser(db)
-    parser.register()
-
+    for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
+                AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
+                AmpTraceroutePathlenParser, AmpTracerouteParser,
+                ]:
+        parser = p(db)
+        parser.register()
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -456,6 +456,27 @@ class InfluxSelector(InfluxConnection):
                         finaldata[cq[2]] = math.sqrt(sumvar / sumn)
                     else:
                         finaldata[cq[2]] = None
+                elif cq[1] in ['most', 'mode']:
+                    seen = {}
+                    mode = None
+                    modefreq = 0
+                    countcol = labels_and_rows[k]["magiccount_" + cq[0]]
+
+                    for i in range(0, len(v[cq[2]])):
+                        if countcol[i] is None:
+                            continue
+                        if v[cq[2]][i] not in seen:
+                            seen[v[cq[2]][i]] = countcol[i]
+                        else:
+                            seen[v[cq[2]][i]] += countcol[i]
+
+                        if seen[v[cq[2]][i]] > modefreq:
+                            mode = v[cq[2]][i]
+                            modefreq = seen[v[cq[2]][i]]
+
+                    if mode is not None:
+                        finaldata[cq[2]] = float(mode)
+
             results.append({'data': finaldata, 'label': k})
 
         for r in results:
