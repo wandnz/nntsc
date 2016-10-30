@@ -645,42 +645,51 @@ class DBInsert(DatabaseCore):
         self._releasebasic()
  
     def update_timestamp(self, datatable, stream_ids, lasttimestamp, 
-            first=None):
+            is_influx, first=None):
         
-        for sid in stream_ids:
-            self.streamcache.update_timestamps(datatable, sid, lasttimestamp)
-            #log("Updated timestamp for %d to %d" % (sid, lasttimestamp))
+        if is_influx:
+            return
+
+        dbkey = "postgres"
+        
+        self.streamcache.update_timestamps(dbkey, datatable, stream_ids,
+                lasttimestamp)
+        #log("Updated timestamp for %d streams to %d" % (len(stream_ids),
+        #            lasttimestamp))
         
         return
 
     def get_last_timestamp(self, table, streamid):
-        lastdict = self.streamcache.fetch_all_last_timestamps(table)
-
-        if streamid not in lastdict:
+        lastdict = self.streamcache.fetch_all_last_timestamps("postgres",
+                table)
+        
+        if streamid not in lastdict:            
             # Nothing useful in cache, query data table for max timestamp
             # Warning, this isn't going to be fast so try to avoid doing
             # this wherever possible!
-            query = "SELECT max(timestamp) FROM %s_" % (table)
-            query += "%s"   # stream id goes in here
+            if influxdb:
+                lastts = influxdb.query_timestamp(table, streamid)
+            else:
+                query = "SELECT max(timestamp) FROM %s_" % (table)
+                query += "%s"   # stream id goes in here
+                
+                self._basicquery(query, (streamid,))
 
-            self._basicquery(query, (streamid,))
+                if self.basic.cursor.rowcount != 1:
+                    log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+                    raise DBQueryException(DB_CODING_ERROR)
 
-            if self.basic.cursor.rowcount != 1:
-                log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
-                raise DBQueryException(DB_CODING_ERROR)
+                row = self.basic.cursor.fetchone()
+                if row[0] == None:
+                    return 0
 
-            row = self.basic.cursor.fetchone()
-            if row[0] == None:
-                return 0
-
-            lastts = int(row[0])
+                lastts = int(row[0])
             lastdict[streamid] = lastts
-            self.streamcache.set_last_timestamps(table, lastdict)
+            self.streamcache.set_last_timestamps("postgres", table, lastdict)
             
             self._releasebasic()
         else:
             lastts = lastdict[streamid]
-
         return lastts
 
 
@@ -713,7 +722,8 @@ class DBInsert(DatabaseCore):
         return row[0]
 
 
-    def insert_stream(self, tablename, datatable, timestamp, streamprops):
+    def insert_stream(self, tablename, datatable, timestamp, streamprops,
+            createdatatable=True):
 
         # insert stream into our stream table
         colstr = "(stream_id"
@@ -741,14 +751,20 @@ class DBInsert(DatabaseCore):
         # Grab the new stream ID so we can return it
         newid = self.streams.cursor.fetchone()[0]
 
+        if (createdatatable):
+            dbkey = "postgres"
+        else:
+            dbkey = "influx"
+
         # Cache the observed timestamp as the first timestamp
-        if timestamp != 0:   
-            self.streamcache.update_timestamps(datatable, newid, timestamp, 
-                    timestamp)
+        if timestamp != 0 and dbkey == "postgres":
+            self.streamcache.update_timestamps(dbkey, datatable, [newid],
+                    timestamp, timestamp)
 
         # Create a new data table for this stream, using the "base" data
         # table as a template
-        self.clone_table(datatable, newid)
+        if (createdatatable):
+            self.clone_table(datatable, newid)
  
         # Resist the urge to commit streams or do any live exporting here!
         #

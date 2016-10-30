@@ -78,6 +78,49 @@ def get_nntsc_config(nntsc_config, section, option):
 
     return result
 
+def get_influx_config(nntsc_config):
+
+    useinflux = get_nntsc_config_bool(nntsc_config, 'influx', 'useinflux')
+    if useinflux == "NNTSCConfigMissing":
+        useinflux = False
+    dbname = get_nntsc_config(nntsc_config, 'influx', 'database')
+    if dbname == "NNTSCConfigMissing":
+        dbname = "nntsc"
+    dbuser = get_nntsc_config(nntsc_config, 'influx', 'username')
+    if dbuser == "NNTSCConfigMissing":
+        dbuser = None
+    dbpass = get_nntsc_config(nntsc_config, 'influx', 'password')
+    if dbpass == "NNTSCConfigMissing":
+        dbpass = None    
+    dbhost = get_nntsc_config(nntsc_config, 'influx', 'host')
+    if dbhost == "NNTSCConfigMissing":
+        dbhost = "localhost"
+    dbport = get_nntsc_config(nntsc_config, 'influx', 'port')
+    if dbport == "NNTSCConfigMissing":
+        dbport = 8086
+    else:
+        try:
+            dbport = int(dbport)
+        except ValueError:
+            logger.log("Invalid port number in influx config: {}".format(dbport))
+            dbport = "NNTSCConfigError"
+    keepdata = get_nntsc_config(nntsc_config, 'influx', 'keepdata')
+    if keepdata == "NNTSCConfigMissing":
+        keepdata = "inf"
+    keeprollups = get_nntsc_config(nntsc_config, 'influx', 'keeprollups')
+    if keeprollups == "NNTSCConfigMissing":
+        keeprollups = "inf"
+    
+
+    if "NNTSCConfigError" in [useinflux,dbname,dbuser,dbpass,dbhost,dbport,keepdata,
+                              keeprollups]:
+        return {}
+
+    return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass,
+            "port":dbport,"useinflux":useinflux,"keepdata":keepdata,
+            "keeprollups":keeprollups}
+    
+
 def get_nntsc_db_config(nntsc_config):
 
     dbhost = get_nntsc_config(nntsc_config, 'database', 'host')

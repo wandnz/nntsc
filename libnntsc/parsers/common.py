@@ -3,8 +3,15 @@ import libnntscclient.logger as logger
 import time
 
 class NNTSCParser(object):
-    def __init__(self, db):
+    def __init__(self, db, influxdb=None):
         self.db = db
+        self.influxdb = influxdb
+        
+        if influxdb is not None:
+            self.have_influx = True
+        else:
+            self.have_influx = False
+
         self.streamtable = None
         self.datatable = None
         self.colname = "Unspecified"
@@ -21,6 +28,21 @@ class NNTSCParser(object):
 
         self.collectionid = None
 
+        self.cqs = []
+        self.matrix_cq = []
+
+    def get_random_field(self, rollup=None):
+        """Get a random field to aggregate. Used by influx to find last timestamp
+        Rollup must be an influx binsize"""
+        if len(self.datacolumns) == 0:
+            return None
+        elif rollup is not None:
+            for times, aggs in self.cqs:
+                if rollup in times:
+                    return aggs[0][0]
+        else:
+            return self.datacolumns[0]["name"]
+
     def add_exporter(self, exp):
         self.exporter = exp
 
@@ -31,9 +53,24 @@ class NNTSCParser(object):
         return self.streamtable
 
     def get_last_timestamp(self, stream):
-        lastts = self.db.get_last_timestamp(self.datatable, stream)
-        return lastts
+        if self.influxdb:
+            return self.influxdb.get_last_timestamp(self.datatable, stream)
+        else:
+            return self.db.get_last_timestamp(self.datatable, stream)
 
+    def build_cqs(self, retention_policy="default"):
+        if not self.influxdb:
+            logger.log("Tried to build Continuous Queries without InfluxDB")
+            return
+        if len(self.matrix_cq) > 0:
+            self.influxdb.create_matrix_cq(self.matrix_cq, self.datatable)
+
+    def get_matrix_cq(self):
+        return self.matrix_cq
+
+    def get_cqs(self):
+        return self.cqs
+    
     def _create_indexes(self, table, indexes):
         for ind in indexes:
             if "columns" not in ind or len(ind["columns"]) == 0:
@@ -105,7 +142,7 @@ class NNTSCParser(object):
 
         return self.collectionid
 
-    def create_new_stream(self, result, timestamp):
+    def create_new_stream(self, result, timestamp, createdatatable):
 
         streamprops = {}
         for col in self.streamcolumns:
@@ -115,8 +152,8 @@ class NNTSCParser(object):
                 streamprops[col['name']] = None
 
         try:
-            streamid = self.db.insert_stream(self.streamtable, 
-                    self.datatable, timestamp, streamprops)
+            streamid = self.db.insert_stream(self.streamtable,
+                    self.datatable, timestamp, streamprops, createdatatable)
         except DBQueryException as e:
             logger.log("Failed to insert new stream into database for %s" \
                     % (self.colname))
@@ -154,8 +191,12 @@ class NNTSCParser(object):
                 filtered[col["name"]] = None
 
         try:
-            self.db.insert_data(self.datatable, self.colname, stream, ts, 
-                    filtered, casts)
+            if self.influxdb:
+                self.influxdb.insert_data(self.datatable,
+                                          stream, ts, filtered, casts)
+            else:
+                self.db.insert_data(self.datatable, self.colname, stream, ts, 
+                                filtered, casts)
         except DBQueryException as e:
             logger.log("Failed to insert new data for %s stream %d" % \
                     (self.colname, stream))

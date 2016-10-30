@@ -21,12 +21,13 @@
 
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.dberrorcodes import *
+from copy import deepcopy
 import libnntscclient.logger as logger
 
 
 class AmpTcppingParser(AmpIcmpParser):
-    def __init__(self, db):
-        super(AmpTcppingParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpTcppingParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_tcpping"
         self.datatable = "data_amp_tcpping"
@@ -61,6 +62,29 @@ class AmpTcppingParser(AmpIcmpParser):
             #{"name":"icmptype", "type":"smallint", "null":True},
             #{"name":"icmpcode", "type":"smallint", "null":True},
         ]
+
+        aggs  =  [
+            ("loss","sum","loss"),
+            ("num_results","sum","results"),
+            ("mean_rtt", "mean", "median"),
+            ("stddev_rtt", "stddev", "median"),
+            ("max_rtt", "max", "median"),
+            ("min_rtt","min","median")
+          ]
+
+        aggs_w_ntile = deepcopy(aggs)
+        aggs_w_ntile += [("\"{}_percentile_rtt\"".format(
+                      i), "percentile", "median, {}".format(i)) for i in range(5,100,5)]
+
+        
+        self.cqs = [
+# Uncomment to aggregate data for tooltips... Doesn't seem to be helpful though            
+#            (['1h','1d'],
+#            aggs),
+            ([('5m', '1h'),('10m','1h'),('20m','1h'),('40m','80m'),
+                    ('80m','160m'),('4h', '8h')],
+             aggs_w_ntile)
+            ]
 
         #self.dataindexes = []
 
@@ -130,7 +154,7 @@ class AmpTcppingParser(AmpIcmpParser):
                 ('icmptype' in datapoint and datapoint['icmptype'] is not None):
             observed[streamid]["icmperrors"] += 1
 
-        if 'loss' in datapoint:
+        if 'loss' in datapoint and datapoint['loss'] is not None:
             observed[streamid]["loss"] += datapoint['loss']
 
         if 'rtt' in datapoint and datapoint['rtt'] is not None:

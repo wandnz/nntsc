@@ -1,5 +1,0 @@
-START_DAEMON=0
-USER=root
-GROUP=root
-CONF=/etc/nntsc/nntsc.conf
-PIDFILE=/var/run/nntsc.pid

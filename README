@@ -1,7 +1,7 @@
-NNTSC 2.3
+NNTSC 2.8
 
 ---------------------------------------------------------------------------
-Copyright (c) 2013 The University of Waikato, Hamilton, New Zealand.
+Copyright (c) 2016 The University of Waikato, Hamilton, New Zealand.
 All rights reserved.
 
 This code has been developed by the University of Waikato WAND
@@ -9,9 +9,9 @@ research group. For further information please see http://www.wand.net.nz/.
 ---------------------------------------------------------------------------
 
 NNTSC is a system designed for collecting, storing and examining network time
-series data. Unlike RRDs, NNTSC does not attempt to aggregate measurements to
-preserve disk space. Instead, all measurements are kept to avoid losing any
-detail when doing historical analysis.
+series data. The main feature of NNTSC is that it is flexible and can work
+with just about time series data, so you can unify your measurement storage
+and analysis systems around a single data management API.
 
 NNTSC also provides a client API that allows other programs to connect to
 the measurement database and either ask for historical data or register
@@ -26,13 +26,15 @@ Quickstart Instructions for Debian Users
  1. Install the NNTSC Debian package
  2. Create a Postgresql database for NNTSC:
  	createdb nntsc
- 3. Configure NNTSC (see 'Configuration' section below for more details)
-	3.1. Create an RRD List file (if needed).
-	3.2. Edit /etc/nntsc/nntsc.conf to point to your new database and
+ 3. Create an Influx database for NNTSC:
+        influx -execute 'CREATE DATABASE nntsc'
+ 4. Configure NNTSC (see 'Configuration' section below for more details)
+	4.1. Create an RRD List file (if needed).
+	4.2. Edit /etc/nntsc/nntsc.conf to point to your new database and
              RRD list.
- 4. Run:
- 	build_nntsc_db -C /etc/nntsc/nntsc.conf
  5. Run:
+ 	build_nntsc_db -C /etc/nntsc/nntsc.conf
+ 6. Run:
  	/etc/init.d/nntsc start
 
 
@@ -124,7 +126,8 @@ options are grouped into sections. The sections currently supported by NNTSC
 and their options are as follows:
 
 [database]
-  Options relating to the database where the time series data will be stored
+  Options relating to the Postgresql database where the relational data will
+  be stored.
 
   Available options:
   	host - the host where the database is located. Leave blank if the
@@ -134,6 +137,27 @@ and their options are as follows:
 	           blank to use the name of the user running NNTSC.
 	password - the password to use when connecting to the database.	Leave
 	           blank if no password required.
+
+[influx]
+  Options relating to the Influx database where the time series data will
+  (mostly) be stored.
+
+  Available options:
+    useinflux - if 'no', all time series data will be stored in the Postgresql
+                database instead.
+    database - the name of the Influx database.
+    username - the username to use when connecting to the database. Leave
+               blank to use the name of the user running NNTSC.
+    password - the password to use when connecting to the database. Leave
+               blank if no password required.
+    host - the host where the database is located. Leave blank if the
+           database is on the local machine.
+    port - the port that the Influx daemon is listening on. Use 8086 unless
+           you've configured Influx to use another port.
+    keepdata - the length of time to keep raw unaggregated data in the database.
+               For example, '30d' will keep data for 30 days.
+    keeprollups - the length of time to keep aggregated data in the database.
+               For example, '365d' will keep data for a year.
 
 [liveexport]
   Options relating to the Rabbit queue that funnels newly collected data to 
@@ -175,6 +199,7 @@ and their options are as follows:
 	port - the port to connect to on the AMP message broker host.
 	ssl - if True, encrypt all messages using SSL. If False, use plain-text.
 	queue - the name of the message queue to read AMP data from.
+        commitfreq - the number of AMP messages to process before committing.
 
 [rrd]
   Options relating to RRD file parsing.
@@ -218,11 +243,16 @@ collecting. NNTSC uses a postgresql database for its storage. First, decide
 on a name for your database -- in the following examples, I am going to use
 'nntsc' as the database name but you can choose anything you like.
 
-Next, create a database and ensure that it is owned by the user that you will
-be ultimately connecting to the database as. In the simplest case, I will be
-connecting using my own username so I can create the nntsc database using:
+Next, create a Postgresql database and ensure that it is owned by the user that you will be ultimately connecting to the database as. In the simplest case, I
+will be connecting using my own username so I can create the nntsc database
+using:
 
 	createdb nntsc
+
+If you're using Influx to store the time series data, you'll also need to
+create an Influx database. Easiest way to do this via the InfluxQL shell.
+
+        influx -execute 'CREATE DATABASE nntsc'
 
 The next step is run the build_nntsc_db script that should have been installed
 on your system when you installed NNTSC. This script will create all of the
@@ -245,9 +275,9 @@ Be warned, this will drop ALL of your existing tables and any time series data
 and streams that are stored within them. Don't do this unless you are really
 sure you want to lose all that data!
 
-If you explore your new database with the psql tool, you should have a
-'collections' table and a number of tables begining with 'stream_' and 
-'data_', one per collection. 
+If you explore your new Postgresql database with the psql tool, you should have
+a 'collections' table and a number of tables begining with 'stream_' and
+'data_', one per collection.
 
 
 Starting NNTSC

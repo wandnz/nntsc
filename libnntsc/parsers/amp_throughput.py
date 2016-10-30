@@ -24,8 +24,8 @@ from libnntsc.parsers.common import NNTSCParser
 import libnntscclient.logger as logger
 
 class AmpThroughputParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpThroughputParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpThroughputParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_throughput"
         self.datatable = "data_amp_throughput"
@@ -57,7 +57,12 @@ class AmpThroughputParser(NNTSCParser):
             {"name":"packets", "type":"bigint", "null":True},
             {"name":"runtime", "type":"integer", "null":True}
         ]
-        
+
+        self.matrix_cq = [
+            ('bytes', 'sum', 'bytes'),
+            ('packets', 'sum', 'packets'),
+            ('runtime', 'sum', 'runtime')
+        ]
 
     def _construct_key(self, stream_data):
         src = str(stream_data["source"])
@@ -83,7 +88,8 @@ class AmpThroughputParser(NNTSCParser):
         if key in self.streams:
             stream_id = self.streams[key]
         else:
-            stream_id = self.create_new_stream(resdict, timestamp)
+            stream_id = self.create_new_stream(resdict, timestamp,
+                    not self.have_influx)
 
             if stream_id < 0:
                 logger.log("AMPModule: Cannot create new throughput stream")
@@ -129,7 +135,8 @@ class AmpThroughputParser(NNTSCParser):
                 return
             done[streamid] = 0
 
-        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp,
+                self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

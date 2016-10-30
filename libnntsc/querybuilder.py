@@ -8,7 +8,7 @@ class QueryBuilder:
     def __init__(self):
         self.clauses = {}
 
-    def add_clause(self, name, clause, params):
+    def add_clause(self, name, clause, params=[]):
         self.clauses[name] = (clause, params)
 
     def reset(self):

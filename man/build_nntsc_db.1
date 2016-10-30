@@ -21,13 +21,13 @@ read the database configuration from <filename>
 
 .TP
 \fB\-F
-wipe and rebuild the entire database. Note that this will DELETE all time 
+wipe and rebuild the entire database. Note that this will DELETE all time
 series data currently in the database.
 
 .SH NOTES
 Running build_nntsc_db is easy \-\- the tricky part is writing the NNTSC
 configuration file. See the NNTSC README for a full explanation of the config
-options available and how to express them. 
+options available and how to express them.
 
 If any of the underlying NNTSC configuration has changed, e.g. you have
 added more Smokeping RRDs that you would like NNTSC to process, then you can
@@ -35,7 +35,7 @@ run this script again (without the -F option!) to update the NNTSC database
 accordingly. The script is smart enough to not create tables or streams for
 anything that already exists.
 
-Only run this with -F if you are absolutely certain you want to scrap 
+Only run this with -F if you are absolutely certain you want to scrap
 everything and start again as the time series data cannot be recovered.
 
 .SH SEE ALSO

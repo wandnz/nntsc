@@ -11,14 +11,14 @@ except ImportError:
 
 requires = [ \
         'python-rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12', 'python-daemon', \
-	'libnntsc-client', 'pywandevent', 'pylibmc' \
+	'libnntsc-client', 'pywandevent', 'pylibmc', 'influxdb', 'psutil' \
 ]
 
 if sys.version_info < (2, 7):
         requires.append('argparse')
 
 setup(name="nntsc",
-	version="2.7",
+	version="2.9",
 	description='Nathan\'s Network Time Series Collector',
         author='Nathan Overall, Shane Alcock',
         author_email='contact@wand.net.nz',
@@ -27,8 +27,8 @@ setup(name="nntsc",
 	packages=['libnntsc', 'libnntsc.parsers'],
 	install_requires = requires,
 	package_dir = { \
-		'libnntsc':'lib', \
-		'libnntsc.parsers':'dataparsers', \
+		'libnntsc':'libnntsc', \
+		'libnntsc.parsers':'libnntsc/parsers', \
 	},
         # XXX these appear to be completely ignored now and so we have to use
         # the manifest file?

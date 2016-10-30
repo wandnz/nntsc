@@ -100,6 +100,27 @@ class NNTSCClient:
 
         return 0
 
+    def request_matrix(self, col, labels, start, end, aggcolumns, aggfunc):
+        if self.sock == None:
+            logger.log("Cannot send NNTSC_MATRIX on a closed socket!")
+            return -1;
+
+        # Our "labels" are actually a list of streams, which is how we used to
+        # manage this sort of thing. Convert to the new label format for 
+        # backwards compatibility
+        if type(labels) is list:
+            labels = self.convert_streams_to_labels(labels)
+
+        contents = pickle.dumps((col, start, end, labels, aggcolumns, aggfunc))
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_MATRIX, len(contents))
+
+        try:
+            self.sock.sendall(header + contents)
+        except error, msg:
+            logger.log("Error sending NNTSC_MATRIX for %s: %s" % (col, msg[1]))
+            return -1
+
+        return 0
 
     def request_aggregate(self, col, labels, start, end, aggcolumns, binsize,
             groupcolumns=[], aggfunc="avg"):
@@ -153,6 +174,7 @@ class NNTSCClient:
             return -1
 
         return 0
+
 
     def receive_message(self):
         if self.sock == None:

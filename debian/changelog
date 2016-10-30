@@ -1,3 +1,12 @@
+nntsc (2.8-1) unstable; urgency=low
+
+  * Minimise locking with better batch processing of messages.
+  * Deal with changes to reported data by the new protocol buffers format.
+  * Move directories around to allow "develop" installs from source.
+  * Remove extraneous commands from debian/rules.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Fri, 20 May 2016 11:12:37 +1200
+
 nntsc (2.7-1) unstable; urgency=low
 
   * Each exporter client is now a separate thread.

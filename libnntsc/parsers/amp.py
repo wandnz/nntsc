@@ -23,6 +23,7 @@
 import sys
 
 from libnntsc.database import DBInsert
+from libnntsc.influx import InfluxInsertor
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
         PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
@@ -31,10 +32,12 @@ from ampsave.importer import import_data_functions
 from ampsave.exceptions import AmpTestVersionMismatch
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
+from libnntsc.parsers.amp_traceroute_pathlen import AmpTraceroutePathlenParser
 from libnntsc.parsers.amp_dns import AmpDnsParser
 from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
+from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 from libnntsc.dberrorcodes import *
 from google.protobuf.message import DecodeError
 import time, signal
@@ -61,6 +64,17 @@ class AmpModule:
 
         self.db.connect_db(15)
 
+        self.influxconf = get_influx_config(nntsc_config)
+        if self.influxconf == {}:
+            sys.exit(1)
+
+        if self.influxconf["useinflux"]:
+            self.influxdb = InfluxInsertor(
+                self.influxconf["name"], self.influxconf["user"], self.influxconf["pass"],
+                self.influxconf["host"], self.influxconf["port"])
+        else:
+            self.influxdb = None
+
         # the amp modules understand how to extract the test data from the blob
         self.amp_modules = import_data_functions()
 
@@ -76,12 +90,15 @@ class AmpModule:
                 self.collections[c['modsubtype']] = c['id']
 
         self.parsers = {
-            "icmp":AmpIcmpParser(self.db),
-            "traceroute":AmpTracerouteParser(self.db),
-            "throughput":AmpThroughputParser(self.db),
-            "dns":AmpDnsParser(self.db),
-            "http":AmpHttpParser(self.db),
-            "tcpping":AmpTcppingParser(self.db)
+            "icmp": [AmpIcmpParser(self.db, self.influxdb)],
+            "traceroute": [AmpTracerouteParser(self.db),
+                    AmpTraceroutePathlenParser(self.db, self.influxdb)
+                    ],
+            "throughput": [AmpThroughputParser(self.db, self.influxdb)],
+            "dns": [AmpDnsParser(self.db, self.influxdb)],
+            "http": [AmpHttpParser(self.db, self.influxdb)],
+            "udpstream": [AmpUdpstreamParser(self.db, self.influxdb)],
+            "tcpping": [AmpTcppingParser(self.db, self.influxdb)]
         }
 
         # set all the streams that we already know about for easy lookup of
@@ -90,7 +107,8 @@ class AmpModule:
 
             testtype = i["modsubtype"]
             if testtype in self.parsers:
-                key = self.parsers[testtype].create_existing_stream(i)
+                for p in self.parsers[testtype]:
+                    key = p.create_existing_stream(i)
 
         self.initSource(nntsc_config)
         
@@ -107,8 +125,9 @@ class AmpModule:
                     initExportPublisher(nntsc_config, routekey, exchange, \
                     queueid)
 
-            for k, parser in self.parsers.iteritems():
-                parser.add_exporter(self.exporter)
+            for k, parsers in self.parsers.iteritems():
+                for p in parsers:
+                    p.add_exporter(self.exporter)
 
     def initSource(self, nntsc_config):
         # Parse connection info
@@ -214,8 +233,9 @@ class AmpModule:
 
             try:
                 # pass the message off to the test specific code
-                self.parsers[test].process_data(properties.timestamp, data,
-                        properties.user_id)
+                for p in self.parsers[test]:
+                    p.process_data(properties.timestamp, data,
+                            properties.user_id)
                 processed += 1
             except DBQueryException as e:
                 if e.code == DB_OPERATIONAL_ERROR:
@@ -267,6 +287,18 @@ class AmpModule:
         # commit the data if anything was successfully processed
         if processed > 0:
             self.db.commit_data()
+            if self.influxdb:
+                try:
+                    self.influxdb.commit_data()
+                except DBQueryException as e:
+                    if e.code == DB_QUERY_TIMEOUT:
+                        logger.log("Database timeout while committing AMP data")
+                        channel.close()
+                        return
+                    else:
+                        logger.log("Unexpected error while committing AMP data")
+                        channel.close()
+                        return
 
         # ack all data up to and including the most recent message
         channel.basic_ack(method.delivery_tag, True)
@@ -299,24 +331,20 @@ def run_module(tests, config, key, exchange, queueid):
     if amp.pubthread:
         amp.pubthread.join()
 
+def create_cqs(db, influxdb):
+
+    for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
+                AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
+                AmpTraceroutePathlenParser]:
+        parser = p(db, influxdb)
+        parser.build_cqs()
+
 def tables(db):
 
-    parser = AmpIcmpParser(db)
-    parser.register()
-        
-    parser = AmpTracerouteParser(db)
-    parser.register()
-
-    parser = AmpDnsParser(db)
-    parser.register()
-
-    parser = AmpThroughputParser(db)
-    parser.register()
-    
-    parser = AmpTcppingParser(db)
-    parser.register()
-    
-    parser = AmpHttpParser(db)
-    parser.register()
-
+    for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
+                AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
+                AmpTraceroutePathlenParser, AmpTracerouteParser,
+                ]:
+        parser = p(db)
+        parser.register()
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

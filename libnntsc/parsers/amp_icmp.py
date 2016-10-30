@@ -21,12 +21,15 @@
 
 from libnntsc.parsers.common import NNTSCParser
 from libnntsc.dberrorcodes import *
+from copy import deepcopy
 import libnntscclient.logger as logger
 
 class AmpIcmpParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpIcmpParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpIcmpParser, self).__init__(db, influxdb)
 
+        self.influxdb = influxdb
+        
         self.streamtable = "streams_amp_icmp"
         self.datatable = "data_amp_icmp"
         self.colname = "amp_icmp"
@@ -56,8 +59,16 @@ class AmpIcmpParser(NNTSCParser):
         ]
 
         self.dataindexes = [
-        ] 
+        ]
 
+
+        self.matrix_cq = [
+            ("median", "mean", "median_avg"),
+            ("median", "stddev", "median_stddev"),
+            ("median", "count", "median_count"),
+            ("loss", "sum", "loss_sum"),
+            ("results", "sum", "results_sum")
+        ]
 
     def create_existing_stream(self, stream_data):
         """Extract the stream key from the stream data provided by NNTSC
@@ -156,7 +167,8 @@ class AmpIcmpParser(NNTSCParser):
                 return DB_DATA_ERROR
 
             if key not in self.streams:
-                streamid = self.create_new_stream(streamparams, timestamp)
+                streamid = self.create_new_stream(streamparams, timestamp,
+                        not self.have_influx)
                 if streamid < 0:
                     logger.log("Failed to create new %s stream" % \
                             (self.colname))
@@ -171,11 +183,15 @@ class AmpIcmpParser(NNTSCParser):
         for sid, streamdata in observed.iteritems():
             self._aggregate_streamdata(streamdata)
 
-            casts = {"rtts":"integer[]"}
+            if self.influxdb:
+                casts = {"rtts":str}
+            else:
+                casts = {"rtts":"integer[]"}
             self.insert_data(sid, timestamp, streamdata, casts)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.datatable, observed.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, observed.keys(), timestamp,
+                self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 

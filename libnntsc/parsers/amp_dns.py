@@ -25,8 +25,8 @@ import libnntscclient.logger as logger
 from libnntsc.parsers.common import NNTSCParser
 
 class AmpDnsParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpDnsParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpDnsParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_dns"
         self.datatable = "data_amp_dns"
@@ -76,11 +76,20 @@ class AmpDnsParser(NNTSCParser):
             {"name":"flag_cd", "type":"boolean", "null":True},
             {"name":"flag_ad", "type":"boolean", "null":True},
             {"name":"flag_ra", "type":"boolean", "null":True},
+            {"name":"requests", "type":"smallint", "null":False},
         ]
 
         self.dataindexes = [
             {"name": "", "columns":['rtt']}
         ]
+
+        self.matrix_cq = [
+            ('rtt', 'mean', 'rtt_avg'),
+            ('rtt', 'stddev', 'rtt_stddev'),
+            ('rtt', 'count', 'rtt_count'),
+            ('requests', 'sum', 'requests_count')
+        ]
+
 
     def _result_to_key(self, res):
         key = (str(res['source']), str(res['destination']), 
@@ -112,7 +121,8 @@ class AmpDnsParser(NNTSCParser):
                 if stream_id in done:
                     continue
             else:
-                stream_id = self.create_new_stream(streamresult, timestamp)
+                stream_id = self.create_new_stream(streamresult, timestamp,
+                        not self.have_influx)
                 if stream_id < 0:
                     logger.log("AMPModule: Cannot create stream for:")
                     logger.log("AMPModule: %s %s %s %s\n" % ("dns", source,
@@ -120,10 +130,12 @@ class AmpDnsParser(NNTSCParser):
                     return stream_id
                 self.streams[key] = stream_id
 
+            dataresult['requests'] = 1
             self.insert_data(stream_id, timestamp, dataresult)
             done[stream_id] = 0
 
-        self.db.update_timestamp(self.datatable, done.keys(), timestamp)
+        self.db.update_timestamp(self.datatable, done.keys(), timestamp,
+                self.have_influx)
 
 
     def _split_result(self, alldata, result):

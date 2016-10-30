@@ -17,7 +17,7 @@ setup(name="pywandevent",
 	url="http://www.wand.net.nz",
 	packages = ['pywandevent'],
 	package_dir = {
-		'pywandevent':'.'
+		'pywandevent':'pywandevent'
 	}
 )
 

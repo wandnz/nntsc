@@ -23,7 +23,9 @@
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
-import operator
+import operator, time
+
+PATH_FLUSH_FREQ = 60 * 60
 
 class AmpTracerouteParser(AmpIcmpParser):
     def __init__(self, db):
@@ -57,7 +59,10 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         self.ascollectionid = None
         self.ipcollectionid = None
-    
+   
+        now = int(time.time())
+        self.nextpathflush = (now - (now % PATH_FLUSH_FREQ)) + \
+                PATH_FLUSH_FREQ
 
     def data_table(self):
         self.db.create_data_table(self.asdatatable, self.asdatacolumns)
@@ -161,7 +166,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         # Don't forget to set the 'first' timestamp (just like insert_stream
         # does).
         self.db.update_timestamp("data_amp_astraceroute", [streamid], 
-                timestamp, timestamp) 
+                timestamp, timestamp, False) 
 
         try:
             self.db.clone_table("data_amp_traceroute_aspaths", 
@@ -333,14 +338,14 @@ class AmpTracerouteParser(AmpIcmpParser):
             keystr += "_%s" % (p)
 
         if keystr in self.paths:
-            result['path_id'] = self.paths[keystr]
+            result['path_id'] = self.paths[keystr][0]
         else:
             pathid = self._insert_path("ip", stream, result)
             if pathid < 0:
                 return err
             
             result['path_id'] = pathid
-            self.paths[keystr] = pathid
+            self.paths[keystr] = (pathid, int(time.time()))
        
         if result['aspath'] != None:
             keystr = "%s" % (stream)
@@ -348,14 +353,14 @@ class AmpTracerouteParser(AmpIcmpParser):
                 keystr += "_%s" % (p)
 
             if keystr in self.aspaths:
-                result['aspath_id'] = self.aspaths[keystr]
+                result['aspath_id'] = self.aspaths[keystr][0]
             else:
                 pathid = self._insert_path("as", stream, result)
                 if pathid < 0:
                     return err
                 
                 result['aspath_id'] = pathid
-                self.aspaths[keystr] = pathid
+                self.aspaths[keystr] = (pathid, int(time.time()))
        
         # XXX Could almost just call parent insert_data here, except for the
         # line where we have to add an entry for "path" before exporting live
@@ -408,14 +413,14 @@ class AmpTracerouteParser(AmpIcmpParser):
             # table. This may be a tad inefficient, but I imagine we are
             # not going to have many AS paths anyway.
             if keystr in self.aspaths:
-                aspath_id = self.aspaths[keystr]
+                aspath_id = self.aspaths[keystr][0]
             else:
                 pathid = self._insert_path("as", streamid, datapoint)
                 if pathid < 0:
                     return
                 
                 aspath_id = pathid
-                self.aspaths[keystr] = pathid
+                self.aspaths[keystr] = (pathid, int(time.time()))
         
             if aspath_id not in observed[streamid]['paths']:
                 observed[streamid]['paths'][aspath_id] = { \
@@ -492,8 +497,33 @@ class AmpTracerouteParser(AmpIcmpParser):
             self.insert_aspath(sid, timestamp, streamdata)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.ipdatatable, ipobserved.keys(), timestamp)
-        self.db.update_timestamp(self.asdatatable, asobserved.keys(), timestamp)
+        self.db.update_timestamp(self.ipdatatable, ipobserved.keys(),
+                timestamp, False)
+        self.db.update_timestamp(self.asdatatable, asobserved.keys(),
+                timestamp, False)
+
+        now = int(time.time())
+        if now > self.nextpathflush:
+            self._flush_unused_paths(now)
+            self.nextpathflush = (now - (now % PATH_FLUSH_FREQ)) + \
+                    PATH_FLUSH_FREQ
+
+    def _flush_unused_paths(self, now):
+        toremove = []
+        for k,v in self.aspaths.iteritems():
+            if v[1] + PATH_FLUSH_FREQ < now:
+                toremove.append(k)
+
+        for k in toremove:
+            del(self.aspaths[k])
+
+        toremove = []
+        for k,v in self.paths.iteritems():
+            if v[1] + PATH_FLUSH_FREQ * 3 < now:
+                toremove.append(k)
+
+        for k in toremove:
+            del(self.paths[k])
 
     def insert_aspath(self, stream, ts, result):
         filtered = {}

@@ -24,8 +24,8 @@ from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 class AmpHttpParser(NNTSCParser):
-    def __init__(self, db):
-        super(AmpHttpParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(AmpHttpParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_amp_http"
         self.datatable = "data_amp_http"
@@ -63,7 +63,11 @@ class AmpHttpParser(NNTSCParser):
         ]
 
         self.dataindexes = [
-        ] 
+        ]
+
+        self.matrix_cq = [
+            ('"duration"', 'mean', '"duration"')
+        ]
 
 
     def _stream_key(self, stream_data):
@@ -138,7 +142,8 @@ class AmpHttpParser(NNTSCParser):
         if key in self.streams:
             stream_id = self.streams[key]
         else:
-            stream_id = self.create_new_stream(mangled, timestamp)
+            stream_id = self.create_new_stream(mangled, timestamp,
+                    not self.have_influx)
             if stream_id < 0:
                 logger.log("AMPModule: Cannot create stream for: ")
                 logger.log("AMPModule: dns %s %s\n", source, \
@@ -146,7 +151,8 @@ class AmpHttpParser(NNTSCParser):
             self.streams[key] = stream_id
 
         self.insert_data(stream_id, timestamp, mangled)
-        self.db.update_timestamp(self.datatable, [stream_id], timestamp)
+        self.db.update_timestamp(self.datatable, [stream_id], timestamp,
+                self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
 
