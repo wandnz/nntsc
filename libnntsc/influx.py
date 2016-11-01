@@ -30,9 +30,6 @@ from libnntsc.cqs import getMatrixCQ
 import libnntscclient.logger as logger
 from requests import ConnectionError
 import requests
-import time
-import threading
-import psutil
 import math
 
 DEFAULT_RP = "default"
