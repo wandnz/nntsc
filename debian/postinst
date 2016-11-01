@@ -50,6 +50,14 @@ case "$1" in
              sed -i "s/username = guest/username = nntsc/" $CONF && \
              sed -i "s/password = guest/password = $PASSWD/" $CONF)
 
+        if [ `lsb_release -c -s` = "wheezy" ]; then
+            echo "============================================================"
+            echo "Debian has old python packages, if you haven't already:"
+            echo
+            echo "pip install influxdb"
+            echo "pip install --upgrade pika"
+            echo "============================================================"
+        fi
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
