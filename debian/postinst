@@ -46,7 +46,7 @@ case "$1" in
         PASSWD=`cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1`
         /usr/sbin/rabbitmqctl list_users | cut -f 1 | grep -qx nntsc || \
             (/usr/sbin/rabbitmqctl add_user nntsc $PASSWD && \
-             sudo rabbitmqctl set_permissions nntsc ".*" ".*" ".*" && \
+             /usr/sbin/rabbitmqctl set_permissions nntsc ".*" ".*" ".*" && \
              sed -i "s/username = guest/username = nntsc/" $CONF && \
              sed -i "s/password = guest/password = $PASSWD/" $CONF)
 
