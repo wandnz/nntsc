@@ -22,6 +22,15 @@ case "$1" in
     configure)
         CONF=/etc/nntsc/nntsc.conf
 
+        echo "============================================================"
+        echo "Debian has old python packages, if you haven't already:"
+        echo
+        echo "pip install influxdb"
+        if [ `lsb_release -c -s` = "wheezy" ]; then
+            echo "pip install --upgrade pika"
+        fi
+        echo "============================================================"
+
         # ensure the cuz system user exists
         if ! getent passwd cuz > /dev/null; then
             adduser --quiet --system --group --no-create-home cuz
@@ -49,15 +58,6 @@ case "$1" in
              /usr/sbin/rabbitmqctl set_permissions nntsc ".*" ".*" ".*" && \
              sed -i "s/username = guest/username = nntsc/" $CONF && \
              sed -i "s/password = guest/password = $PASSWD/" $CONF)
-
-        if [ `lsb_release -c -s` = "wheezy" ]; then
-            echo "============================================================"
-            echo "Debian has old python packages, if you haven't already:"
-            echo
-            echo "pip install influxdb"
-            echo "pip install --upgrade pika"
-            echo "============================================================"
-        fi
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
