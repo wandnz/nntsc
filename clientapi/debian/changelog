@@ -1,3 +1,10 @@
+libnntsc-client (1.7-1) unstable; urgency=low
+
+  * Updated to include new messages used for the InfluxDB backed matrix.
+  * Updated build dependencies.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Thu,  3 Nov 2016 14:50:32 +1300
+
 libnntsc-client (1.6-2) unstable; urgency=low
 
   * Move directories around to allow "develop" installs from source.
