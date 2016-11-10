@@ -428,6 +428,18 @@ class InfluxSelector(InfluxConnection):
                             total += v[cq[2]][i]
 
                     finaldata[cq[2]] = total
+                elif cq[1] in ['max']:
+                    maxval = None
+                    for i in range(0, len(v[cq[2]])):
+                        if v[cq[2]][i] is not None and (maxval is None or v[cq[2]][i] > maxval):
+                            maxval = v[cq[2]][i]
+                    finaldata[cq[2]] = maxval
+                elif cq[1] in ['min']:
+                    minval = None
+                    for i in range(0, len(v[cq[2]])):
+                        if v[cq[2]][i] is not None and (minval is None or v[cq[2]][i] < minval):
+                            minval = v[cq[2]][i]
+                    finaldata[cq[2]] = minval
                 elif cq[1] in ["avg", "mean"]:
                     countcol = labels_and_rows[k]["magiccount_" + cq[0]]
 
