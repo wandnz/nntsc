@@ -316,6 +316,7 @@ class DBSelector(DatabaseCore):
                 yield(None, label, None, None, None)
                 continue
 
+            influx_start = start_time
             # Fetch any available postgres data
             pgstreams = []
             for sid in streams:
@@ -337,19 +338,23 @@ class DBSelector(DatabaseCore):
 
  
                 fetched = self._query_data_generator()
-                for row, errcode in fetched:
+                for rows, errcode in fetched:
+
                     if errcode != DB_NO_ERROR:
                         yield(None, label, None, None,
                                 DBQueryException(errcode))
                     else:
-                        yield (row, label, tscol, binsize, None)
+                        if rows and 'timestamp' in rows[-1] and \
+                                rows[-1]['timestamp'] > influx_start:
+                            influx_start = rows[-1]['timestamp'] + 1
+                        yield (rows, label, tscol, binsize, None)
 
             # Fetch any available influx data
             if influxdb is None or table in traceroute_tables:
                 continue
 
             for row in influxdb.select_aggregated_data(table, 
-                    {label:streams}, aggcols, start_time, stop_time, binsize):
+                    {label:streams}, aggcols, influx_start, stop_time, binsize):
                 yield row
 
 
