@@ -703,7 +703,6 @@ class DBInsert(DatabaseCore):
         for i in range(0, len(keys)):
             if i != 0:
                 wherecl += " AND "
-            # XXX NOT PARAMETERISED
             wherecl += keys[i] + "=%s" 
             params += [props[keys[i]]]
 
