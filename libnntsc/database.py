@@ -114,7 +114,7 @@ class NNTSCCursor(object):
         except psycopg2.IntegrityError as e:
             log(e)
             self.conn.rollback()
-            if " duplicate " in str(e):
+            if "duplicate key " in str(e):
                 raise DBQueryException(DB_DUPLICATE_KEY)
             raise DBQueryException(DB_DATA_ERROR)
         except psycopg2.DataError as e:
