@@ -112,10 +112,10 @@ class NNTSCCursor(object):
             self.conn.rollback()
             raise DBQueryException(DB_CODING_ERROR)
         except psycopg2.IntegrityError as e:
-            log(e)
             self.conn.rollback()
             if "duplicate key " in str(e):
                 raise DBQueryException(DB_DUPLICATE_KEY)
+            log(e)
             raise DBQueryException(DB_DATA_ERROR)
         except psycopg2.DataError as e:
             log(e)
@@ -704,8 +704,8 @@ class DBInsert(DatabaseCore):
             if i != 0:
                 wherecl += " AND "
             # XXX NOT PARAMETERISED
-            wherecl += "%s = %s" 
-            params += [keys[i], props[keys[i]]]
+            wherecl += keys[i] + "=%s" 
+            params += [props[keys[i]]]
 
         query = "SELECT stream_id FROM %s " % (st)
         query += wherecl
@@ -714,6 +714,7 @@ class DBInsert(DatabaseCore):
 
         if self.basic.cursor.rowcount != 1:
             log("Unexpected number of matches when searching for existing stream: %d" % (self.basic.cursor.rowcount))
+            log(query % tuple(params))
             raise DBQueryException(DB_CODING_ERROR)
 
         row = self.basic.cursor.fetchone()
