@@ -448,7 +448,10 @@ class DBSelector(DatabaseCore):
 
         selclause = "SELECT "
         for i in range(0, len(pg_selectcols)):
-            selclause += pg_selectcols[i]
+            if pg_selectcols[i].startswith('activestreams'):
+                selclause += pg_selectcols[i]
+            else:
+                selclause += '"' + pg_selectcols[i] + '"'
 
             if i != len(pg_selectcols) - 1:
                 selclause += ", "
@@ -768,7 +771,7 @@ class DBSelector(DatabaseCore):
                 if cn is not None:
                     sanitised.append(cn)
             else:
-                if cn.lstrip('"').rstrip('"') in columns:
+                if cn in columns:
                     sanitised.append(cn)
         return sanitised
 

@@ -262,7 +262,7 @@ class InfluxSelector(InfluxConnection):
                     selectcols[i] = "requests"
 
         self.qb.reset()
-        self.qb.add_clause("select", "select {}".format(", ".join(selectcols)))
+        self.qb.add_clause("select", "select " + ', '.join('"{0}"'.format(s) for s in selectcols))
 
         self.qb.add_clause("from", "from {}".format(table))
 
@@ -586,6 +586,8 @@ class InfluxSelector(InfluxConnection):
         querystring, _ = self.qb.create_query(order)
 
         results = self.query(querystring)
+
+        #print querystring
 
         # Update the labels of the results
         for (series, tags), generator in results.items():
