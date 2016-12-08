@@ -146,7 +146,14 @@ class InfluxInsertor(InfluxConnection):
                 aggstring += ", count({}) AS magiccount_{}".format(cq[0], cq[0].replace('"', ''))
 
 
-        # TODO check if exists and skip
+
+        query = """ DROP CONTINUOUS QUERY {0} ON {1}
+                """.format(daycqname, self.dbname)
+        self.query(query)
+
+        query = """ DROP CONTINUOUS QUERY {0} ON {1}
+                """.format(shortcqname, self.dbname)
+        self.query(query)
 
         query = """
             CREATE CONTINUOUS QUERY {0} ON {1} RESAMPLE EVERY 1h FOR 3h BEGIN
