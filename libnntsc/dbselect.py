@@ -759,6 +759,7 @@ class DBSelector(DatabaseCore):
 
         for i in range(0, len(selcols)):
             cn = selcols[i]
+
             
             if table in traceroute_tables:
                 # Include columns from other tables that amp-traceroute
@@ -767,7 +768,7 @@ class DBSelector(DatabaseCore):
                 if cn is not None:
                     sanitised.append(cn)
             else:
-                if cn in columns:
+                if cn.lstrip('"').rstrip('"') in columns:
                     sanitised.append(cn)
         return sanitised
 
