@@ -66,8 +66,11 @@ class AmpHttpParser(NNTSCParser):
         ]
 
         self.matrix_cq = [
-            ('"duration"', 'mean', '"duration"'),
-            ('"bytes"', 'max', '"bytes"')
+            ('"duration"', 'mean', '"duration_avg"'),
+            ('"duration"', 'stddev', '"duration_stddev"'),
+            ('"bytes"', 'max', '"bytes_max"'),
+            ('"bytes"', 'mean', '"bytes_avg"'),
+            ('"bytes"', 'stddev', '"bytes_stddev"')
         ]
 
 
