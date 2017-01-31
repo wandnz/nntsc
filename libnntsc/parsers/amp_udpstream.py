@@ -75,6 +75,7 @@ class AmpUdpstreamParser(NNTSCParser):
             {"name": "packets_recvd", "type": "integer", "null": False},
             #{"name": "loss_periods", "type": "varchar", "null": True},
             {"name": "itu_mos", "type": "float", "null": True},
+            {"name": "lossrate", "type": "float", "null": False},
 
         ]
 
@@ -103,6 +104,7 @@ class AmpUdpstreamParser(NNTSCParser):
         self.matrix_cq = [
             ('packets_sent', 'sum', 'packets_sent'),
             ('packets_recvd', 'sum', 'packets_recvd'),
+            ('lossrate', 'stddev', 'lossrate_stddev'),
             ('mean_rtt', 'mean', 'mean_rtt_avg'),
             ('mean_rtt', 'stddev', 'mean_rtt'),
             ('mean_rtt', 'count', 'count_mean_rtt')
@@ -169,7 +171,15 @@ class AmpUdpstreamParser(NNTSCParser):
                 resdict['max_jitter'] = result['jitter']['maximum']
             if 'packets_received' in result:
                 resdict['packets_recvd'] = result['packets_received']
+            else:
+                resdict['packets_recvd'] = 0
+
             resdict['packets_sent'] = data['packet_count']
+            if data['packet_count'] > 0:
+                resdict['lossrate'] = resdict['packets_recvd'] / float(resdict['packets_sent'])
+            else:
+                resdict['lossrate'] = 0.0
+
             if 'voip' in result and result['voip'] is not None:
                 resdict['itu_mos' ] = result['voip']['itu_mos']
 

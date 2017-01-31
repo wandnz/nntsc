@@ -77,6 +77,7 @@ class AmpDnsParser(NNTSCParser):
             {"name":"flag_ad", "type":"boolean", "null":True},
             {"name":"flag_ra", "type":"boolean", "null":True},
             {"name":"requests", "type":"smallint", "null":False},
+            {"name":"lossrate", "type":"float", "null": False},
         ]
 
         self.dataindexes = [
@@ -87,7 +88,8 @@ class AmpDnsParser(NNTSCParser):
             ('rtt', 'mean', 'rtt_avg'),
             ('rtt', 'stddev', 'rtt_stddev'),
             ('rtt', 'count', 'rtt_count'),
-            ('requests', 'sum', 'requests_count')
+            ('requests', 'sum', 'requests_count'),
+            ('lossrate', 'stddev', 'lossrate_stddev')
         ]
 
 
@@ -131,6 +133,11 @@ class AmpDnsParser(NNTSCParser):
                 self.streams[key] = stream_id
 
             dataresult['requests'] = 1
+            if 'response_size' in dataresult and dataresult['response_size']:
+                dataresult['lossrate'] = 0.0
+            else:
+                dataresult['lossrate'] = 1.0
+
             self.insert_data(stream_id, timestamp, dataresult)
             done[stream_id] = 0
 

@@ -58,6 +58,7 @@ class AmpTcppingParser(AmpIcmpParser):
             {"name":"results", "type":"smallint", "null":False},
             {"name":"icmperrors", "type":"smallint", "null":False},
             {"name":"rtts", "type":"integer[]", "null":True},
+            {"name":"lossrate", "type":"float", "null":False},
             #{"name":"replyflags", "type":"smallint", "null":True},
             #{"name":"icmptype", "type":"smallint", "null":True},
             #{"name":"icmpcode", "type":"smallint", "null":True},
@@ -75,16 +76,6 @@ class AmpTcppingParser(AmpIcmpParser):
         aggs_w_ntile = deepcopy(aggs)
         aggs_w_ntile += [("\"{}_percentile_rtt\"".format(
                       i), "percentile", "median, {}".format(i)) for i in range(5,100,5)]
-
-        
-        self.cqs = [
-# Uncomment to aggregate data for tooltips... Doesn't seem to be helpful though            
-#            (['1h','1d'],
-#            aggs),
-            ([('5m', '1h'),('10m','1h'),('20m','1h'),('40m','80m'),
-                    ('80m','160m'),('4h', '8h')],
-             aggs_w_ntile)
-            ]
 
         #self.dataindexes = []
 
@@ -169,7 +160,11 @@ class AmpTcppingParser(AmpIcmpParser):
         # with our median calculation
         nulls = [None] * (streamdata['loss'] + streamdata['icmperrors'])
         streamdata["rtts"] += nulls
- 
-        
+
+        if streamdata["results"] > 0:
+            streamdata["lossrate"] = streamdata["loss"] / float(streamdata["results"])
+        else:
+            streamdata["lossrate"] = 0.0
+
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
