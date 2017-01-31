@@ -1,3 +1,16 @@
+nntsc (2.10-1) unstable; urgency=low
+
+  * Add support for 'min' and 'max' when querying matrix data.
+  * Increase default retention policy to one year.
+  * Add bytes to amp-http matrix continuous query.
+  * Expand all HTTP matrix continuous queries to support relative metrics.
+  * Fix influx query going too far back in time when overlapping postgres data.
+  * Correctly detect duplicate stream keys.
+  * Always re-create continuous queries when running build_nntsc_db.
+  * Quieten some log messages that were not useful.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Wed, 11 Jan 2016 10:54:14 +1300
+
 nntsc (2.9-1) unstable; urgency=low
 
   * InfluxDB is now used to store results for all tests except traceroute.
