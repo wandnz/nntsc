@@ -55,6 +55,7 @@ class AmpIcmpParser(NNTSCParser):
             {"name":"packet_size", "type":"smallint", "null":False},
             {"name":"loss", "type":"smallint", "null":False},
             {"name":"results", "type":"smallint", "null":False},
+            {"name":"lossrate", "type":"float", "null":False},
             {"name":"rtts", "type":"integer[]", "null":True},
         ]
 
@@ -67,7 +68,8 @@ class AmpIcmpParser(NNTSCParser):
             ("median", "stddev", "median_stddev"),
             ("median", "count", "median_count"),
             ("loss", "sum", "loss_sum"),
-            ("results", "sum", "results_sum")
+            ("results", "sum", "results_sum"),
+            ("lossrate", "stddev", "lossrate_stddev"),
         ]
 
     def create_existing_stream(self, stream_data):
@@ -133,7 +135,7 @@ class AmpIcmpParser(NNTSCParser):
         if streamid not in observed:
             observed[streamid] = { "loss":0, "rtts":[], 
                     "median":None, "packet_size":datapoint["packet_size"],
-                    "results":0 }
+                    "results":0}
 
         observed[streamid]["results"] += 1
 
@@ -151,6 +153,11 @@ class AmpIcmpParser(NNTSCParser):
         # have to wait until now to add them otherwise they'll mess
         # with our median calculation
         streamdata["rtts"] += [None] * streamdata['loss']
+
+        if streamdata["results"] > 0:
+            streamdata["lossrate"] = streamdata["loss"] / float(streamdata["results"])
+        else:
+            streamdata["lossrate"] = 0.0
 
     def process_data(self, timestamp, data, source):
         """ Process a AMP ICMP message, which can contain 1 or more sets of 

@@ -55,13 +55,15 @@ class AmpThroughputParser(NNTSCParser):
         self.datacolumns = [
             {"name":"bytes", "type":"bigint", "null":True},    
             {"name":"packets", "type":"bigint", "null":True},
+            {"name":"rate", "type":"float", "null":True},
             {"name":"runtime", "type":"integer", "null":True}
         ]
 
         self.matrix_cq = [
             ('bytes', 'sum', 'bytes'),
             ('packets', 'sum', 'packets'),
-            ('runtime', 'sum', 'runtime')
+            ('runtime', 'sum', 'runtime'),
+            ('rate', 'stddev', 'rate'),
         ]
 
     def _construct_key(self, stream_data):
@@ -116,6 +118,11 @@ class AmpThroughputParser(NNTSCParser):
             resdict['duration'] = result['duration']
             resdict['runtime'] = result['runtime']
             resdict['bytes'] = result['bytes']
+
+            if result['duration'] is not None and result['duration'] > 0:
+                resdict['rate'] = result['bytes'] / float(result['duration'])
+            else:
+                resdict['rate'] = None
 
             # new style has write_size fixed for all schedule items in a test,
             # but we should try to be backwards compatible for a while at least.
