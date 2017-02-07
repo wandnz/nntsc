@@ -1,3 +1,9 @@
+nntsc (2.11-1) unstable; urgency=low
+
+  * Add lossrate and throughput rate metrics to data tables.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Wed,  1 Feb 2017 11:46:39 +1300
+
 nntsc (2.10-1) unstable; urgency=low
 
   * Add support for 'min' and 'max' when querying matrix data.
@@ -9,7 +15,7 @@ nntsc (2.10-1) unstable; urgency=low
   * Always re-create continuous queries when running build_nntsc_db.
   * Quieten some log messages that were not useful.
 
- -- Brendon Jones <brendonj@waikato.ac.nz>  Wed, 11 Jan 2016 10:54:14 +1300
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Wed, 11 Jan 2017 10:54:14 +1300
 
 nntsc (2.9-1) unstable; urgency=low
 
