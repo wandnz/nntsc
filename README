@@ -45,12 +45,12 @@ NNTSC uses Python setuptools to install both itself and its dependencies.
 
 In version 2.3 there has been a significant change to the installation
 process -- some of the NNTSC dependencies are now distributed and installed
-separately, namely pywandevent and libnntsc-client.
+separately, namely libnntsc-client.
 
-If you have checked out a copy of NNTSC from our git repository, pywandevent
-and libnntsc-client will be included (in the pywandevent/ and clientapi/
-directories respectively). Install these by changing into their directory and
-running 'python setup.py install' prior to attempting to install NNTSC itself.
+If you have checked out a copy of NNTSC from our git repository,
+libnntsc-client will be included (in the clientapi/ directory). Install it
+by changing into the directory and running 'python setup.py install' prior to
+attempting to install NNTSC itself.
 
 Once these are installed, simply run the following to install NNTSC:
 	python setup.py install
