@@ -9,9 +9,9 @@ try:
 except ImportError:
         from distutils.core import setup
 
-requires = [ \
-        'python-rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12', 'python-daemon', \
-	'libnntsc-client', 'pylibmc', 'influxdb' \
+requires = [
+        'python-rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12', 'python-daemon',
+	'libnntsc-client', 'pylibmc', 'influxdb'
 ]
 
 if sys.version_info < (2, 7):
@@ -26,30 +26,8 @@ setup(name="nntsc",
 	scripts=['build_nntsc_db', 'nntsc'],
 	packages=['libnntsc', 'libnntsc.parsers'],
 	install_requires = requires,
-	package_dir = { \
-		'libnntsc':'libnntsc', \
-		'libnntsc.parsers':'libnntsc/parsers', \
-	},
-        # XXX these appear to be completely ignored now and so we have to use
-        # the manifest file?
-	include_package_data=True,
-	package_data = {
-		'libnntsc': ['conf/nntsc.conf', 'conf/rrd.examples',
-			'initscripts/nntsc', 'initscripts/nntsc.default']
+	package_dir = {
+		'libnntsc':'libnntsc',
+		'libnntsc.parsers':'libnntsc/parsers',
 	},
 )
-
-# XXX Commented out because this probably shouldn't be done here -- get the
-# packaging system to do it instead
-
-
-# Install configuration file
-#filename = resource_filename(Requirement.parse("NNTSC"), "conf/nntsc.conf")
-
-#try:
-#	import shutil, os
-#	if not os.path.exists("/etc/nntsc.conf"):
-#		shutil.copyfile(filename, "/etc/nntsc.conf")
-#except IOError:
-#	print "Unable to copy configuration file to /etc/nntsc.conf"
-
