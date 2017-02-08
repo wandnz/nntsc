@@ -45,7 +45,7 @@ class LPIFlowsParser(LPIBytesParser):
             {"name":"protocol", "type":"varchar", "null":False},
             {"name":"metric", "type":"varchar", "null":False},
         ]
-        self.uniquecolumns = ['source', 'user', 'dir', 'freq', 'protocol', 
+        self.uniquecolumns = ['source', 'user', 'dir', 'freq', 'protocol',
                 'metric']
         self.streamindexes = []
         self.datacolumns = [

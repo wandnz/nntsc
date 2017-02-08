@@ -29,7 +29,7 @@ class AmpIcmpParser(NNTSCParser):
         super(AmpIcmpParser, self).__init__(db, influxdb)
 
         self.influxdb = influxdb
-        
+
         self.streamtable = "streams_amp_icmp"
         self.datatable = "data_amp_icmp"
         self.colname = "amp_icmp"
@@ -43,7 +43,7 @@ class AmpIcmpParser(NNTSCParser):
             {"name":"packet_size", "type":"varchar", "null":False},
         ]
 
-        self.uniquecolumns = ['source', 'destination', 'packet_size', 
+        self.uniquecolumns = ['source', 'destination', 'packet_size',
                 'family']
         self.streamindexes = [
             {"name": "", "columns": ['source']},
@@ -61,7 +61,6 @@ class AmpIcmpParser(NNTSCParser):
 
         self.dataindexes = [
         ]
-
 
         self.matrix_cq = [
             ("median", "mean", "median_avg"),
@@ -112,7 +111,7 @@ class AmpIcmpParser(NNTSCParser):
                         (self.colname))
                 return None, None
             sizestr = str(result['packet_size'])
-        
+
         props['source'] = source
         props['destination'] = result['target']
         props['family']  = family
@@ -133,7 +132,7 @@ class AmpIcmpParser(NNTSCParser):
 
     def _update_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
-            observed[streamid] = { "loss":0, "rtts":[], 
+            observed[streamid] = { "loss":0, "rtts":[],
                     "median":None, "packet_size":datapoint["packet_size"],
                     "results":0}
 
@@ -144,7 +143,7 @@ class AmpIcmpParser(NNTSCParser):
 
         if 'rtt' in datapoint and datapoint['rtt'] is not None:
             observed[streamid]["rtts"].append(datapoint['rtt'])
-            
+
     def _aggregate_streamdata(self, streamdata):
         streamdata["rtts"].sort()
         streamdata["median"] = self._find_median(streamdata["rtts"])
@@ -160,8 +159,8 @@ class AmpIcmpParser(NNTSCParser):
             streamdata["lossrate"] = 0.0
 
     def process_data(self, timestamp, data, source):
-        """ Process a AMP ICMP message, which can contain 1 or more sets of 
-            results 
+        """ Process a AMP ICMP message, which can contain 1 or more sets of
+            results
         """
         observed = {}
 
@@ -201,4 +200,3 @@ class AmpIcmpParser(NNTSCParser):
                 self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
-

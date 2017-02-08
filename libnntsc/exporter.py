@@ -48,7 +48,7 @@ from libnntsc.dberrorcodes import *
 # register themselves as sources to the NNTSCExporter on start-up and
 # send all new data to the exporter via a rabbit queue. The queue is
 # disk-backed and persistent so there is less urgency than there used to
-# be about reading data from this queue.  
+# be about reading data from this queue.
 #
 # When it first starts running, the NNTSCExporter creates a thread for
 # a NNTSCListener to run in. This thread is solely dedicated to listening
@@ -63,7 +63,7 @@ from libnntsc.dberrorcodes import *
 # for data from the client and sending
 # the responses back to the client. It also handles forwarding any live
 # data that the NNTSCExporter passes on to it -- this particular task
-# has higher priority than the others. 
+# has higher priority than the others.
 #
 # Whenever a NNTSCClient receives a request for data that requires a
 # database query, e.g. historical data or a list of streams, the job is
@@ -71,8 +71,8 @@ from libnntsc.dberrorcodes import *
 # own a number of DBWorker threads (equal to MAX_WORKERS) which can
 # query the database without affecting processing of live data or new
 # client requests. When the query completes, the results are packed into
-# NNTSC response messages and returned back to the NNTSCClient instance via yet 
-# another queue for subsequent transmission to the client that requested them. 
+# NNTSC response messages and returned back to the NNTSCClient instance via yet
+# another queue for subsequent transmission to the client that requested them.
 # Before doing so, the
 # DBWorker thread will also run over the results, transforming them into
 # a nice dictionary mapping column names to values and estimating the
@@ -111,10 +111,10 @@ class DBWorker(threading.Thread):
     def process_job(self, job):
         jobtype = job[0]
         jobdata = job[1]
-        
+
         if jobtype == -1:
             return DBWORKER_HALT
-   
+
         self.retries = 0
 
         if jobtype == NNTSC_REQUEST:
@@ -154,7 +154,6 @@ class DBWorker(threading.Thread):
             for i in range(0, len(columns)):
                 aggs.append((columns[i], func[i]))
 
-
         return aggs
 
     def aggregate(self, aggmsg):
@@ -170,7 +169,7 @@ class DBWorker(threading.Thread):
             for lab, streams in labels.items():
                 err = self._enqueue_history(colid, lab, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
-                    return err 
+                    return err
             return DBWORKER_SUCCESS
 
         if end == None:
@@ -237,9 +236,8 @@ class DBWorker(threading.Thread):
             for lab, streams in labels.items():
                 err = self._enqueue_history(colid, lab, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
-                    return err 
+                    return err
             return DBWORKER_SUCCESS
-
 
         while 1:
             generator = self.db.select_matrix_data(colid, aggs, labels,
@@ -255,7 +253,6 @@ class DBWorker(threading.Thread):
                 return error
             break
 
-
         try:
             self.db.release_data()
         except DBQueryException as e:
@@ -266,7 +263,7 @@ class DBWorker(threading.Thread):
 
     def subscribe(self, submsg):
         colid, start, end, columns, labels, aggs = pickle.loads(submsg)
-        
+
         now = int(time.time())
 
         origstart = start
@@ -283,7 +280,7 @@ class DBWorker(threading.Thread):
                     return err
 
             return DBWORKER_SUCCESS
-        
+
         if end == None:
             stoppoint = int(time.time())
         else:
@@ -294,7 +291,7 @@ class DBWorker(threading.Thread):
 
         while start <= stoppoint:
             queryend = start + MAX_HISTORY_QUERY
-    
+
             # If we were asked for data up until "now", make sure we account
             # for the time taken to make earlier queries otherwise we'll
             # miss any new data inserted while we were querying previous
@@ -303,13 +300,13 @@ class DBWorker(threading.Thread):
             # We're still going to miss anything that arrives between here and
             # whenever we manage to complete the last query but we want
             # our data to arrive in order (i.e. history before any live), so
-            # that's kinda tricky. Usually, we're only going to miss one 
+            # that's kinda tricky. Usually, we're only going to miss one
             # measurement though.
             #
             # XXX Can we subscribe before doing the last query and then
             # funnel any live data into temporary storage until the query
             # completes. Once we're caught up, throw all that saved live data
-            # onto the queue. 
+            # onto the queue.
             #if end == None:
             #    stoppoint = int(time.time())
 
@@ -350,7 +347,7 @@ class DBWorker(threading.Thread):
 
     def _cancel_history(self, colid, labels, start, end, more):
         # If the query was cancelled, let the client know that
-        # the absence of data for this time range is due to a 
+        # the absence of data for this time range is due to a
         # database query timeout rather than a lack of data
         err = self._enqueue_cancel(NNTSC_HISTORY, (colid, labels, start, end, more))
         if err != DBWORKER_SUCCESS:
@@ -381,11 +378,11 @@ class DBWorker(threading.Thread):
                     return self._cancel_history(colid, labels, start, end, more)
                 elif exception.code == DB_OPERATIONAL_ERROR:
                     if self._reconnect_database() == -1:
-                        return DBWORKER_ERROR 
+                        return DBWORKER_ERROR
                     return DBWORKER_RETRY
                 else:
                     return DBWORKER_ERROR
-            
+
             # If we have reached the end of the history for the current label,
             # flush any history we've got remaining for that stream
             if label != currlabel:
@@ -398,12 +395,12 @@ class DBWorker(threading.Thread):
                         lastts = history[-1]['timestamp']
                     else:
                         lastts = start
-                    
+
                     err = self._enqueue_history(colid, currlabel, history, \
                             more, freq, lastts)
                     if err != DBWORKER_SUCCESS:
                         return err
-                    
+
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
                             'totaldiffs':0, 'tsdiffs':{} }
@@ -412,8 +409,8 @@ class DBWorker(threading.Thread):
                 observed.add(currlabel)
                 history = []
                 historysize = 0
-            
-            if rows is None:    
+
+            if rows is None:
                 #err = self._enqueue_history(name, label, [], more, 0, start)
                 #if err != DBWORKER_SUCCESS:
                 #    return err
@@ -425,16 +422,15 @@ class DBWorker(threading.Thread):
                 if freq == 0:
                     freq = self._calc_frequency(freqstats, binsize)
                 lastts = history[-1]['timestamp']
-                err = self._enqueue_history(colid, currlabel, history, True, 
+                err = self._enqueue_history(colid, currlabel, history, True,
                         freq, lastts)
                 if err != DBWORKER_SUCCESS:
                     return err
                 history = []
                 historysize = 0
 
-
             if freq == 0:
-                freq = self._update_frequency_stats(freqstats, rows, binsize, 
+                freq = self._update_frequency_stats(freqstats, rows, binsize,
                         tscol)
             history += rows
             historysize += len(rows)
@@ -451,11 +447,10 @@ class DBWorker(threading.Thread):
             history = []
 
         if currlabel != -1:
-            err = self._enqueue_history(colid, currlabel, history, more, 
+            err = self._enqueue_history(colid, currlabel, history, more,
                     freq, lastts)
             if err != DBWORKER_SUCCESS:
                 return err
-
 
         # Also remember to export empty history for any streams that had
         # no data in the request period
@@ -529,7 +524,7 @@ class DBWorker(threading.Thread):
                 return DBWORKER_FULLQUEUE
 
         #log("Queue size: %d" % (self.queue.qsize()))
-        
+
         return DBWORKER_SUCCESS
 
     def _reconnect_database(self):
@@ -544,13 +539,13 @@ class DBWorker(threading.Thread):
 
     def _request_collections(self):
         # Requesting the collection list
-         
+
         try:
             collections = self.db.list_collections()
         except DBQueryException as e:
             if e.code == DB_QUERY_TIMEOUT:
                 log("Query timed out while fetching collections")
-                err = self._enqueue_cancel(NNTSC_COLLECTIONS, None)    
+                err = self._enqueue_cancel(NNTSC_COLLECTIONS, None)
                 if err != DBWORKER_SUCCESS:
                     return err
                 return DBWORKER_SUCCESS
@@ -601,7 +596,7 @@ class DBWorker(threading.Thread):
         return DBWORKER_SUCCESS
 
     def _request_streams(self, col, bound):
-        
+
         try:
             streams = self.db.select_streams_by_collection(col, bound)
         except DBQueryException as e:
@@ -615,13 +610,13 @@ class DBWorker(threading.Thread):
             else:
                 log("Exception while fetching streams: %s" % (e))
                 return DBWORKER_ERROR
-                
+
         try:
             self.queue.put((NNTSC_REGISTER_COLLECTION, col), False)
         except StdQueue.Full:
             log("Failed to register collection %d due to full DBWorker result queue" % (col));
             return DBWORKER_FULLQUEUE
-        
+
         if len(streams) == 0:
             return self._enqueue_streams(NNTSC_STREAMS, col, False, [])
 
@@ -635,7 +630,7 @@ class DBWorker(threading.Thread):
                 end = i + 1000
                 more = True
 
-            err = self._enqueue_streams(NNTSC_STREAMS, col, more, 
+            err = self._enqueue_streams(NNTSC_STREAMS, col, more,
                         streams[start:end])
             if err != DBWORKER_SUCCESS:
                 log("Failed on streams %d:%d (out of %d))" % (start, end, len(streams)))
@@ -654,7 +649,7 @@ class DBWorker(threading.Thread):
             log("Failed to write streams to full DBWorker result queue");
             return DBWORKER_FULLQUEUE
         return DBWORKER_SUCCESS
-       
+
 
     # Processes the job for a basic NNTSC request, i.e. asking for the
     # collections, schemas or streams rather than querying for time
@@ -668,14 +663,14 @@ class DBWorker(threading.Thread):
 
         if req_hdr[0] == NNTSC_REQ_SCHEMA:
             return self._request_schemas(req_hdr[1])
-        
+
         if req_hdr[0] == NNTSC_REQ_STREAMS:
             return self._request_streams(req_hdr[1], req_hdr[2])
 
         return 0
 
     def _connect_database(self):
-        self.db = DBSelector(self.threadid, self.dbconf["name"], 
+        self.db = DBSelector(self.threadid, self.dbconf["name"],
                 self.dbconf["user"],
                 self.dbconf["pass"], self.dbconf["host"], self.timeout,
                 cachetime = self.dbconf["cachetime"])
@@ -686,7 +681,7 @@ class DBWorker(threading.Thread):
                                     self.influxconf["user"], self.influxconf["pass"],
                                     self.influxconf["host"], self.influxconf["port"],
                                     self.timeout)
-        
+
     def run(self):
         running = 1
 
@@ -826,8 +821,8 @@ class NNTSCClient(threading.Thread):
         self.running = 0
         self.waitstreams = {}
         self.waitlabels = {}
-        self.savedlive = {} 
-        
+        self.savedlive = {}
+
         self.workers = []
         # Create some worker threads for handling the database queries
         for i in range(0, MAX_WORKERS):
@@ -841,14 +836,14 @@ class NNTSCClient(threading.Thread):
 
     def subscribe_stream(self, submsg):
         colid, start, end, columns, labels, aggs = pickle.loads(submsg)
-       
-        for label, streams in labels.iteritems(): 
+
+        for label, streams in labels.iteritems():
 
             if label not in self.waitlabels:
                 self.waitlabels[label] = streams
             else:
                 continue
-        
+
             for s in streams:
                 self.waitstreams[s] = label
 
@@ -884,7 +879,7 @@ class NNTSCClient(threading.Thread):
 
         if len(data) != 0:
             ts = 0
-            
+
             for d in data:
                 contents = pickle.loads(d[1])
 
@@ -894,16 +889,16 @@ class NNTSCClient(threading.Thread):
                 if d[2] != ts:
                     # Chuck a PUSH on the queue
                     pushdata = pickle.dumps((contents[0], ts))
-                    header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, 
+                    header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH,
                             len(pushdata))
-                    
+
                     try:
                         self.releasedlive.put((header, pushdata), True, 10)
                     except StdQueue.Full:
                         log("Could not release stored live data, queue full")
                         log("Dropping client")
                         return -1
-                    
+
                     ts = d[2]
 
                 if d[2] <= lasthist:
@@ -918,7 +913,7 @@ class NNTSCClient(threading.Thread):
 
             # One final push
             pushdata = pickle.dumps((contents[0], ts))
-            header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, 
+            header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH,
                     len(pushdata))
             try:
                 self.releasedlive.put((header, pushdata), True, 10)
@@ -928,15 +923,15 @@ class NNTSCClient(threading.Thread):
                 return -1
 
         del(self.savedlive[label])
-        
+
         for s in streams:
             if s in self.waitstreams:
                 del(self.waitstreams[s])
 
         del self.waitlabels[label]
-           
-        return 0   
-         
+
+        return 0
+
     def client_message(self, msg):
         error = 0
         header = struct.unpack(nntsc_hdr_fmt, msg[0:struct.calcsize(nntsc_hdr_fmt)])
@@ -991,13 +986,13 @@ class NNTSCClient(threading.Thread):
             return 0
 
     def receive_live(self):
-        
+
         while 1:
             try:
                 obj = self.livequeue.get(False)
             except StdQueue.Empty:
                 return 0
-            
+
             sendobj = obj[0] + obj[1]
             contents = pickle.loads(obj[1])
 
@@ -1018,7 +1013,7 @@ class NNTSCClient(threading.Thread):
                 return -1
 
         return 0
-       
+
     def send_released(self):
         while 1:
             try:
@@ -1032,9 +1027,9 @@ class NNTSCClient(threading.Thread):
             # Just reflect the objects directly to the client
             if self.transmit_client(sendobj) == -1:
                 return -1
-        
-        return 0    
-        
+
+        return 0
+
     def transmit_client(self, result):
         try:
             fd = self.sock.fileno()
@@ -1056,7 +1051,7 @@ class NNTSCClient(threading.Thread):
         else:
             self.outstanding = ""
         return 0
-        
+
 
     def receive_worker(self):
 
@@ -1085,13 +1080,12 @@ class NNTSCClient(threading.Thread):
 
             elif response == NNTSC_REGISTER_COLLECTION:
                 self.parent.register_collection(self.sock, result)
-                    
+
             elif response == NNTSC_HISTORY_DONE:
                 label = obj[1]
                 timestamp = obj[2]
                 if self.finish_subscribe(label, timestamp) == -1:
                     return -1
-            
             else:
                 # Response type was invalid
                 log("Received invalid response from worker thread: %d" % (response))
@@ -1120,7 +1114,7 @@ class NNTSCClient(threading.Thread):
 
         # Tell the client what version of the client API they need
         contents = pickle.dumps(NNTSC_CLIENTAPI_VERSION)
-        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_VERSION_CHECK, 
+        header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_VERSION_CHECK,
                 len(contents))
 
         self.transmit_client(header + contents)
@@ -1235,11 +1229,11 @@ class NNTSCExporter:
                 self.subscribers[s].append((sock, columns, start, end, colid))
             else:
                 self.subscribers[s] = [(sock, columns, start, end, colid)]
-            
+
             if colid in self.collections and sock in self.collections[colid]:
                 self.collections[colid][sock] += 1
             #log("Registered stream %d:%d for socket %d" % (colid, s, sock.fileno()))
-        self.sublock.release()     
+        self.sublock.release()
 
     def deregister_streams(self, colid, streams, sock):
         self.sublock.acquire()
@@ -1247,7 +1241,7 @@ class NNTSCExporter:
         for s in streams:
             if not self.subscribers.has_key(s):
                 continue
-        
+
             # Maybe consider changing this from a list to a dict?
             self.subscribers[s][:] = \
                 [x for x in self.subscribers[s] if (x[0] != sock \
@@ -1277,7 +1271,7 @@ class NNTSCExporter:
             log("Format should be (colid, timestamp)")
             self.drop_source(key)
             return -1
-        
+
         pushdata = pickle.dumps((collid, timestamp))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PUSH, len(pushdata))
 
@@ -1296,7 +1290,7 @@ class NNTSCExporter:
             if subbed == 0:
                 active[sock] = subbed
                 continue
-            
+
             try:
                 self.clients[sock]['queue'].put((header, pushdata), True, 10)
             except StdQueue.Full:
@@ -1328,7 +1322,7 @@ class NNTSCExporter:
         if not isinstance(properties, dict):
             log("Values should expressed as a dictionary")
             return -1
-        
+
         properties['stream_id'] = stream_id
 
         ns_data = pickle.dumps((coll_id, False, [properties]))
@@ -1349,7 +1343,7 @@ class NNTSCExporter:
         }
 
         active = {}
-        
+
         self.clientlock.acquire()
         for sock, subbed in self.collections[coll_id].items():
             if sock not in self.clients.keys():
@@ -1364,8 +1358,8 @@ class NNTSCExporter:
                 sock.close()
                 self.deregister_client(sock)
                 continue
-         
-            self.newstreams[stream_id]["sockets"].append(sock)   
+
+            self.newstreams[stream_id]["sockets"].append(sock)
             active[sock] = subbed
 
         self.clientlock.release()
@@ -1385,7 +1379,7 @@ class NNTSCExporter:
         if not isinstance(values, dict):
             log("Values should expressed as a dictionary")
             return -1
-        
+
         self.sublock.acquire()
         self.clientlock.acquire()
         if stream_id in self.subscribers.keys():
@@ -1397,7 +1391,7 @@ class NNTSCExporter:
                     continue
 
                 # Only export data if it was generated by the collection we
-                # are subscribed to -- this is mainly to deal with 
+                # are subscribed to -- this is mainly to deal with
                 # amp-traceroute vs amp-astraceroute which share stream ids
                 # across both collections
                 if int(col) != int(colid):
@@ -1446,7 +1440,7 @@ class NNTSCExporter:
                     except StdQueue.Full:
                         sock.close()
                         continue
-            
+
             ns['tosend'] -= 1
             if ns['tosend'] == 0:
                 del self.newstreams[stream_id]
@@ -1472,10 +1466,10 @@ class NNTSCExporter:
         #channel.basic_ack(delivery_tag = method.delivery_tag)
         if ret == -1:
             self.drop_source(key)
-    
+
         return ret
 
-    def createClient(self, clientfd): 
+    def createClient(self, clientfd):
         #log("Creating client on fd %d" % (clientfd.fileno()))
         queue = Queue(1000000)
         clientfd.setblocking(1)
@@ -1536,7 +1530,7 @@ class NNTSCExporter:
         influxconf = get_influx_config(nntsc_conf)
         if influxconf == {}:
             sys.exit(1)
-            
+
         self.dbconf = dbconf
         self.influxconf = influxconf
         self.dbtimeout = dbtimeout
@@ -1552,21 +1546,21 @@ class NNTSCExporter:
                     'nntsclive')
         else:
             self.livequeue = None
-        return 0 
+        return 0
 
     def run(self):
         # Start up our listener thread
         if self.listen_sock == None:
             log("Must successfully call configure before calling run on the exporter!")
             return
-        
+
         listenthread = NNTSCListener(self.listen_sock, self)
         listenthread.daemon = True
         listenthread.start()
-       
+
         if self.livequeue is not None:
             try:
-                self.livequeue.configure(self.sources, self.receive_source, 1, True) 
+                self.livequeue.configure(self.sources, self.receive_source, 1, True)
                 self.livequeue.run()
             except KeyboardInterrupt:
                 self.livequeue.halt_consumer()
@@ -1574,7 +1568,6 @@ class NNTSCExporter:
             except:
                 log("Unknown exception while reading from live queue")
                 raise
-         
         else:
             while 1:
                 try:
@@ -1583,7 +1576,7 @@ class NNTSCExporter:
                 #    break
                 except:
                     raise
-        
+
 
 
 class NNTSCListener(threading.Thread):
@@ -1601,10 +1594,10 @@ class NNTSCListener(threading.Thread):
                 inpready, outready, exready = select.select(listener, [], [])
             except:
                 break
-            
+
             if self.sock not in inpready:
                 continue
-            
+
             # Accept the connection
             try:
                 client, addr = self.sock.accept()
@@ -1631,7 +1624,4 @@ if __name__ == '__main__':
     exp.run()
 
 
-
-
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
-

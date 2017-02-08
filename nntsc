@@ -57,7 +57,7 @@ class DataCollector():
         except Exception, e:
             raise
 
-    def __init__(self, listen_port, config, backgrounded, exportonly, 
+    def __init__(self, listen_port, config, backgrounded, exportonly,
             querytimeout):
         if backgrounded:
             logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
@@ -84,7 +84,7 @@ class DataCollector():
         dbconf = get_nntsc_db_config(nntsc_conf)
         if dbconf == {}:
             sys.exit(1)
-            
+
         if dbconf["name"] == "":
             logger.log("No database name specified in the NNTSC configuration file")
             sys.exit(1)
@@ -101,16 +101,16 @@ class DataCollector():
         if influxconf["useinflux"]:
             logger.log("Connecting to Influx database {} on host {} with user {}".format(
                 influxconf["name"], influxconf["host"], influxconf["user"]))
-        
+
         self.processes = []
-        
+
         if not self.exportonly:
             queueid = get_nntsc_config(nntsc_conf, "liveexport", "queueid")
             if queueid == "NNTSCConfigError":
                 sys.exit(1)
             if queueid == "NNTSCConfigMissing":
                 queueid = "nntsclivequeue"
-        
+
             self.queueid = queueid
         else:
             self.queueid = None
@@ -137,7 +137,7 @@ class DataCollector():
                 p.join()
             except:
                 raise
-        
+
 
     def get_processes(self):
         return self.processes

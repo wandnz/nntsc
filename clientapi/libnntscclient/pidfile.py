@@ -13,7 +13,7 @@
 # $Id$
 
 """This code was written by Graham Poulter and distributed using the MIT
-   license. 
+   license.
 
    It was originally acquired from:
    http://code.activestate.com/recipes/577911-context-manager-for-a-daemon-pid-file/

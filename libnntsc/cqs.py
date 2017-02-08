@@ -60,7 +60,7 @@ def get_cqs(table_name, bin_size=None):
     parser = get_parser(table_name)
     if parser == None:
         return []
-    
+
     cqs = parser.get_cqs()
     if bin_size is None:
         return cqs
@@ -70,11 +70,11 @@ def get_cqs(table_name, bin_size=None):
             return cols
 
     return []
-        
+
 def build_cqs(influxdb, retention_policy="default"):
     """Builds continuous queries on influxdb"""
     parsers = []
-    
+
     parsers.append(AmpIcmpParser(None, influxdb))
     parsers.append(AmpTcppingParser(None, influxdb))
     parsers.append(AmpDnsParser(None, influxdb))
@@ -82,6 +82,6 @@ def build_cqs(influxdb, retention_policy="default"):
     parsers.append(AmpHttpParser(None, influxdb))
     parsers.append(AmpUdpstreamParser(None, influxdb))
     parsers.append(AmpTraceroutePathlenParser(None, influxdb))
-    
+
     for parser in parsers:
         parser.build_cqs(retention_policy)

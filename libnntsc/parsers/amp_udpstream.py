@@ -187,7 +187,7 @@ class AmpUdpstreamParser(NNTSCParser):
                 step = len(result['percentiles']) / 10.0
 
                 ind = 0.0
-               
+
                 for i in range(10, 110, 10):
 
                     pctname = 'jitter_percentile_%d' % i

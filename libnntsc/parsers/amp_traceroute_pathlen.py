@@ -45,8 +45,8 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
 
 
     def process_data(self, timestamp, data, source):
-        """ Process a AMP traceroute message, which can contain 1 or more 
-            sets of results 
+        """ Process a AMP traceroute message, which can contain 1 or more
+            sets of results
         """
         lengthseen = {}
 
@@ -73,7 +73,7 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
             self._extract_paths(d)
 
             # IP flag tells us if this is intended as an IP traceroute.
-            # If the flag isn't present, we're running an old ampsave 
+            # If the flag isn't present, we're running an old ampsave
             # that pre-dates AS path support so assume an IP traceroute in
             # that case
             if 'ip' not in d or d['ip'] != 0:
@@ -184,14 +184,14 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
             # Remove tailing "null hops" from our responses count
             if currentas == -1:
                 responses -= count
-        
+
         if len(rtts) == 0:
             result["hop_rtt"] = None
         else:
             result['hop_rtt'] = rtts
-       
+
         if len(aspath) == 0:
-            result["aspath"] = None 
+            result["aspath"] = None
             result["aspathlen"] = None
             result["uniqueas"] = None
             result["responses"] = None

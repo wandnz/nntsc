@@ -160,7 +160,7 @@ and their options are as follows:
                For example, '365d' will keep data for a year.
 
 [liveexport]
-  Options relating to the Rabbit queue that funnels newly collected data to 
+  Options relating to the Rabbit queue that funnels newly collected data to
   the live exporter.
 
   Available options:
@@ -171,11 +171,11 @@ and their options are as follows:
 
 [modules]
   These options are used to enable or disable NNTSC dataparsers. To enable
-  a module, set the appropriate option to "yes". To disable a module, set 
+  a module, set the appropriate option to "yes". To disable a module, set
   the option to "no".
 
   Available options:
-        amp - controls whether NNTSC accepts data from AMP. 
+        amp - controls whether NNTSC accepts data from AMP.
         lpi - controls whether NNTSC accepts data from the libprotoident
               collector.
         rrd - controls whether NNTSC can read data from RRD files.
@@ -307,7 +307,7 @@ Finally, you may run NNTSC in the foreground by omitting the '-b' option from
 the manual command given above. In this case, we strongly recommend running
 NNTSC within screen or some other persistant terminal environment.
 
-By default, the nntsc exporter will listen on port 61234 for incoming client 
+By default, the nntsc exporter will listen on port 61234 for incoming client
 connections. This can be changed using the '-p' option.
 
 Note that in all cases, the same config file must be used by both NNTSC and the

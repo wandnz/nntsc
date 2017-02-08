@@ -73,7 +73,7 @@ class NNTSCCursor(object):
         self.connect(5)
 
     def createcursor(self):
-                
+
         try:
             if self.cursorname is not None:
                 self.cursor = self.conn.cursor(self.cursorname,
@@ -136,7 +136,7 @@ class NNTSCCursor(object):
             except InterfaceError as e:
                 log(e)
             raise DBQueryException(DB_GENERIC_ERROR)
-    
+
     def closecursor(self):
         if self.cursor is None:
             return
@@ -179,7 +179,7 @@ class NNTSCCursor(object):
             log("Error while closing database cursor")
             raise DBQueryException(err)
 
-        self.cursor = None    
+        self.cursor = None
 
 
     def commit(self):
@@ -191,7 +191,7 @@ class NNTSCCursor(object):
             self.conn.commit()
         except psycopg2.extensions.QueryCanceledError:
             self.conn.rollback()
-            err = DB_QUERY_TIMEOUT        
+            err = DB_QUERY_TIMEOUT
         except psycopg2.OperationalError:
             log("Database appears to have disappeared during commit -- reconnecting")
             self.reconnect()
@@ -215,11 +215,11 @@ class NNTSCCursor(object):
                 err = DB_OPERATIONAL_ERROR
             log(e.pgerror)
             err = DB_GENERIC_ERROR
-    
+
         if err != DB_NO_ERROR:
             log("Error while committing to database")
             raise DBQueryException(err)
-            
+
 
 class DatabaseCore(object):
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
@@ -258,7 +258,7 @@ class DatabaseCore(object):
 
     def disconnect(self):
         self.basic.destroy()
-        
+
     def __del__(self):
         try:
             self.basic.commit()
@@ -279,7 +279,7 @@ class DatabaseCore(object):
 
             self.basic.commit()
             break
-    
+
     def _releasebasic(self):
         self.basic.closecursor()
 
@@ -323,7 +323,7 @@ class DatabaseCore(object):
 
         # Find the collections matching this module
 
-        self._basicquery("SELECT * from collections where module=%s", 
+        self._basicquery("SELECT * from collections where module=%s",
                     (mod,))
         streamtables = {}
 
@@ -336,7 +336,7 @@ class DatabaseCore(object):
         streams = []
         for cid, (tname, sub) in streamtables.items():
             sql = """ SELECT * FROM %s """ % (tname)
-            
+
             self._basicquery(sql, (cid,))
 
             while True:
@@ -349,11 +349,11 @@ class DatabaseCore(object):
                         continue
                     row_dict[k] = v
                 streams.append(row_dict)
-        
+
         self._releasebasic()
         return streams
-    
-    
+
+
 
 
 class DBInsert(DatabaseCore):
@@ -380,7 +380,7 @@ class DBInsert(DatabaseCore):
 
     def _streamsquery(self, query, params=None):
         self.streams.executequery(query, params)
-    
+
     def _dataquery(self, query, params=None):
         self.data.executequery(query, params)
 
@@ -405,9 +405,9 @@ class DBInsert(DatabaseCore):
                 LIMIT 1;
             $BODY$
                 LANGUAGE 'sql' IMMUTABLE;"""
-       
+
         self._basicquery(mostfunc)
- 
+
         smokefunc = """
             CREATE OR REPLACE FUNCTION _final_smoke(anyarray)
                 RETURNS numeric[] AS
@@ -421,9 +421,9 @@ class DBInsert(DatabaseCore):
                 ) as c;
             $BODY$
                 LANGUAGE 'sql' IMMUTABLE;"""
-        
+
         self._basicquery(smokefunc)
-        
+
         # we can't check IF EXISTS or use CREATE OR REPLACE, so just query it
         self._basicquery("""SELECT * from pg_proc WHERE proname='most';""")
         assert(self.basic.cursor.rowcount <= 1)
@@ -452,10 +452,10 @@ class DBInsert(DatabaseCore):
                 INITCOND='{}'
             );"""
             self._basicquery(aggfunc)
-        
+
         self._basicquery(
                 """SELECT * from pg_proc WHERE proname='smoke';""")
-        
+
         if self.basic.cursor.rowcount == 0:
             aggfunc = """
                 CREATE AGGREGATE smoke(numeric) (
@@ -465,7 +465,7 @@ class DBInsert(DatabaseCore):
                 INITCOND='{}'
             );"""
             self._basicquery(aggfunc)
-        
+
         self._releasebasic()
 
     def create_index(self, name, table, columns):
@@ -476,57 +476,57 @@ class DBInsert(DatabaseCore):
             # XXX Not ideal but people should provide properly named
             # indexes anyway!
             name = "%s_%s_idx" % (table, columns[0])
-        
+
         # Unfortunately we have to explicitly check if the index exists
-        # before attempting this because there is no CREATE INDEX IF 
+        # before attempting this because there is no CREATE INDEX IF
         # NOT EXISTS
         indexcheck = """SELECT * FROM pg_class c JOIN pg_namespace n ON
-                    n.oid = c.relnamespace WHERE 
+                    n.oid = c.relnamespace WHERE
                     c.relname = %s AND
                     n.nspname = 'public'"""
 
         self._basicquery(indexcheck, (name,))
-        
+
         if self.basic.cursor.rowcount != 0:
             # Already exists, no need to create
             return
 
         self._releasebasic()
-        
-        index = "CREATE INDEX %s ON %s" 
+
+        index = "CREATE INDEX %s ON %s"
         index += "(%s)" % (",".join(["%s"] * len(columns)))
 
         params = tuple([name] + [table] + columns)
-        
+
         # Annoying that I can't parameterise this SQL nicely
         self._streamsquery(index % params)
- 
+
 
     def build_databases(self, modules, new=False):
         if new:
             self.__delete_everything()
 
         self.create_aggregators()
-        
+
         # Function to create a sequence if it doesn't already exist
         # Borrowed from an answer on stack overflow:
         # http://stackoverflow.com/questions/11905868/check-if-sequence-exists-postgres-plpgsql
         seqfunc = """
-            CREATE OR REPLACE FUNCTION create_seq(_seq text, 
+            CREATE OR REPLACE FUNCTION create_seq(_seq text,
                     _schema text = 'public') RETURNS void AS
             $func$
             DECLARE
                _fullname text := quote_ident(_seq);
 
             BEGIN
-            -- If an object of the name exists, the first RAISE EXCEPTION 
+            -- If an object of the name exists, the first RAISE EXCEPTION
             -- raises a meaningful message immediately.
-            -- Else, the failed cast to regclass raises its own exception 
+            -- Else, the failed cast to regclass raises its own exception
             -- "undefined_table".
             -- This particular error triggers sequence creation further down.
 
             RAISE EXCEPTION 'Object >>%<< of type "%" already exists.'
-               ,_fullname 
+               ,_fullname
                ,(SELECT c.relkind FROM pg_class c
                  WHERE  c.oid = _fullname::regclass    -- error if non-existent
                 ) USING ERRCODE = '23505';
@@ -538,12 +538,12 @@ class DBInsert(DatabaseCore):
             END
             $func$  LANGUAGE plpgsql STRICT;
 
-            COMMENT ON FUNCTION create_seq(text, text) IS 
+            COMMENT ON FUNCTION create_seq(text, text) IS
                 'Create new seq if name is free.
                  $1 _seq  .. name of sequence
-                 $2 _name .. name of schema (optional; default is "public")';       
+                 $2 _name .. name of schema (optional; default is "public")';
         """
-        self._basicquery(seqfunc)       
+        self._basicquery(seqfunc)
 
         coltable = """CREATE TABLE IF NOT EXISTS collections (
                 id SERIAL PRIMARY KEY,
@@ -552,12 +552,12 @@ class DBInsert(DatabaseCore):
                 streamtable character varying NOT NULL,
                 datatable character varying NOT NULL,
                 UNIQUE (module, modsubtype))"""
-        
-        self._basicquery(coltable)       
+
+        self._basicquery(coltable)
 
         createseq = """SELECT create_seq('streams_id_seq');"""
         try:
-            self._basicquery(createseq)       
+            self._basicquery(createseq)
         except DBQueryException as e:
             # Not the best error handling, but should stop us from falling
             # over if the sequence already exists
@@ -571,24 +571,24 @@ class DBInsert(DatabaseCore):
             mod.tables(self)
 
     def get_collection_id(self, mod, subtype):
-        
+
         # Find the appropriate collection id
-        colcheck = """SELECT * FROM collections WHERE module=%s 
+        colcheck = """SELECT * FROM collections WHERE module=%s
                     AND modsubtype=%s"""
-                
+
         self._basicquery(colcheck, (mod, subtype))
 
         if self.basic.cursor.rowcount > 1:
             log("Database Error: duplicate collections for %s:%s" % (mod, subtype))
             self._releasebasic()
             return -1
-        
+
         if self.basic.cursor.rowcount == 0:
             col_id = 0
         else:
             col = self.basic.cursor.fetchone()
             col_id = col['id']
-        
+
         self._releasebasic()
         return col_id
 
@@ -596,12 +596,12 @@ class DBInsert(DatabaseCore):
 
         # Check if the collection already exists
         colid = self.get_collection_id(mod, subtype)
-        
-        if colid != 0: 
+
+        if colid != 0:
             # Collection already exists
             return
 
-        insert = """INSERT INTO collections (module, modsubtype, 
+        insert = """INSERT INTO collections (module, modsubtype,
                 streamtable, datatable) VALUES (%s, %s, %s, %s)"""
 
         self._basicquery(insert, (mod, subtype, stable, dtable))
@@ -629,41 +629,41 @@ class DBInsert(DatabaseCore):
         query = "ALTER TABLE %s ADD FOREIGN KEY (%s) REFERENCES %s(%s) ON DELETE CASCADE" % (tablename, column, foreigntable, foreigncolumn)
 
         self._streamsquery(query)
-        
+
     def __delete_everything(self):
 
         self._basicquery("""SELECT table_schema, table_name FROM
                     information_schema.tables WHERE table_schema='public'
                     ORDER BY table_schema, table_name""")
-       
+
         # XXX This may use a lot of memory :0
         rows = self.basic.cursor.fetchall()
         for r in rows:
             self._basicquery("""DROP TABLE IF EXISTS %s CASCADE""" % (r['table_name'],))
-       
+
         self._basicquery("""DROP SEQUENCE IF EXISTS "streams_id_seq" """)
         self._releasebasic()
- 
-    def update_timestamp(self, datatable, stream_ids, lasttimestamp, 
+
+    def update_timestamp(self, datatable, stream_ids, lasttimestamp,
             is_influx, first=None):
-        
+
         if is_influx:
             return
 
         dbkey = "postgres"
-        
+
         self.streamcache.update_timestamps(dbkey, datatable, stream_ids,
                 lasttimestamp)
         #log("Updated timestamp for %d streams to %d" % (len(stream_ids),
         #            lasttimestamp))
-        
+
         return
 
     def get_last_timestamp(self, table, streamid):
         lastdict = self.streamcache.fetch_all_last_timestamps("postgres",
                 table)
-        
-        if streamid not in lastdict:            
+
+        if streamid not in lastdict:
             # Nothing useful in cache, query data table for max timestamp
             # Warning, this isn't going to be fast so try to avoid doing
             # this wherever possible!
@@ -672,7 +672,7 @@ class DBInsert(DatabaseCore):
             else:
                 query = "SELECT max(timestamp) FROM %s_" % (table)
                 query += "%s"   # stream id goes in here
-                
+
                 self._basicquery(query, (streamid,))
 
                 if self.basic.cursor.rowcount != 1:
@@ -686,7 +686,7 @@ class DBInsert(DatabaseCore):
                 lastts = int(row[0])
             lastdict[streamid] = lastts
             self.streamcache.set_last_timestamps("postgres", table, lastdict)
-            
+
             self._releasebasic()
         else:
             lastts = lastdict[streamid]
@@ -703,7 +703,7 @@ class DBInsert(DatabaseCore):
         for i in range(0, len(keys)):
             if i != 0:
                 wherecl += " AND "
-            wherecl += keys[i] + "=%s" 
+            wherecl += keys[i] + "=%s"
             params += [props[keys[i]]]
 
         query = "SELECT stream_id FROM %s " % (st)
@@ -717,7 +717,7 @@ class DBInsert(DatabaseCore):
             raise DBQueryException(DB_CODING_ERROR)
 
         row = self.basic.cursor.fetchone()
-        
+
         self._releasebasic()
         return row[0]
 
@@ -730,16 +730,16 @@ class DBInsert(DatabaseCore):
         values = []
         for k,v in streamprops.iteritems():
             colstr += ', "%s"' % (k)
-            values.append(v)    
+            values.append(v)
         colstr += ") "
-        
+
         params = tuple(values)
         insert = "INSERT INTO %s " % (tablename)
         insert += colstr
         insert += "VALUES (nextval('streams_id_seq'), %s)" % \
                 (",".join(["%s"] * len(values)))
         insert += " RETURNING stream_id"
-        
+
         try:
             self._streamsquery(insert, params)
         except DBQueryException as e:
@@ -765,12 +765,12 @@ class DBInsert(DatabaseCore):
         # table as a template
         if (createdatatable):
             self.clone_table(datatable, newid)
- 
+
         # Resist the urge to commit streams or do any live exporting here!
         #
         # Some collections have additional steps that they
         # need to perform before the new tables etc should be committed.
-        # For example, amp traceroute needs to create the corresponding 
+        # For example, amp traceroute needs to create the corresponding
         # path table. If you commit here then get interrupted, there will be
         # a stream without a matching path table and NNTSC will error on
         # restart.
@@ -783,36 +783,36 @@ class DBInsert(DatabaseCore):
     def custom_insert(self, customsql, values):
         self._dataquery(customsql, values)
         result = self.data.cursor.fetchone()
-        return result     
+        return result
 
     def insert_data(self, tablename, collection, stream, ts, result,
             casts = {}):
-   
+
         colstr = "(stream_id, timestamp"
         valstr = "%s, %s"
         values = [stream, ts]
-        
+
         for k,v in result.iteritems():
             colstr += ', "%s"' % (k)
-            values.append(v)    
+            values.append(v)
 
             if k in casts:
                 valstr += ", CAST(%s AS " + casts[k] + ")"
             else:
                 valstr += ", %s"
         colstr += ") "
-        
+
         params = tuple(values)
         insert = "INSERT INTO %s_%s " % (tablename, stream)
         insert += colstr
         insert += "VALUES (%s)" % (valstr)
 
         self._dataquery(insert, params)
-    
+
     def _columns_sql(self, columns):
 
         basesql = ""
-        
+
         for c in columns:
             if "name" not in c:
                 log("Unnamed column when creating streams table %s -- skipping" % (name))
@@ -829,7 +829,7 @@ class DBInsert(DatabaseCore):
 
             if "default" in c:
                 basesql += "DEFAULT %s " % (c["default"])
-            
+
             if "unique" in c and c["unique"] == True:
                 basesql += "UNIQUE "
 
@@ -840,11 +840,11 @@ class DBInsert(DatabaseCore):
         coltext = self._columns_sql(columns)
 
         # Remove the leading comma
-        basesql += coltext[1:]    
-    
+        basesql += coltext[1:]
+
         if len(uniquecols) != 0:
             basesql += ", UNIQUE ("
-    
+
             for i in range(0, len(uniquecols)):
                 if i != 0:
                     basesql += ", "
@@ -857,10 +857,10 @@ class DBInsert(DatabaseCore):
         self._releasebasic()
 
     def create_data_table(self, name, columns, indexes=[]):
- 
+
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
 
-        basesql += "stream_id integer NOT NULL, timestamp integer NOT NULL" 
+        basesql += "stream_id integer NOT NULL, timestamp integer NOT NULL"
 
         basesql += self._columns_sql(columns)
         basesql += ")"
@@ -868,7 +868,7 @@ class DBInsert(DatabaseCore):
         self._basicquery(basesql)
         self._releasebasic()
 
-        # Automatically create an index on timestamp      
+        # Automatically create an index on timestamp
         self.create_index("%s_%s_idx" % (name, "timestamp"), name, \
                     ["timestamp"])
 
@@ -881,7 +881,7 @@ class DBInsert(DatabaseCore):
 
         if len(uniquecols) != 0:
             basesql += ", UNIQUE ("
-    
+
             for i in range(0, len(uniquecols)):
                 if i != 0:
                     basesql += ", "

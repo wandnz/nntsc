@@ -24,7 +24,7 @@ class StreamCache(object):
     def update_timestamps(self, db, collection, streamids, last, first=None):
         if first == None and last == None:
             return
-       
+
         if last is not None:
             self._update_last_timestamp(db, collection, streamids, last)
 
@@ -33,7 +33,7 @@ class StreamCache(object):
         # than update the cache every time we create a new stream
         #if first is not None:
         #    self._update_first_timestamp(collection, streamid, first)
-        
+
     def _update_first_timestamp(self, db, collection, streamid, first):
         # Always fetch first timestamps, because another process might
         # set the first timestamp instead
@@ -41,7 +41,7 @@ class StreamCache(object):
         coldict[streamid] = first
         self.set_first_timestamps(db, collection, coldict)
 
-    def _update_last_timestamp(self, db, collection, streamids, last):    
+    def _update_last_timestamp(self, db, collection, streamids, last):
         if collection not in self.collections:
             coldict = self._fetch_dict(db, collection, "last")
             self.collections[collection] = {"streams":coldict}
@@ -57,7 +57,7 @@ class StreamCache(object):
             self.set_last_timestamps(db, collection, coldict)
             self.collections[collection]['laststore'] = time.time()
 
-        # Write timestamps back to the cache every 5 mins rather than 
+        # Write timestamps back to the cache every 5 mins rather than
         # every time we update a stream, otherwise this gets very slow
         if now - self.collections[collection]['laststore'] >= 60:
             self.set_last_timestamps(db, collection, coldict)
@@ -74,8 +74,8 @@ class StreamCache(object):
     def _fetch_dict(self, db, collection, style):
 
         key = self._dict_cache_key(db, collection, style)
-       
-        #print "Fetching using key", key, time.time() 
+
+        #print "Fetching using key", key, time.time()
         coldict = {}
         with self.mcpool.reserve() as mc:
             try:
@@ -90,15 +90,15 @@ class StreamCache(object):
 
     def set_first_timestamps(self, db, collection, coldict):
         self._set_timestamps(db, collection, coldict, "first")
-    
+
     def set_last_timestamps(self, db, collection, coldict):
         self._set_timestamps(db, collection, coldict, "last")
 
     def _set_timestamps(self, db, collection, coldict, style):
         key = self._dict_cache_key(db, collection, style)
-    
+
         tostore = zlib.compress(cPickle.dumps(coldict), 1)
-        #print "Storing using key", key, time.time() 
+        #print "Storing using key", key, time.time()
         with self.mcpool.reserve() as mc:
             try:
                 mc.set(key, tostore, self.cachetime)
@@ -106,7 +106,7 @@ class StreamCache(object):
                 log("Warning: pylibmc error while storing collection timestamps")
                 log(e)
 
-    
+
     def _dict_cache_key(self, db, collection, style):
         return "nntsc_%s_%s_%s_%s" % (self.nntscid, db, str(collection), style)
 

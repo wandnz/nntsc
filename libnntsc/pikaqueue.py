@@ -23,7 +23,7 @@ class PikaNNTSCException(Exception):
             return "NNTSC Exception encountered while reading Rabbit Queue -- halting"
 
 class PikaBasicAsync(object):
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword, 
+    def __init__(self, exchange, queuename, host, port, ssl, user, pword,
             durable):
         self._connection = None
         self._channel = None
@@ -48,7 +48,7 @@ class PikaBasicAsync(object):
                         connection_attempts=25), self._pikaConnectionOpen,
                         stop_ioloop_on_close=False)
         return connection
-    
+
     def connect(self):
         self._connection = self._pikaConnect(self._host, self._port, self._ssl,
                 self._credentials)
@@ -66,7 +66,7 @@ class PikaBasicAsync(object):
                 continue
 
             break
-    
+
     def close_channel(self):
         if self._channel:
             self._channel.close()
@@ -74,9 +74,9 @@ class PikaBasicAsync(object):
     def close_connection(self):
         self._closing = True
         self._connection.close()
-    
+
     def _pikaCancelled(self, unused):
-        self.close_channel()    
+        self.close_channel()
 
     def _pikaConnectionOpen(self, unused):
         self._connection.add_on_close_callback(self._pikaConnectionClosed)
@@ -98,13 +98,13 @@ class PikaBasicAsync(object):
         self._channel.add_on_close_callback(self._pikaChannelClosed)
 
         if self._exchangename != '':
-            self._channel.exchange_declare(self._pikaExchangeDeclared, 
+            self._channel.exchange_declare(self._pikaExchangeDeclared,
                     exchange=self._exchangename,
                     type='direct')
         else:
-            self._channel.queue_declare(self._pikaQueueDeclared, 
+            self._channel.queue_declare(self._pikaQueueDeclared,
                     self._queuename, durable = self._durable)
-        
+
     def _pikaChannelClosed(self, channel, replycode, replytext):
         logger.log("Pika Channel was closed: %s %s" % (replycode, replytext))
         #if not self._closing:
@@ -115,14 +115,14 @@ class PikaBasicAsync(object):
                 durable = self._durable)
 
     def _pikaQueueDeclared(self, methodframe):
-        return 
+        return
 
     def run(self):
         self.connect()
         self._connection.ioloop.start()
 
 class PikaPublisher(PikaBasicAsync):
-    
+
     def __init__(self, exchange, queuename, key, host, port, ssl, user, pword,
             sourcequeue, durable=True):
         super(PikaPublisher, self).__init__(exchange, queuename, host, port,
@@ -137,7 +137,7 @@ class PikaPublisher(PikaBasicAsync):
         self._stopping = True
         self.close_channel()
         self.close_connection()
-        
+
         # This will cause the IO loop to restart and close our connection
         # to rabbitMQ nicely
         self._connection.ioloop.start()
@@ -155,22 +155,21 @@ class PikaPublisher(PikaBasicAsync):
         while 1:
             if self._stopping:
                 return
-           
-            
+
             try:
                 pubstring = self._outstanding.get(True, 1)
             except StdQueue.Empty:
                 continue
-            
+
             msgtype, content = pickle.loads(pubstring)
             if self._channel is None:
-                return    
+                return
 
             self._channel.basic_publish(self._exchangename, self._pubkey,
-                    pubstring, 
+                    pubstring,
                     pika.BasicProperties(delivery_mode=1,
                         content_type = "text/plain"))
-    
+
 
 class PikaPubQueue(object):
     def __init__(self, sourcequeue):
@@ -189,13 +188,13 @@ class PikaPubQueue(object):
     def publishLiveData(self, colname, stream, ts, result):
         content = (0, (colname, stream, ts, result))
         pubstring = pickle.dumps(content)
-        
+
         try:
             self._outstanding.put(pubstring, True, 10)
         except StdQueue.Full:
             logger.log("Internal publishing queue has reached capacity!")
             return -1
-        
+
         return 0
 
     def publishPush(self, colid, ts):
@@ -210,7 +209,7 @@ class PikaPubQueue(object):
 
 
 class PikaConsumer(PikaBasicAsync):
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword, 
+    def __init__(self, exchange, queuename, host, port, ssl, user, pword,
             durable=True):
         super(PikaConsumer, self).__init__(exchange, queuename, host, port,
                 ssl, user, pword, durable)
@@ -220,12 +219,12 @@ class PikaConsumer(PikaBasicAsync):
         self._prefetch = 0
         self.callback = None
         self.noack = False
-    
+
     def halt_consumer(self):
         self._closing = True
         if self._channel:
             self._channel.basic_cancel(self._pikaCancelled, self._consumer_tag)
-        
+
         # This will cause the IO loop to restart and close our connection
         # to rabbitMQ nicely
         self._connection.ioloop.start()
@@ -262,17 +261,17 @@ class PikaConsumer(PikaBasicAsync):
             self._channel.basic_qos(prefetch_count=self._prefetch)
         self._channel.add_on_cancel_callback(self._pikaCancelled)
         logger.log("Started consuming from %s" % (self._queuename))
-        self._consumer_tag = self._channel.basic_consume(self.callback, 
+        self._consumer_tag = self._channel.basic_consume(self.callback,
                 self._queuename, self.noack)
 
-    
+
     def configure(self, keys, callback, prefetch, noack=False):
         self._keys = keys[:]
         self._unbound = keys[:]
         self.callback = callback
         self._prefetch = prefetch
-        self.noack = noack 
-    
+        self.noack = noack
+
 
 def parseExportOptions(conf):
     username = get_nntsc_config(conf, "liveexport", "username")
@@ -291,15 +290,14 @@ def parseExportOptions(conf):
         return None, None, None
 
 
-    return username, password, port 
+    return username, password, port
 
 def startPubThread(conf, key, exchange, queuename, src):
     username, password, port = parseExportOptions(conf)
     if username == None:
         return None
 
-    
-    exporter = PikaPublisher(exchange, queuename, key, 'localhost', port, 
+    exporter = PikaPublisher(exchange, queuename, key, 'localhost', port,
             False, username, password, src, False)
     if exporter == None:
         logger.log("Failed to create live exporter for %s -- no live export will occur" % (queuename))
@@ -328,7 +326,7 @@ def initExportConsumer(conf, queuename, exchange):
     if username == None:
         return None
 
-    consumer = PikaConsumer(exchange, queuename, 'localhost', port, False, 
+    consumer = PikaConsumer(exchange, queuename, 'localhost', port, False,
             username, password, False)
     if consumer == None:
         logger.log("Failed to create live consumer for %s -- no live export will occur" % (queuename))

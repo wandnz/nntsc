@@ -33,11 +33,11 @@ class RRDSmokepingParser(NNTSCParser):
         self.module = "smokeping"
 
         self.streamcolumns = [
-            {"name":"filename", "type":"varchar", "null":False}, 
-            {"name":"source", "type":"varchar", "null":False}, 
-            {"name":"host", "type":"varchar", "null":False}, 
-            {"name":"minres", "type":"integer", "null":False, "default":"300"}, 
-            {"name":"highrows", "type":"integer", "null":False, 
+            {"name":"filename", "type":"varchar", "null":False},
+            {"name":"source", "type":"varchar", "null":False},
+            {"name":"host", "type":"varchar", "null":False},
+            {"name":"minres", "type":"integer", "null":False, "default":"300"},
+            {"name":"highrows", "type":"integer", "null":False,
                     "default":"1008"}
         ]
 
@@ -81,7 +81,7 @@ class RRDSmokepingParser(NNTSCParser):
                 kwargs['median'] = None
             else:
                 kwargs['median'] = round(float(line[2]) * 1000.0, 6)
-            
+
         kwargs['pings'] = []
 
         for i in range(3, len(line)):
@@ -97,4 +97,3 @@ class RRDSmokepingParser(NNTSCParser):
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
-

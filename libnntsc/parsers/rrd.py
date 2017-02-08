@@ -43,7 +43,6 @@ class RRDModule:
         if dbconf == {}:
             sys.exit(1)
 
-    
         self.db = DBInsert(dbconf["name"], dbconf["user"], dbconf["pass"],
                 dbconf["host"], cachetime=dbconf['cachetime'])
         self.db.connect_db(15)
@@ -151,20 +150,20 @@ class RRDModule:
                 parser = self.muninparser
             else:
                 break
-                
+
             parser.process_data(r['stream_id'], current, line)
             if datatable is None:
                 datatable = parser.get_data_table_name()
-            
+
             if r['lasttimestamp'] is None or current > r['lasttimestamp']:
                 r['lasttimestamp'] = current
                 update_needed = True
-                
+
             current += step
 
         if not update_needed:
             return
-        
+
         self.db.commit_data()
 
         if datatable is not None:
@@ -183,7 +182,7 @@ class RRDModule:
                         return RRD_RETRY
                     if e.code == DB_INTERRUPTED:
                         return RRD_HALT
-                    # Ignore other DB errors as they represent bad data or 
+                    # Ignore other DB errors as they represent bad data or
                     # database code. Try to carry on to the next RRD instead.
                     continue
         return RRD_CONTINUE
@@ -193,7 +192,7 @@ class RRDModule:
         logger.log("Starting RRD module")
         while True:
             result = self.rrdloop()
-            
+
             if result == RRD_RETRY:
                 self.revert_rrds()
                 time.sleep(10)
@@ -281,14 +280,14 @@ def insert_rrd_streams(db, conf):
                     parser = munin
                 else:
                     parser = None
-                
-                try: 
-                    create_rrd_stream(db, subtype, parameters, index, 
+
+                try:
+                    create_rrd_stream(db, subtype, parameters, index,
                        files, parser)
                 except DBQueryException as e:
                     logger.log("Exception while creating RRD streams, aborting")
                     return
-                    
+
             parameters = {}
             subtype = x[1]
             index += 1
@@ -303,9 +302,9 @@ def insert_rrd_streams(db, conf):
             parser = munin
         else:
             parser = None
-        
-        try: 
-            create_rrd_stream(db, subtype, parameters, index, 
+
+        try:
+            create_rrd_stream(db, subtype, parameters, index,
                files, parser)
         except DBQueryException as e:
             logger.log("Exception while creating RRD streams, aborting")

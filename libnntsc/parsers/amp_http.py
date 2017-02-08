@@ -45,8 +45,8 @@ class AmpHttpParser(NNTSCParser):
             {"name":"caching", "type":"boolean", "null":False},
         ]
 
-        self.uniquecolumns = ['source', 'destination', 'max_connections', 
-                'max_connections_per_server', 
+        self.uniquecolumns = ['source', 'destination', 'max_connections',
+                'max_connections_per_server',
                 "max_persistent_connections_per_server",
                 "pipelining_max_requests",
                 "persist", "pipelining", "caching"]
@@ -76,7 +76,7 @@ class AmpHttpParser(NNTSCParser):
 
     def _stream_key(self, stream_data):
         src = str(stream_data["source"])
-        
+
         if 'url' in stream_data:
             dest = str(stream_data["url"])
         else:
@@ -112,7 +112,7 @@ class AmpHttpParser(NNTSCParser):
 
     def _mangle_result(self, data):
         # Our columns are slightly different to the names that AMPsave uses,
-        # so we'll have to mangle them to match what we're expecting 
+        # so we'll have to mangle them to match what we're expecting
         key = self._stream_key(data)
 
         mangled = {}
@@ -133,7 +133,7 @@ class AmpHttpParser(NNTSCParser):
         if data['duration'] is None:
             mangled['duration'] = None
         else:
-            mangled['duration'] = int(data['duration']) 
+            mangled['duration'] = int(data['duration'])
         mangled['bytes'] = data['bytes']
 
         return mangled, key

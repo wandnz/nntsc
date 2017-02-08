@@ -91,7 +91,7 @@ def get_influx_config(nntsc_config):
         dbuser = None
     dbpass = get_nntsc_config(nntsc_config, 'influx', 'password')
     if dbpass == "NNTSCConfigMissing":
-        dbpass = None    
+        dbpass = None
     dbhost = get_nntsc_config(nntsc_config, 'influx', 'host')
     if dbhost == "NNTSCConfigMissing":
         dbhost = "localhost"
@@ -110,7 +110,7 @@ def get_influx_config(nntsc_config):
     keeprollups = get_nntsc_config(nntsc_config, 'influx', 'keeprollups')
     if keeprollups == "NNTSCConfigMissing":
         keeprollups = "inf"
-    
+
 
     if "NNTSCConfigError" in [useinflux,dbname,dbuser,dbpass,dbhost,dbport,keepdata,
                               keeprollups]:
@@ -119,7 +119,7 @@ def get_influx_config(nntsc_config):
     return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass,
             "port":dbport,"useinflux":useinflux,"keepdata":keepdata,
             "keeprollups":keeprollups}
-    
+
 
 def get_nntsc_db_config(nntsc_config):
 

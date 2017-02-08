@@ -23,6 +23,6 @@ class QueryBuilder:
             querystring += self.clauses[cl][0] + " "
 
         return querystring, tuple(paramlist)
-        
+
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -98,7 +98,7 @@ class LPIModule:
         if liveconf:
             self.exporter, self.pubthread = initExportPublisher(nntsc_conf, \
                     routekey, exchange, queueid)
-        
+
             self.bytesparser.add_exporter(self.exporter)
             self.packetsparser.add_exporter(self.exporter)
             self.usersparser.add_exporter(self.exporter)
@@ -212,23 +212,23 @@ class LPIModule:
                     try:
                         self.process_stats(data)
                     except DBQueryException as e:
-                        # TODO Store results locally so that we don't lose data 
+                        # TODO Store results locally so that we don't lose data
                         # when we lose the database
                         if e.code == DB_OPERATIONAL_ERROR:
                             logger.log("DB disappeared while inserting LPI data")
                             logger.log("LPI data potentially lost")
                             continue
-                   
+
                         if e.code == DB_INTERRUPTED:
                             logger.log("Interrupt while processing LPI data")
                             break
-                        
+
                         if e.code == DB_GENERIC_ERROR:
                             logger.log("Database error while processing LPI data")
                             break
-                         
+
                         if e.code == DB_DATA_ERROR:
-                            # Bad data -- reconnect to server  
+                            # Bad data -- reconnect to server
                             logger.log("LPIModule: Invalid Statistics Data")
                             break
 
@@ -263,7 +263,7 @@ def tables(db):
 
     parser = LPIBytesParser(db)
     parser.register()
-        
+
     parser = LPIPacketsParser(db)
     parser.register()
 

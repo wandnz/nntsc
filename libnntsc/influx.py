@@ -45,13 +45,13 @@ class InfluxConnection(object):
                  dbport="8086", timeout=None, cachetime=0):
 
         self.dbname = dbname
-        
+
         if dbhost == "" or dbhost == None:
             dbhost = "localhost"
 
         if dbport == "" or dbport == None:
             dbport = 8086
-            
+
         if dbpass == "":
             dbpass = None
 
@@ -98,7 +98,7 @@ class InfluxConnection(object):
 class InfluxInsertor(InfluxConnection):
     """
     A class for inserting data into the influx database
-    """            
+    """
     def __init__(self, dbname, user, password, host, port, timeout=None):
         super(InfluxInsertor, self).__init__(dbname, user, password, host, port, timeout)
         self.to_write = []
@@ -144,8 +144,6 @@ class InfluxInsertor(InfluxConnection):
             if cq[0] not in countcols:
                 countcols.append(cq[0])
                 aggstring += ", count({}) AS magiccount_{}".format(cq[0], cq[0].replace('"', ''))
-
-
 
         query = """ DROP CONTINUOUS QUERY {0} ON {1}
                 """.format(daycqname, self.dbname)
@@ -223,7 +221,7 @@ class InfluxInsertor(InfluxConnection):
             self.cqs_in_db = []
         except Exception as e:
             self.handler(e)
-        
+
 class InfluxSelector(InfluxConnection):
     """A class for selecting things from influx database"""
     def __init__(self, thread_id, dbname, user, password, host, port, timeout):
@@ -304,7 +302,7 @@ class InfluxSelector(InfluxConnection):
                     rows.append(result)
 
             yield(rows, label, "timestamp", 0, None)
-    
+
 
     def _was_stream_active(self, sid, table, start, end):
 
@@ -381,7 +379,7 @@ class InfluxSelector(InfluxConnection):
 
         results = []
         labels_and_rows = {}
-    
+
         for label, streams in labels.iteritems():
             if len(streams) == 0:
                 results.append({'data': None, 'label': label})
@@ -460,7 +458,7 @@ class InfluxSelector(InfluxConnection):
                         finaldata[cq[2]] = None
                 elif cq[1] in ['stddev']:
                     countcol = labels_and_rows[k]["magiccount_" + cq[0]]
-                   
+
                     sumvar = 0.0
                     sumn = 0
                     for i in range(0, len(v[cq[2]])):
@@ -511,8 +509,8 @@ class InfluxSelector(InfluxConnection):
                 labels -- a dictionary of label to streams mappings, describing
                          which streams to query and what labels to assign to
                          the results.
-                aggcols -- a list of tuples describing the columns to 
-                           aggregate and the aggregation function to apply to 
+                aggcols -- a list of tuples describing the columns to
+                           aggregate and the aggregation function to apply to
                            that column
                 start_time -- a timestamp describing the start of the
                               time period that data is required for. If
@@ -535,7 +533,7 @@ class InfluxSelector(InfluxConnection):
         """
 
         self.qb.reset()
-        
+
         self.table = table
         self.aggcols = aggcols
 
@@ -660,7 +658,7 @@ class InfluxSelector(InfluxConnection):
 
         # Pack up the smoke array to be sent back
         aggs = [k[1] for k in self.aggcols]
-        
+
         if "count" in aggs:
             # Check we got any results
             index = aggs.index("count")
@@ -669,7 +667,7 @@ class InfluxSelector(InfluxConnection):
             if result[label] == 0:
                 # We got no results, so ignore bin
                 return {}
-        
+
         if "smokearray" in aggs:
             index = aggs.index("smokearray")
             meas = self.aggcols[index][0]
@@ -730,7 +728,7 @@ class InfluxSelector(InfluxConnection):
             if key in result and result[key] is None:
                 del result[key]
         return result
-        
+
     def _meas_duplicated(self, meas):
         """True if one measure is being aggregated more than once"""
         count = 0

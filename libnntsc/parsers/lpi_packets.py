@@ -30,7 +30,7 @@ from libnntsc.parsers.lpi_bytes import LPIBytesParser
 
 class LPIPacketsParser(LPIBytesParser):
     def __init__(self, db):
-        super(LPIPacketsParser, self).__init__(db)    
+        super(LPIPacketsParser, self).__init__(db)
 
         self.streamtable = "streams_lpi_packets"
         self.datatable = "data_lpi_packets"

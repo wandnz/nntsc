@@ -25,7 +25,7 @@ class DBSelector(DatabaseCore):
     def __init__(self, uniqueid, dbname, dbuser=None, dbpass=None, dbhost=None,
                  timeout=0, cachetime=0):
 
-        super(DBSelector, self).__init__(dbname, dbuser, dbpass, dbhost, 
+        super(DBSelector, self).__init__(dbname, dbuser, dbpass, dbhost,
                 False, False, timeout, cachetime)
 
         self.qb = QueryBuilder()
@@ -44,7 +44,7 @@ class DBSelector(DatabaseCore):
         self.cursorname = "cursor_" + uniqueid
 
         self.data = NNTSCCursor(self.connstr, False, self.cursorname)
-                
+
     def connect_db(self, retrywait):
         if self.data.connect(retrywait) == -1:
             return -1
@@ -73,12 +73,12 @@ class DBSelector(DatabaseCore):
                     continue
                 else:
                     raise
-            
+
             break
 
     def release_data(self):
         self.data.closecursor()
- 
+
     def get_collection_schema(self, colid):
         """ Fetches the column names for both the stream and data tables
             for the given collection.
@@ -131,7 +131,7 @@ class DBSelector(DatabaseCore):
         tname = coldata['streamtable']
         sql = """SELECT * FROM %s WHERE stream_id > %s""" \
                  % (tname, "%s")
-      
+
         self._basicquery(sql, (minid,))
         selected = []
         while True:
@@ -144,7 +144,7 @@ class DBSelector(DatabaseCore):
                     continue
                 stream_dict[k] = v
             selected.append(stream_dict)
-        
+
         self._releasebasic()
         return selected
 
@@ -193,8 +193,8 @@ class DBSelector(DatabaseCore):
                 col -- the id of the collection to query
                 labels -- a dictionary of labels and their corresponding
                           stream ids
-                aggcols -- a list of tuples describing the columns to 
-                           aggregate and the aggregation function to apply to 
+                aggcols -- a list of tuples describing the columns to
+                           aggregate and the aggregation function to apply to
                            that column
                 start_time -- a timestamp describing the start of the
                               time period that data is required for. If
@@ -221,7 +221,7 @@ class DBSelector(DatabaseCore):
             1, 2 and 3 from collection 1 for a given week:
 
                 for row, tscol, binsize in db.select_aggregated_data(1,
-                        {'stream1':[1], 'stream2':[2], 'stream3':[3]}, 
+                        {'stream1':[1], 'stream2':[2], 'stream3':[3]},
                         {'value':'avg'}, 1380758400, 1381363200, None,
                         60 * 60):
                     process_row(row)
@@ -288,7 +288,7 @@ class DBSelector(DatabaseCore):
         self.qb.add_clause("innersel", innselclause, [])
 
         self._generate_where(start_time, stop_time)
-        
+
         # Constructing the outer SELECT query, which will aggregate across
         # each label to find the aggregate values
         outselclause = "SELECT nntsclabel"
@@ -326,7 +326,7 @@ class DBSelector(DatabaseCore):
             if len(pgstreams) > 0:
                 self._generate_from(table, label, pgstreams, streamtable)
 
-                order = ["outsel", "innersel", "activestreams", "activejoin", 
+                order = ["outsel", "innersel", "activestreams", "activejoin",
                         "union", "joincondition", "wheretime", "outselend",
                         "outgroup"]
                 query, params = self.qb.create_query(order)
@@ -336,7 +336,6 @@ class DBSelector(DatabaseCore):
                 except DBQueryException as e:
                     yield(None, label, None, None, e)
 
- 
                 fetched = self._query_data_generator()
                 for rows, errcode in fetched:
 
@@ -353,7 +352,7 @@ class DBSelector(DatabaseCore):
             if influxdb is None or table in traceroute_tables:
                 continue
 
-            for row in influxdb.select_aggregated_data(table, 
+            for row in influxdb.select_aggregated_data(table,
                     {label:streams}, aggcols, influx_start, stop_time, binsize):
                 yield row
 
@@ -432,14 +431,13 @@ class DBSelector(DatabaseCore):
                 yield row
             return
 
-
         pg_selectcols = selectcols[:]
         # These columns are important so include them regardless
         if 'timestamp' not in pg_selectcols:
             pg_selectcols.append('timestamp')
         while 'stream_id' in pg_selectcols:
             pg_selectcols.remove('stream_id')
-        
+
         pg_selectcols.append("activestreams.stream_id")
         pg_selectcols.append("nntsclabel")
 
@@ -461,7 +459,7 @@ class DBSelector(DatabaseCore):
         self._generate_where(start_time, stop_time)
 
         # Order the results both chronologically and by stream id
-        orderclause = " ORDER BY nntsclabel, timestamp " 
+        orderclause = " ORDER BY nntsclabel, timestamp "
         self.qb.add_clause("order", orderclause, [])
 
         for label, streams in labels.iteritems():
@@ -504,7 +502,7 @@ class DBSelector(DatabaseCore):
                 yield row
 
     def _datatable_exists(self, table, sid):
-        
+
         query = """SELECT EXISTS ( SELECT 1 FROM pg_catalog.pg_class c
                    WHERE c.relname = %s )"""
         tname = table + "_" + str(sid)
@@ -584,7 +582,6 @@ class DBSelector(DatabaseCore):
         return True
 
 
-
     def _generate_label_case(self, label, stream_ids):
         """ Forms a CASE statement for an SQL query that converts all stream
             ids into the label to which they belong
@@ -633,12 +630,12 @@ class DBSelector(DatabaseCore):
             raise DBQueryException(DB_CODING_ERROR)
         else:
             row = self.basic.cursor.fetchone()
-        
+
         if row[0] == None:
             ts = 0
         else:
             ts = int(row[0])
-        
+
         self._releasebasic()
         self.dbqueries += 1
         return ts
@@ -663,7 +660,7 @@ class DBSelector(DatabaseCore):
         # get all stream ids that are active in the period
         caseparams = []
         active = "FROM ((SELECT stream_id, CASE "
-        
+
         if len(streams) > 0:
             active += " WHEN stream_id in (%s)" % (
                 ",".join(["%s"] * len(streams)))
@@ -672,9 +669,9 @@ class DBSelector(DatabaseCore):
             caseparams += streams
             caseparams.append(label)
         active += " END as nntsclabel FROM %s " % (streamtable)
-       
+
         #print "Querying for streams", len(uniquestreams), time.time()
-        
+
         active += "WHERE stream_id in ("
         count = len(uniquestreams)
         for i in range(0, count):
@@ -690,7 +687,6 @@ class DBSelector(DatabaseCore):
         joincond = "ON dataunion.stream_id = activestreams.stream_id)"
         self.qb.add_clause("joincondition", joincond, [])
 
-
         if table in traceroute_tables:
             amp_traceroute.generate_union(self.qb, table, uniquestreams)
         else:
@@ -698,10 +694,10 @@ class DBSelector(DatabaseCore):
 
     def _generate_where(self, start, end):
         """ Forms a WHERE clause for an SQL query based on a time period """
-       
+
         sql = " WHERE timestamp >= %s AND timestamp <= %s "
         self.qb.add_clause("wheretime", sql, [start, end])
-        return "wheretime" 
+        return "wheretime"
 
     def _get_data_table(self, col):
         """ Finds the data table for a given collection
@@ -763,11 +759,10 @@ class DBSelector(DatabaseCore):
         for i in range(0, len(selcols)):
             cn = selcols[i]
 
-            
             if table in traceroute_tables:
                 # Include columns from other tables that amp-traceroute
-                # joins with. 
-                cn = amp_traceroute.sanitise_column(cn) 
+                # joins with.
+                cn = amp_traceroute.sanitise_column(cn)
                 if cn is not None:
                     sanitised.append(cn)
             else:
@@ -808,10 +803,10 @@ class DBSelector(DatabaseCore):
             aggcols.append(colclause)
 
         return aggcols
-    
+
     def _filter_aggregation_columns(self, table, columns, aggcols):
         keys = [k[0] for k in aggcols]
-        
+
         filtered = []
         for k,v in aggcols:
             if table in traceroute_tables:
@@ -824,7 +819,7 @@ class DBSelector(DatabaseCore):
                     filtered.append((k,v))
 
         return filtered
-      
+
     # This generator is called by a generator function one level up, but
     # nesting them all seems to work ok
     def _query_data_generator(self):
@@ -832,7 +827,7 @@ class DBSelector(DatabaseCore):
             try:
                 fetched = self.data.cursor.fetchmany(100)
             except psycopg2.extensions.QueryCanceledError:
-                yield None, DB_QUERY_TIMEOUT 
+                yield None, DB_QUERY_TIMEOUT
             except psycopg2.OperationalError:
                 yield None, DB_OPERATIONAL_ERROR
             except psycopg2.ProgrammingError as e:
@@ -853,7 +848,7 @@ class DBSelector(DatabaseCore):
 
             if fetched == []:
                 break
-            
+
             yield fetched, DB_NO_ERROR
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

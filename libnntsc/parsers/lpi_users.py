@@ -85,7 +85,7 @@ class LPIUsersParser(LPIBytesParser):
         props['freq'] = data['freq']
         props['protocol'] = protocol
 
-        key = (props['source'], props['freq'], props['protocol'], 
+        key = (props['source'], props['freq'], props['protocol'],
                 props['metric'])
         return props, key
 

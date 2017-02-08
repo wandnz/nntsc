@@ -11,7 +11,7 @@ PIDFILE=/tmp/nntsc.pid
 export PATH=$PATH
 
 if test -f /etc/default/nntsc; then
-	. /etc/default/nntsc 
+	. /etc/default/nntsc
 fi
 
 test -f $CONF || exit 0
@@ -24,7 +24,7 @@ case "$1" in
   	echo "Starting $NAME"
 	start-stop-daemon --quiet --start --exec $DAEMON \
 		-- -P $PIDFILE -C $CONF -b
-	
+
 	if [ $? -ne 0 ]; then
 		echo "Failed to start $NAME"
 	else
@@ -53,6 +53,3 @@ case "$1" in
 esac
 
 exit 0
-
-	
-

@@ -87,22 +87,22 @@ class LPIBytesParser(NNTSCParser):
         key = (props['source'], props['user'], props['dir'], props['freq'],
                 props['protocol'])
         return props, key
-    
+
     def _result_dict(self, val):
         return {'bytes':val}
-        
+
     def process_data(self, protomap, data):
         done = []
-        
+
         for p, val in data['results'].items():
             if p not in protomap:
                 logger.log("LPI Bytes: Unknown protocol id: %u" % (p))
                 return DB_DATA_ERROR
-            
+
             streamparams, key = self._stream_properties(protomap[p], data)
-        
+
             if key is None:
-                logger.log("Failed to determine stream for %s result" % 
+                logger.log("Failed to determine stream for %s result" %
                         (self.colname))
                 return DB_DATA_ERROR
 
@@ -121,7 +121,7 @@ class LPIBytesParser(NNTSCParser):
 
             self.insert_data(streamid, data['ts'], self._result_dict(val))
             done.append(streamid)
-        
+
         self.db.update_timestamp(self.datatable, done, data['ts'])
-    
+
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -32,15 +32,15 @@ class RRDMuninbytesParser(NNTSCParser):
         self.colname = "rrd_muninbytes"
         self.source = "rrd"
         self.module = "muninbytes"
-        
-        self.streamcolumns = [ 
+
+        self.streamcolumns = [
             {"name":"filename", "type":"varchar", "null":False},
             {"name":"switch", "type":"varchar", "null":False},
             {"name":"interface", "type":"varchar", "null":False},
             {"name":"interfacelabel", "type":"varchar"},
             {"name":"direction", "type":"varchar", "null":False},
             {"name":"minres", "type":"integer", "null":False, "default":"300"},
-            {"name":"highrows", "type":"integer", "null":False, 
+            {"name":"highrows", "type":"integer", "null":False,
                     "default":"1008"}
         ]
 
@@ -67,10 +67,10 @@ class RRDMuninbytesParser(NNTSCParser):
             return DB_DATA_ERROR
 
         streamparams['filename'] = streamparams.pop('file')
-        
+
         if 'interfacelabel' not in streamparams:
             streamparams['interfacelabel'] = None
-        
+
         return self.create_new_stream(streamparams, 0)
 
     def process_data(self, stream, ts, line):

@@ -48,7 +48,7 @@ DEFAULT_COMMIT_FREQ=50
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, routekey, exchange, queueid):
-        
+
         self.pending = []
         self.exporter = None
         self.pubthread = None
@@ -57,8 +57,8 @@ class AmpModule:
         self.dbconf = get_nntsc_db_config(nntsc_config)
         if self.dbconf == {}:
             sys.exit(1)
-        
-        self.db = DBInsert(self.dbconf["name"], self.dbconf["user"], 
+
+        self.db = DBInsert(self.dbconf["name"], self.dbconf["user"],
                 self.dbconf["pass"], self.dbconf["host"])
 
         self.db.connect_db(15)
@@ -110,7 +110,7 @@ class AmpModule:
                     key = p.create_existing_stream(i)
 
         self.initSource(nntsc_config)
-        
+
         liveconf = get_nntsc_config_bool(nntsc_config, "liveexport", "enabled")
         if liveconf == "NNTSCConfigError":
             logger.log("Bad 'enabled' option for liveexport -- disabling")
@@ -149,7 +149,7 @@ class AmpModule:
         queue = get_nntsc_config(nntsc_config, "amp", "queue")
         if queue == "NNTSCConfigMissing":
             queue = "amp-nntsc"
-        
+
         self.commitfreq = get_nntsc_config(nntsc_config, "amp", "commitfreq")
         if self.commitfreq == "NNTSCConfigMissing":
             self.commitfreq = DEFAULT_COMMIT_FREQ
@@ -162,7 +162,7 @@ class AmpModule:
 
         logger.log("Connecting to RabbitMQ queue %s on host %s:%s (ssl=%s), username %s" % (queue, host, port, ssl, username))
 
-        self.source = PikaConsumer('', queue, host, port, 
+        self.source = PikaConsumer('', queue, host, port,
                 ssl, username, password, True)
 
 

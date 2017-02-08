@@ -42,7 +42,7 @@ class AmpTcppingParser(AmpIcmpParser):
             {"name":"family", "type":"varchar", "null":False},
             {"name":"packet_size", "type":"varchar", "null":False},
         ]
-        
+
         self.uniquecolumns = ['source', 'destination', 'port', 'family',
                 'packet_size']
         self.streamindexes = [
@@ -106,7 +106,7 @@ class AmpTcppingParser(AmpIcmpParser):
             logger.log("Error: no address specified in %s result" % \
                     (self.colname))
             return None, None
-        
+
         if '.' in result['address']:
             family = "ipv4"
         else:

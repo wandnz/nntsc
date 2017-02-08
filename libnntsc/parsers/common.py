@@ -6,7 +6,7 @@ class NNTSCParser(object):
     def __init__(self, db, influxdb=None):
         self.db = db
         self.influxdb = influxdb
-        
+
         if influxdb is not None:
             self.have_influx = True
         else:
@@ -70,7 +70,7 @@ class NNTSCParser(object):
 
     def get_cqs(self):
         return self.cqs
-    
+
     def _create_indexes(self, table, indexes):
         for ind in indexes:
             if "columns" not in ind or len(ind["columns"]) == 0:
@@ -90,9 +90,9 @@ class NNTSCParser(object):
                 raise
 
     def stream_table(self):
-        self.db.create_streams_table(self.streamtable, 
+        self.db.create_streams_table(self.streamtable,
                 self.streamcolumns, self.uniquecolumns)
-        
+
         self._create_indexes(self.streamtable, self.streamindexes)
         self.db.commit_streams()
 
@@ -117,7 +117,7 @@ class NNTSCParser(object):
             raise
 
         try:
-            self.db.register_collection(self.source, self.module, 
+            self.db.register_collection(self.source, self.module,
                 self.streamtable, self.datatable)
         except DBQueryException as e:
             logger.log("Failed to register new collection %s in database" % \
@@ -167,7 +167,7 @@ class NNTSCParser(object):
                     (self.colname))
             logger.log("Error was: %s" % (str(e)))
             raise
-        
+
         if self.exporter == None:
             return streamid
 
@@ -178,7 +178,7 @@ class NNTSCParser(object):
                 # stream
                 return streamid
 
-        self.exporter.publishStream(colid, self.colname, streamid, 
+        self.exporter.publishStream(colid, self.colname, streamid,
                 streamprops)
         return streamid
 
@@ -195,7 +195,7 @@ class NNTSCParser(object):
                 self.influxdb.insert_data(self.datatable,
                                           stream, ts, filtered, casts)
             else:
-                self.db.insert_data(self.datatable, self.colname, stream, ts, 
+                self.db.insert_data(self.datatable, self.colname, stream, ts,
                                 filtered, casts)
         except DBQueryException as e:
             logger.log("Failed to insert new data for %s stream %d" % \

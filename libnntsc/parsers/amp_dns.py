@@ -94,7 +94,7 @@ class AmpDnsParser(NNTSCParser):
 
 
     def _result_to_key(self, res):
-        key = (str(res['source']), str(res['destination']), 
+        key = (str(res['source']), str(res['destination']),
                 str(res['instance']),
                 res['address'], str(res['query']), str(res['query_type']),
                 str(res['query_class']), str(res['udp_payload_size']),

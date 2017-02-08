@@ -68,8 +68,8 @@ class NNTSCClient:
             return -1;
 
         # Our "labels" are actually a list of streams, which is how we used to
-        # manage this sort of thing. Convert to the new label format for 
-        # backwards compatibility   
+        # manage this sort of thing. Convert to the new label format for
+        # backwards compatibility
         if type(labels) is list:
             labels = self.convert_streams_to_labels(labels)
 
@@ -91,7 +91,7 @@ class NNTSCClient:
 
         contents = pickle.dumps((colid, streams))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_UNSUBSCRIBE, len(contents))
-        
+
         try:
             self.sock.sendall(header + contents)
         except error, msg:
@@ -106,7 +106,7 @@ class NNTSCClient:
             return -1;
 
         # Our "labels" are actually a list of streams, which is how we used to
-        # manage this sort of thing. Convert to the new label format for 
+        # manage this sort of thing. Convert to the new label format for
         # backwards compatibility
         if type(labels) is list:
             labels = self.convert_streams_to_labels(labels)
@@ -128,14 +128,14 @@ class NNTSCClient:
         if self.sock == None:
             logger.log("Cannot send NNTSC_AGGREGATE on a closed socket!")
             return -1;
-        
+
         # Our "labels" are actually a list of streams, which is how we used to
-        # manage this sort of thing. Convert to the new label format for 
-        # backwards compatibility   
+        # manage this sort of thing. Convert to the new label format for
+        # backwards compatibility
         if type(labels) is list:
             labels = self.convert_streams_to_labels(labels)
-        
-        contents = pickle.dumps((col, start, end, labels, aggcolumns, 
+
+        contents = pickle.dumps((col, start, end, labels, aggcolumns,
                 groupcolumns, binsize, aggfunc))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_AGGREGATE, len(contents))
 
@@ -147,23 +147,23 @@ class NNTSCClient:
 
         return 0
 
-    def request_percentiles(self, col, labels, start, end, binsize, 
-            ntilecolumns, othercolumns=[], ntileaggfunc="avg", 
-            otheraggfunc="avg"): 
+    def request_percentiles(self, col, labels, start, end, binsize,
+            ntilecolumns, othercolumns=[], ntileaggfunc="avg",
+            otheraggfunc="avg"):
 
         if self.sock == None:
             logger.log("Cannot send NNTSC_PERCENTILE on a closed socket!")
             return -1;
-        
-        
+
+
         # Our "labels" are actually a list of streams, which is how we used to
-        # manage this sort of thing. Convert to the new label format for 
-        # backwards compatibility   
+        # manage this sort of thing. Convert to the new label format for
+        # backwards compatibility
         if type(labels) is list:
             labels = self.convert_streams_to_labels(labels)
-        
-        contents = pickle.dumps((col, start, end, labels, binsize, 
-                ntilecolumns, 
+
+        contents = pickle.dumps((col, start, end, labels, binsize,
+                ntilecolumns,
                 othercolumns, ntileaggfunc, otheraggfunc))
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_PERCENTILE, len(contents))
 
@@ -269,11 +269,11 @@ class NNTSCClient:
 
             if request == NNTSC_SCHEMAS:
                 msgdict['colid'] = data
-           
+
             if request in [NNTSC_STREAMS, NNTSC_ACTIVE_STREAMS] :
                 msgdict['collection'] = data[0]
                 msgdict['boundary'] = data[1]
-            
+
             if request == NNTSC_HISTORY:
                 collection, labels, start, end, more = data
                 msgdict['collection'] = collection
@@ -291,7 +291,7 @@ class NNTSCClient:
 
         for s in streams:
             # XXX Make the labels strings, otherwise we run into casting
-            # issues later on with Brendon's hax ampy code. 
+            # issues later on with Brendon's hax ampy code.
             labels[str(s)] = [s]
         return labels
 

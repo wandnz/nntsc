@@ -39,7 +39,7 @@ class AmpThroughputParser(NNTSCParser):
             {"name":"direction", "type":"varchar", "null":False},
             {"name":"address", "type":"inet", "null":False},
             {"name":"duration", "type":"integer", "null":False},
-            {"name":"writesize", "type":"integer", "null":False}, 
+            {"name":"writesize", "type":"integer", "null":False},
             {"name":"tcpreused", "type":"boolean", "null":False},
         ]
 
@@ -53,7 +53,7 @@ class AmpThroughputParser(NNTSCParser):
         ]
 
         self.datacolumns = [
-            {"name":"bytes", "type":"bigint", "null":True},    
+            {"name":"bytes", "type":"bigint", "null":True},
             {"name":"packets", "type":"bigint", "null":True},
             {"name":"rate", "type":"float", "null":True},
             {"name":"runtime", "type":"integer", "null":True}
@@ -74,7 +74,7 @@ class AmpThroughputParser(NNTSCParser):
         duration = str(stream_data["duration"])
         writesize = str(stream_data["writesize"])
         reused = stream_data["tcpreused"]
-        
+
         key = (src, dest, direction, remote, duration, writesize, reused)
         return key
 
@@ -86,7 +86,7 @@ class AmpThroughputParser(NNTSCParser):
 
     def _process_single_result(self, timestamp, resdict):
         key = self._construct_key(resdict)
-        
+
         if key in self.streams:
             stream_id = self.streams[key]
         else:
@@ -96,14 +96,14 @@ class AmpThroughputParser(NNTSCParser):
             if stream_id < 0:
                 logger.log("AMPModule: Cannot create new throughput stream")
                 logger.log("AMPModule: %s:%s:%s:%s" % ( \
-                        resdict['source'], resdict['destination'], 
+                        resdict['source'], resdict['destination'],
                         resdict['duration'],
                         resdict['writesize']))
                 return stream_id
             else:
                 self.streams[key] = stream_id
 
-        self.insert_data(stream_id, timestamp, resdict) 
+        self.insert_data(stream_id, timestamp, resdict)
         return stream_id
 
 
@@ -146,4 +146,3 @@ class AmpThroughputParser(NNTSCParser):
                 self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
-
