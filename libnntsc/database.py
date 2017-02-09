@@ -64,7 +64,7 @@ class NNTSCCursor(object):
             except psycopg2.DatabaseError as e:
                 if not logmessage:
                     log("Error connecting to database: %s" % e)
-                    log("Retrying every %d seconds" % retrywait);
+                    log("Retrying every %d seconds" % retrywait)
                     logmessage = True
                 self.conn = None
                 time.sleep(retrywait)

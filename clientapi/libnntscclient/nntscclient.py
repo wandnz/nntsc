@@ -48,7 +48,7 @@ class NNTSCClient:
     def send_request(self, reqtype, col, start=0):
         if self.sock == None:
             logger.log("Cannot send NNTSC_REQUEST on a closed socket!")
-            return -1;
+            return -1
 
         if reqtype == NNTSC_REQ_COLLECTION:
             col = 0
@@ -73,7 +73,7 @@ class NNTSCClient:
     def subscribe_streams(self, name, columns, labels, start, end, aggs):
         if self.sock == None:
             logger.log("Cannot send NNTSC_SUBSCRIBE on a closed socket!")
-            return -1;
+            return -1
 
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for
@@ -111,7 +111,7 @@ class NNTSCClient:
     def request_matrix(self, col, labels, start, end, aggcolumns, aggfunc):
         if self.sock == None:
             logger.log("Cannot send NNTSC_MATRIX on a closed socket!")
-            return -1;
+            return -1
 
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for
@@ -135,7 +135,7 @@ class NNTSCClient:
 
         if self.sock == None:
             logger.log("Cannot send NNTSC_AGGREGATE on a closed socket!")
-            return -1;
+            return -1
 
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for
@@ -161,7 +161,7 @@ class NNTSCClient:
 
         if self.sock == None:
             logger.log("Cannot send NNTSC_PERCENTILE on a closed socket!")
-            return -1;
+            return -1
 
 
         # Our "labels" are actually a list of streams, which is how we used to
@@ -187,7 +187,7 @@ class NNTSCClient:
     def receive_message(self):
         if self.sock == None:
             logger.log("Cannot receive messages on a closed socket!")
-            return -1;
+            return -1
 
         try:
             received = self.sock.recv(256000)
@@ -196,7 +196,7 @@ class NNTSCClient:
             return -1
 
         if len(received) == 0:
-            return 0;
+            return 0
 
         self.buf += received
         return len(received)

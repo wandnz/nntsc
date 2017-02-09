@@ -108,7 +108,7 @@ def parse_stat_record(msg_buf, name_len):
 
     user_len = int(stats_hdr[6])
     stat_record["user"] = msg_buf[buf_parsed:buf_parsed + user_len]
-    buf_parsed += user_len;
+    buf_parsed += user_len
 
     stat_record["id"] = msg_buf[0:name_len]
     stat_record["ts"] = stats_hdr[0]

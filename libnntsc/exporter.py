@@ -573,7 +573,7 @@ class DBWorker(threading.Thread):
         try:
             self.queue.put((NNTSC_COLLECTIONS, header + col_pickle), False)
         except StdQueue.Full:
-            log("Failed to write collections to full DBWorker result queue");
+            log("Failed to write collections to full DBWorker result queue")
             return DBWORKER_FULLQUEUE
 
         return DBWORKER_SUCCESS
@@ -601,7 +601,7 @@ class DBWorker(threading.Thread):
         try:
             self.queue.put((NNTSC_SCHEMAS, header + result), False)
         except StdQueue.Full:
-            log("Failed to write schemas to full DBWorker result queue");
+            log("Failed to write schemas to full DBWorker result queue")
             return DBWORKER_FULLQUEUE
         return DBWORKER_SUCCESS
 
@@ -624,7 +624,7 @@ class DBWorker(threading.Thread):
         try:
             self.queue.put((NNTSC_REGISTER_COLLECTION, col), False)
         except StdQueue.Full:
-            log("Failed to register collection %d due to full DBWorker result queue" % (col));
+            log("Failed to register collection %d due to full DBWorker result queue" % (col))
             return DBWORKER_FULLQUEUE
 
         if len(streams) == 0:
@@ -656,7 +656,7 @@ class DBWorker(threading.Thread):
         try:
             self.queue.put((req, header + stream_data), False)
         except StdQueue.Full:
-            log("Failed to write streams to full DBWorker result queue");
+            log("Failed to write streams to full DBWorker result queue")
             return DBWORKER_FULLQUEUE
         return DBWORKER_SUCCESS
 
