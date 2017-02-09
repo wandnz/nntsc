@@ -1,23 +1,32 @@
-# This file is part of NNTSC
 #
-# Copyright (C) 2013 The University of Waikato, Hamilton, New Zealand
+# This file is part of NNTSC.
+#
+# Copyright (C) 2013-2017 The University of Waikato, Hamilton, New Zealand.
+#
 # Authors: Shane Alcock
 #          Brendon Jones
-#          Nathan Overall
 #
 # All rights reserved.
 #
 # This code has been developed by the WAND Network Research Group at the
-# University of Waikato. For more information, please see
+# University of Waikato. For further information please see
 # http://www.wand.net.nz/
 #
-# This source code is proprietary to the University of Waikato and may not be
-# redistributed, published or disclosed without prior permission from the
-# University of Waikato and the WAND Network Research Group.
+# NNTSC is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 as
+# published by the Free Software Foundation.
+#
+# NNTSC is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with NNTSC; if not, write to the Free Software Foundation, Inc.
+# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
-# $Id$
 
 
 import libnntscclient.logger as logger
