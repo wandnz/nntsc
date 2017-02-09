@@ -30,7 +30,6 @@
 
 from libnntsc.parsers.common import NNTSCParser
 from libnntsc.dberrorcodes import *
-from copy import deepcopy
 import libnntscclient.logger as logger
 
 class AmpIcmpParser(NNTSCParser):
@@ -123,7 +122,7 @@ class AmpIcmpParser(NNTSCParser):
 
         props['source'] = source
         props['destination'] = result['target']
-        props['family']  = family
+        props['family'] = family
         props['packet_size'] = sizestr
 
         key = (props['source'], props['destination'], props['family'], \
@@ -141,7 +140,7 @@ class AmpIcmpParser(NNTSCParser):
 
     def _update_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
-            observed[streamid] = { "loss":0, "rtts":[],
+            observed[streamid] = {"loss":0, "rtts":[],
                     "median":None, "packet_size":datapoint["packet_size"],
                     "results":0}
 

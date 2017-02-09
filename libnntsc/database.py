@@ -58,7 +58,7 @@ class NNTSCCursor(object):
     def connect(self, retrywait):
         logmessage = False
 
-        while self.conn == None:
+        while self.conn is None:
             try:
                 self.conn = psycopg2.connect(self.connstr)
             except psycopg2.DatabaseError as e:
@@ -300,7 +300,7 @@ class DatabaseCore(object):
         while True:
             row = self.basic.cursor.fetchone()
 
-            if row == None:
+            if row is None:
                 break
             col = {}
             for k, v in row.items():
@@ -577,7 +577,7 @@ class DBInsert(DatabaseCore):
 
         self._releasebasic()
 
-        for base,mod in modules.items():
+        for mod in modules.values():
             mod.tables(self)
 
     def get_collection_id(self, mod, subtype):
@@ -735,7 +735,7 @@ class DBInsert(DatabaseCore):
         # insert stream into our stream table
         colstr = "(stream_id"
         values = []
-        for k,v in streamprops.iteritems():
+        for k, v in streamprops.iteritems():
             colstr += ', "%s"' % (k)
             values.append(v)
         colstr += ") "
@@ -758,7 +758,7 @@ class DBInsert(DatabaseCore):
         # Grab the new stream ID so we can return it
         newid = self.streams.cursor.fetchone()[0]
 
-        if (createdatatable):
+        if createdatatable:
             dbkey = "postgres"
         else:
             dbkey = "influx"
@@ -792,14 +792,13 @@ class DBInsert(DatabaseCore):
         result = self.data.cursor.fetchone()
         return result
 
-    def insert_data(self, tablename, collection, stream, ts, result,
-            casts = {}):
+    def insert_data(self, tablename, collection, stream, ts, result, casts={}):
 
         colstr = "(stream_id, timestamp"
         valstr = "%s, %s"
         values = [stream, ts]
 
-        for k,v in result.iteritems():
+        for k, v in result.iteritems():
             colstr += ', "%s"' % (k)
             values.append(v)
 

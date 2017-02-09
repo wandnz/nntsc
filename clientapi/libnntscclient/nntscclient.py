@@ -279,7 +279,7 @@ class NNTSCClient:
             if request == NNTSC_SCHEMAS:
                 msgdict['colid'] = data
 
-            if request in [NNTSC_STREAMS, NNTSC_ACTIVE_STREAMS] :
+            if request in [NNTSC_STREAMS, NNTSC_ACTIVE_STREAMS]:
                 msgdict['collection'] = data[0]
                 msgdict['boundary'] = data[1]
 

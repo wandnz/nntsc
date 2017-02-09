@@ -32,7 +32,7 @@
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
-import operator, time
+import time
 
 PATH_FLUSH_FREQ = 60 * 60
 
@@ -156,7 +156,7 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         # This will automatically clone the ipdatatable
         try:
-           streamid = self.db.insert_stream(self.streamtable,
+            streamid = self.db.insert_stream(self.streamtable,
                     self.ipdatatable, timestamp, streamparams)
         except DBQueryException as e:
             logger.log("Failed to insert new stream for %s" % (self.colname))
@@ -221,7 +221,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             logger.log("Error was: %s" % (str(e)))
             raise
 
-        if self.exporter == None:
+        if self.exporter is None:
             return streamid
 
         colid = self._get_iptraceroute_collection_id()
@@ -446,7 +446,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         maxfreq = 0
         commonpathid = -1
 
-        for pathid,pdata in streamdata['paths'].iteritems():
+        for pathid, pdata in streamdata['paths'].iteritems():
             if pdata['count'] > maxfreq:
                 commonpathid = pathid
                 maxfreq = pdata['count']
@@ -517,7 +517,7 @@ class AmpTracerouteParser(AmpIcmpParser):
 
     def _flush_unused_paths(self, now):
         toremove = []
-        for k,v in self.aspaths.iteritems():
+        for k, v in self.aspaths.iteritems():
             if v[1] + PATH_FLUSH_FREQ < now:
                 toremove.append(k)
 
@@ -525,7 +525,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             del(self.aspaths[k])
 
         toremove = []
-        for k,v in self.paths.iteritems():
+        for k, v in self.paths.iteritems():
             if v[1] + PATH_FLUSH_FREQ * 3 < now:
                 toremove.append(k)
 

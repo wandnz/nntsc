@@ -133,7 +133,7 @@ class PikaBasicAsync(object):
                     type='direct')
         else:
             self._channel.queue_declare(self._pikaQueueDeclared,
-                    self._queuename, durable = self._durable)
+                    self._queuename, durable=self._durable)
 
     def _pikaChannelClosed(self, channel, replycode, replytext):
         logger.log("Pika Channel was closed: %s %s" % (replycode, replytext))
@@ -142,7 +142,7 @@ class PikaBasicAsync(object):
 
     def _pikaExchangeDeclared(self, unused):
         self._channel.queue_declare(self._pikaQueueDeclared, self._queuename,
-                durable = self._durable)
+                durable=self._durable)
 
     def _pikaQueueDeclared(self, methodframe):
         return
@@ -197,7 +197,7 @@ class PikaPublisher(PikaBasicAsync):
             self._channel.basic_publish(self._exchangename, self._pubkey,
                     pubstring,
                     pika.BasicProperties(delivery_mode=1,
-                        content_type = "text/plain"))
+                        content_type="text/plain"))
 
 
 class PikaPubQueue(object):
@@ -323,12 +323,12 @@ def parseExportOptions(conf):
 
 def startPubThread(conf, key, exchange, queuename, src):
     username, password, port = parseExportOptions(conf)
-    if username == None:
+    if username is None:
         return None
 
     exporter = PikaPublisher(exchange, queuename, key, 'localhost', port,
             False, username, password, src, False)
-    if exporter == None:
+    if exporter is None:
         logger.log("Failed to create live exporter for %s -- no live export will occur" % (queuename))
 
     try:
@@ -352,12 +352,12 @@ def initExportPublisher(conf, key, exchange, queuename):
 
 def initExportConsumer(conf, queuename, exchange):
     username, password, port = parseExportOptions(conf)
-    if username == None:
+    if username is None:
         return None
 
     consumer = PikaConsumer(exchange, queuename, 'localhost', port, False,
             username, password, False)
-    if consumer == None:
+    if consumer is None:
         logger.log("Failed to create live consumer for %s -- no live export will occur" % (queuename))
     return consumer
 

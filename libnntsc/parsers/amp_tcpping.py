@@ -129,9 +129,9 @@ class AmpTcppingParser(AmpIcmpParser):
 
     def _update_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
-            observed[streamid] = { "loss":0, "rtts":[], "icmperrors":0,
+            observed[streamid] = {"loss":0, "rtts":[], "icmperrors":0,
                     "median":None, "packet_size":datapoint["packet_size"],
-                    "results":0 }
+                    "results":0}
 
         observed[streamid]["results"] += 1
 

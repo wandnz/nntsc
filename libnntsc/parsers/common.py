@@ -155,7 +155,7 @@ class NNTSCParser(object):
             raise
 
     def _get_collection_id(self):
-        if self.collectionid == None:
+        if self.collectionid is None:
             try:
                 colid = self.db.get_collection_id(self.source, self.module)
             except DBQueryException as e:
@@ -197,21 +197,21 @@ class NNTSCParser(object):
             logger.log("Error was: %s" % (str(e)))
             raise
 
-        if self.exporter == None:
+        if self.exporter is None:
             return streamid
 
         colid = self._get_collection_id()
         if colid <= 0:
-                # Not sure what we should do if we get a bad collection id,
-                # but for now I'm going to go with not exporting the new
-                # stream
-                return streamid
+            # Not sure what we should do if we get a bad collection id,
+            # but for now I'm going to go with not exporting the new
+            # stream
+            return streamid
 
         self.exporter.publishStream(colid, self.colname, streamid,
                 streamprops)
         return streamid
 
-    def insert_data(self, stream, ts, result, casts = {}):
+    def insert_data(self, stream, ts, result, casts={}):
         filtered = {}
         for col in self.datacolumns:
             if col["name"] in result:

@@ -67,7 +67,7 @@ def get_cqs(table_name, bin_size=None):
     """Gets continuous queries for given table at given bin size,
     or all cqs if no bin size given"""
     parser = get_parser(table_name)
-    if parser == None:
+    if parser is None:
         return []
 
     cqs = parser.get_cqs()

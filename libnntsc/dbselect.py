@@ -28,6 +28,7 @@
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 
+import time
 import psycopg2
 import psycopg2.extras
 from libnntscclient.logger import *
@@ -36,7 +37,6 @@ from libnntsc.querybuilder import QueryBuilder
 from libnntsc.database import DatabaseCore, NNTSCCursor
 from libnntsc.influx import InfluxSelector
 from libnntsc.dberrorcodes import *
-import time
 
 # Class used for querying the NNTSC database.
 # Uses psycopg2 rather than SQLAlchemy for the following reasons:
@@ -166,7 +166,7 @@ class DBSelector(DatabaseCore):
         selected = []
         while True:
             row = self.basic.cursor.fetchone()
-            if row == None:
+            if row is None:
                 break
             stream_dict = {}
             for k, v in row.items():
@@ -182,9 +182,9 @@ class DBSelector(DatabaseCore):
             influxdb=None):
 
         # Set default time boundaries
-        if stop_time == None:
+        if stop_time is None:
             stop_time = int(time.time())
-        if start_time == None:
+        if start_time is None:
             start_time = stop_time - (24 * 60 * 60)
 
         assert(type(labels) is dict)
@@ -206,8 +206,8 @@ class DBSelector(DatabaseCore):
 
 
     def select_aggregated_data(self, col, labels, aggcols,
-            start_time = None, stop_time = None, groupcols = None,
-                               binsize = 0, influxdb = None):
+            start_time=None, stop_time=None, groupcols=None,
+                               binsize=0, influxdb=None):
 
         """ Queries the database for time series data, splits the time
             series into bins and applies the given aggregation function(s)
@@ -261,9 +261,9 @@ class DBSelector(DatabaseCore):
             return
 
         # Set default time boundaries
-        if stop_time == None:
+        if stop_time is None:
             stop_time = int(time.time())
-        if start_time == None:
+        if start_time is None:
             start_time = stop_time - (24 * 60 * 60)
 
         assert(type(labels) is dict)
@@ -426,9 +426,9 @@ class DBSelector(DatabaseCore):
         """
 
         # Set default time boundaries
-        if stop_time == None:
+        if stop_time is None:
             stop_time = int(time.time())
-        if start_time == None:
+        if start_time is None:
             start_time = stop_time - (24 * 60 * 60)
 
         # Find the data table for the requested collection
@@ -543,7 +543,7 @@ class DBSelector(DatabaseCore):
             return False
 
         row = self.basic.cursor.fetchone()
-        if row == None:
+        if row is None:
             return False
 
         result = row[0]
@@ -565,7 +565,7 @@ class DBSelector(DatabaseCore):
             return default
 
         row = self.basic.cursor.fetchone()
-        if row == None:
+        if row is None:
             return default
 
         result = row[0]
@@ -585,7 +585,7 @@ class DBSelector(DatabaseCore):
 
         if sid not in firststamps:
             firststamps[sid] = None
-        if firststamps[sid] == None:
+        if firststamps[sid] is None:
             f = self.query_timestamp(table, sid, "min")
             if f != 0:
                 firststamps[sid] = f
@@ -594,7 +594,7 @@ class DBSelector(DatabaseCore):
 
         if sid not in laststamps:
             laststamps[sid] = None
-        if laststamps[sid] == None:
+        if laststamps[sid] is None:
             l = self.query_timestamp(table, sid, "max")
             if l != 0:
                 laststamps[sid] = l
@@ -661,7 +661,7 @@ class DBSelector(DatabaseCore):
         else:
             row = self.basic.cursor.fetchone()
 
-        if row[0] == None:
+        if row[0] is None:
             ts = 0
         else:
             ts = int(row[0])
@@ -760,7 +760,7 @@ class DBSelector(DatabaseCore):
         columns = []
         while True:
             row = self.basic.cursor.fetchone()
-            if row == None:
+            if row is None:
                 break
 
             columns.append(row['column_name'])
@@ -836,7 +836,7 @@ class DBSelector(DatabaseCore):
 
     def _filter_aggregation_columns(self, table, columns, aggcols):
         filtered = []
-        for k,v in aggcols:
+        for k, v in aggcols:
             if table in traceroute_tables:
                 col = amp_traceroute.sanitise_column(k)
                 if col is not None:
@@ -844,7 +844,7 @@ class DBSelector(DatabaseCore):
 
             else:
                 if k in columns:
-                    filtered.append((k,v))
+                    filtered.append((k, v))
 
         return filtered
 

@@ -55,10 +55,10 @@ class InfluxConnection(object):
 
         self.dbname = dbname
 
-        if dbhost == "" or dbhost == None:
+        if dbhost == "" or dbhost is None:
             dbhost = "localhost"
 
-        if dbport == "" or dbport == None:
+        if dbport == "" or dbport is None:
             dbport = 8086
 
         if dbpass == "":
@@ -295,7 +295,7 @@ class InfluxSelector(InfluxConnection):
                             start_time, stop_time, " or ".join([
                             "stream = '{}'".format(s) for s in fluxstreams])))
 
-            order = ["select","from","where"]
+            order = ["select", "from", "where"]
             querystring, _ = self.qb.create_query(order)
             try:
                 results = self.query(querystring)
@@ -426,10 +426,10 @@ class InfluxSelector(InfluxConnection):
                     else:
                         labels_and_rows[lab][col].append(value)
 
-        for k,v in labels_and_rows.iteritems():
+        for k, v in labels_and_rows.iteritems():
             finaldata = {'binstart': start_time, 'timestamp': stop_time}
             for cq in mcq:
-                cq  = (cq[0].replace('"', ''), cq[1], cq[2].replace('"', ''))
+                cq = (cq[0].replace('"', ''), cq[1], cq[2].replace('"', ''))
                 if cq[2] not in v:
                     continue
                 if cq[1] in ["sum", "count"]:
@@ -472,7 +472,7 @@ class InfluxSelector(InfluxConnection):
                     sumn = 0
                     for i in range(0, len(v[cq[2]])):
                         if v[cq[2]][i] is not None and countcol[i] > 1:
-                            sumvar += (pow(v[cq[2]][i],2) * countcol[i])
+                            sumvar += (pow(v[cq[2]][i], 2) * countcol[i])
                             sumn += countcol[i]
 
                     if sumn > 0:
@@ -559,8 +559,7 @@ class InfluxSelector(InfluxConnection):
             if meas == "timestamp" and agg == "count":
                 self.aggcols[i] = ("requests", agg)
 
-        else:
-            columns = self._get_rollup_functions()
+        columns = self._get_rollup_functions()
 
         self.qb.add_clause("from", "from {}".format(table))
         if stop_time - start_time > binsize:
@@ -596,7 +595,7 @@ class InfluxSelector(InfluxConnection):
                         "stream = '{}'".format(stream)
                                 for stream in all_streams])))
 
-        order = ["select","from","where","group_by"]
+        order = ["select", "from", "where", "group_by"]
         querystring, _ = self.qb.create_query(order)
 
         results = self.query(querystring)
@@ -613,7 +612,7 @@ class InfluxSelector(InfluxConnection):
                     if ts not in labels_and_rows[label]:
                         labels_and_rows[label][ts] = row
                     else:
-                        for k,v in row.iteritems():
+                        for k, v in row.iteritems():
                             if k not in labels_and_rows[label][ts]:
                                 labels_and_rows[label][ts][k] = v
                             elif labels_and_rows[label][ts][k] is None:

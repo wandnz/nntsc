@@ -29,8 +29,9 @@
 #
 
 import time
+import cPickle
+import zlib
 import pylibmc
-import cPickle, zlib
 
 from libnntscclient.logger import *
 
@@ -52,7 +53,7 @@ class StreamCache(object):
         self.mcpool.relinquish()
 
     def update_timestamps(self, db, collection, streamids, last, first=None):
-        if first == None and last == None:
+        if first is None and last is None:
             return
 
         if last is not None:

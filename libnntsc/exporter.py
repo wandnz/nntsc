@@ -154,7 +154,7 @@ class DBWorker(threading.Thread):
 
         if type(func) is str:
             for c in columns:
-                aggs.append((c,func))
+                aggs.append((c, func))
 
         elif len(func) == 1:
             for c in columns:
@@ -174,7 +174,7 @@ class DBWorker(threading.Thread):
         if end == 0:
             end = None
 
-        if start == None or start >= now:
+        if start is None or start >= now:
             # No historical data, send empty history for all streams
             for label in labels.keys():
                 err = self._enqueue_history(colid, label, [], False, 0, now)
@@ -182,7 +182,7 @@ class DBWorker(threading.Thread):
                     return err
             return DBWORKER_SUCCESS
 
-        if end == None:
+        if end is None:
             stoppoint = int(time.time())
         else:
             stoppoint = end
@@ -225,7 +225,7 @@ class DBWorker(threading.Thread):
             # for the time taken to make earlier queries otherwise we'll
             # miss any new data inserted while we were querying previous
             # weeks of data
-            if end == None:
+            if end is None:
                 stoppoint = int(time.time())
 
         try:
@@ -241,7 +241,7 @@ class DBWorker(threading.Thread):
         now = int(time.time())
         aggs = self._merge_aggregators(aggcols, aggfunc)
 
-        if start == None or start >= now:
+        if start is None or start >= now:
             # No historical data, send empty history for all streams
             for label in labels.keys():
                 err = self._enqueue_history(colid, label, [], False, 0, now)
@@ -277,7 +277,7 @@ class DBWorker(threading.Thread):
         now = int(time.time())
 
         origstart = start
-        if start == 0 or start == None:
+        if start == 0 or start is None:
             start = now
         if end == 0:
             end = None
@@ -291,7 +291,7 @@ class DBWorker(threading.Thread):
 
             return DBWORKER_SUCCESS
 
-        if end == None:
+        if end is None:
             stoppoint = int(time.time())
         else:
             stoppoint = end
@@ -413,7 +413,7 @@ class DBWorker(threading.Thread):
 
                 # Reset all our counters etc.
                 freqstats = {'lastts': 0, 'lastbin':0, 'perfectbins':0,
-                            'totaldiffs':0, 'tsdiffs':{} }
+                            'totaldiffs':0, 'tsdiffs':{}}
                 freq = 0
                 currlabel = label
                 observed.add(currlabel)
@@ -951,10 +951,10 @@ class NNTSCClient(threading.Thread):
         if len(msg) < total_len:
             return msg, 1, error
 
-        if (header[1] == NNTSC_UNSUBSCRIBE):
+        if header[1] == NNTSC_UNSUBSCRIBE:
             self.unsubscribe_streams(body)
         else:
-            if (header[1] == NNTSC_SUBSCRIBE):
+            if header[1] == NNTSC_SUBSCRIBE:
                 self.subscribe_stream(body)
 
             # Put the job on our joblist for one of the worker threads to handle
@@ -1084,7 +1084,7 @@ class NNTSCClient(threading.Thread):
             # A worker has completed a job, let's form up a response to
             # send to our client
             if response in [NNTSC_COLLECTIONS, NNTSC_SCHEMAS, NNTSC_STREAMS, \
-                        NNTSC_HISTORY,  NNTSC_QUERY_CANCELLED]:
+                        NNTSC_HISTORY, NNTSC_QUERY_CANCELLED]:
                 return self.transmit_client(result)
 
             elif response == NNTSC_REGISTER_COLLECTION:
@@ -1559,7 +1559,7 @@ class NNTSCExporter:
 
     def run(self):
         # Start up our listener thread
-        if self.listen_sock == None:
+        if self.listen_sock is None:
             log("Must successfully call configure before calling run on the exporter!")
             return
 
@@ -1620,7 +1620,7 @@ class NNTSCListener(threading.Thread):
 
 if __name__ == '__main__':
 
-    opts, rest = getopt.getopt(sys.argv[1:],'p:h')
+    opts, rest = getopt.getopt(sys.argv[1:], 'p:h')
 
     for o, a in opts:
         if o == "-p":
