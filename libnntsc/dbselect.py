@@ -835,8 +835,6 @@ class DBSelector(DatabaseCore):
         return aggcols
 
     def _filter_aggregation_columns(self, table, columns, aggcols):
-        keys = [k[0] for k in aggcols]
-
         filtered = []
         for k,v in aggcols:
             if table in traceroute_tables:

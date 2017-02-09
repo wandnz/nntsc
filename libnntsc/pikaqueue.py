@@ -191,7 +191,6 @@ class PikaPublisher(PikaBasicAsync):
             except StdQueue.Empty:
                 continue
 
-            msgtype, content = pickle.loads(pubstring)
             if self._channel is None:
                 return
 

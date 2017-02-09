@@ -88,28 +88,6 @@ class AmpUdpstreamParser(NNTSCParser):
 
         ]
 
-        # Not strictly correct to take the mean of the means, but hard to do
-        # much else without some custom functions
-        aggs = [("mean_rtt", "mean", "mean_rtt"),
-                ("mean_jitter", "mean", "mean_jitter"),
-                ("min_min_jitter", "min", "min_jitter"),
-                ("max_jitter", "max", "max_jitter"),
-                ("mean_min_jitter", "mean", "min_jitter"),
-                ("jitter_percentile_10", "mean", "jitter_percentile_10"),
-                ("jitter_percentile_20", "mean", "jitter_percentile_20"),
-                ("jitter_percentile_30", "mean", "jitter_percentile_30"),
-                ("jitter_percentile_40", "mean", "jitter_percentile_40"),
-                ("jitter_percentile_50", "mean", "jitter_percentile_50"),
-                ("jitter_percentile_60", "mean", "jitter_percentile_60"),
-                ("jitter_percentile_70", "mean", "jitter_percentile_70"),
-                ("jitter_percentile_80", "mean", "jitter_percentile_80"),
-                ("jitter_percentile_90", "mean", "jitter_percentile_90"),
-                ("jitter_percentile_100", "mean", "jitter_percentile_100"),
-                ("packets_sent", "sum", "packets_sent"),
-                ("packets_recvd", "sum", "packets_recvd"),
-                ("itu_mos", "mean", "itu_mos")
-               ]
-
         self.matrix_cq = [
             ('packets_sent', 'sum', 'packets_sent'),
             ('packets_recvd', 'sum', 'packets_recvd'),

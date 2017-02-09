@@ -176,8 +176,8 @@ class DBWorker(threading.Thread):
 
         if start == None or start >= now:
             # No historical data, send empty history for all streams
-            for lab, streams in labels.items():
-                err = self._enqueue_history(colid, lab, [], False, 0, now)
+            for label in labels.keys():
+                err = self._enqueue_history(colid, label, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
                     return err
             return DBWORKER_SUCCESS
@@ -243,8 +243,8 @@ class DBWorker(threading.Thread):
 
         if start == None or start >= now:
             # No historical data, send empty history for all streams
-            for lab, streams in labels.items():
-                err = self._enqueue_history(colid, lab, [], False, 0, now)
+            for label in labels.keys():
+                err = self._enqueue_history(colid, label, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
                     return err
             return DBWORKER_SUCCESS
@@ -284,8 +284,8 @@ class DBWorker(threading.Thread):
 
         if start >= now:
             # No historical data, send empty history for all streams
-            for lab, streams in labels.items():
-                err = self._enqueue_history(colid, lab, [], False, 0, start)
+            for label in labels.keys():
+                err = self._enqueue_history(colid, label, [], False, 0, start)
                 if err != DBWORKER_SUCCESS:
                     return err
 
@@ -1008,7 +1008,6 @@ class NNTSCClient(threading.Thread):
 
             if len(obj) == 3:
                 streamid = contents[1]
-                ts = obj[2]
                 if streamid in self.waitstreams:
                     # Still waiting for history to come back for this stream.
                     # Save this live data so we can send it after the history is

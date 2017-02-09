@@ -351,7 +351,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         else:
             pathid = self._insert_path("ip", stream, result)
             if pathid < 0:
-                return err
+                return
 
             result['path_id'] = pathid
             self.paths[keystr] = (pathid, int(time.time()))
@@ -366,7 +366,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             else:
                 pathid = self._insert_path("as", stream, result)
                 if pathid < 0:
-                    return err
+                    return
 
                 result['aspath_id'] = pathid
                 self.aspaths[keystr] = (pathid, int(time.time()))
@@ -439,7 +439,6 @@ class AmpTracerouteParser(AmpIcmpParser):
                         'responses':datapoint['responses']
                 }
             else:
-                prev = observed[streamid]['paths'][aspath_id]
                 observed[streamid]['paths'][aspath_id]['count'] += 1
 
     def _aggregate_streamdata(self, streamdata):
@@ -449,7 +448,6 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         for pathid,pdata in streamdata['paths'].iteritems():
             if pdata['count'] > maxfreq:
-                common = pdata
                 commonpathid = pathid
                 maxfreq = pdata['count']
 

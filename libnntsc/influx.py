@@ -35,7 +35,7 @@ from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError, InfluxDBServerError
 from libnntsc.dberrorcodes import *
 from libnntsc.querybuilder import QueryBuilder
-from libnntsc.cqs import getMatrixCQ
+from libnntsc.cqs import getMatrixCQ, get_parser
 import libnntscclient.logger as logger
 from requests import ConnectionError
 import requests
@@ -695,11 +695,9 @@ class InfluxSelector(InfluxConnection):
                 range_step = range_step - (range_step % 5)
                 range_bottom = range_top - range_step * (num_results - 1)
                 ntile_range = range(range_bottom, range_top, range_step)
-                second_bottom = range_bottom + range_step
             else:
                 ntile_range = range(5,100,5)
                 range_bottom = 5
-                second_bottom = 10
 
             # Also take the max_rtt, as this acts as the 100 percentile
             percentiles = ["{}_percentile_rtt".format(

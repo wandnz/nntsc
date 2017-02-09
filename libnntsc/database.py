@@ -677,23 +677,20 @@ class DBInsert(DatabaseCore):
             # Nothing useful in cache, query data table for max timestamp
             # Warning, this isn't going to be fast so try to avoid doing
             # this wherever possible!
-            if influxdb:
-                lastts = influxdb.query_timestamp(table, streamid)
-            else:
-                query = "SELECT max(timestamp) FROM %s_" % (table)
-                query += "%s"   # stream id goes in here
+            query = "SELECT max(timestamp) FROM %s_" % (table)
+            query += "%s"   # stream id goes in here
 
-                self._basicquery(query, (streamid,))
+            self._basicquery(query, (streamid,))
 
-                if self.basic.cursor.rowcount != 1:
-                    log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
-                    raise DBQueryException(DB_CODING_ERROR)
+            if self.basic.cursor.rowcount != 1:
+                log("Unexpected number of results when querying for max timestamp: %d" % (self.basic.cursor.rowcount))
+                raise DBQueryException(DB_CODING_ERROR)
 
-                row = self.basic.cursor.fetchone()
-                if row[0] == None:
-                    return 0
+            row = self.basic.cursor.fetchone()
+            if row[0] == None:
+                return 0
 
-                lastts = int(row[0])
+            lastts = int(row[0])
             lastdict[streamid] = lastts
             self.streamcache.set_last_timestamps("postgres", table, lastdict)
 
@@ -819,7 +816,7 @@ class DBInsert(DatabaseCore):
 
         self._dataquery(insert, params)
 
-    def _columns_sql(self, columns):
+    def _columns_sql(self, name, columns):
 
         basesql = ""
 
@@ -847,7 +844,7 @@ class DBInsert(DatabaseCore):
 
     def create_misc_table(self, name, columns, uniquecols=[]):
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
-        coltext = self._columns_sql(columns)
+        coltext = self._columns_sql(name, columns)
 
         # Remove the leading comma
         basesql += coltext[1:]
@@ -872,7 +869,7 @@ class DBInsert(DatabaseCore):
 
         basesql += "stream_id integer NOT NULL, timestamp integer NOT NULL"
 
-        basesql += self._columns_sql(columns)
+        basesql += self._columns_sql(name, columns)
         basesql += ")"
 
         self._basicquery(basesql)
@@ -887,7 +884,7 @@ class DBInsert(DatabaseCore):
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
         basesql += "stream_id integer PRIMARY KEY "
         basesql += "DEFAULT nextval('streams_id_seq')"
-        basesql += self._columns_sql(columns)
+        basesql += self._columns_sql(name, columns)
 
         if len(uniquecols) != 0:
             basesql += ", UNIQUE ("

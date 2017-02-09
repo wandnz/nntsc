@@ -60,6 +60,6 @@ class DBQueryException(Exception):
             return "Could not execute query as had no valid cursor"
         if self.code == DB_NO_ERROR:
             return "No error occurred, why are we getting this exception?"
-        return "Unknown error code for DBQueryException: %d" % (code)
+        return "Unknown error code for DBQueryException: %d" % (self.code)
 
 # vim: set smartindent shiftwidth=4 tabstop=4 softtabstop=4 expandtab :

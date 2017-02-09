@@ -131,7 +131,7 @@ class AmpModule:
                     initExportPublisher(nntsc_config, routekey, exchange, \
                     queueid)
 
-            for k, parsers in self.parsers.iteritems():
+            for parsers in self.parsers.itervalues():
                 for p in parsers:
                     p.add_exporter(self.exporter)
 
@@ -271,7 +271,7 @@ class AmpModule:
 
                 else:
                     logger.log("Unknown error code returned by database: %d" %
-                            (code))
+                            (e.code))
                     logger.log("Shutting down AMP module")
                     channel.close()
                     return

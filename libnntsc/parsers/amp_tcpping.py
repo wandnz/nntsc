@@ -30,7 +30,6 @@
 
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.dberrorcodes import *
-from copy import deepcopy
 import libnntscclient.logger as logger
 
 
@@ -72,19 +71,6 @@ class AmpTcppingParser(AmpIcmpParser):
             #{"name":"icmptype", "type":"smallint", "null":True},
             #{"name":"icmpcode", "type":"smallint", "null":True},
         ]
-
-        aggs  =  [
-            ("loss","sum","loss"),
-            ("num_results","sum","results"),
-            ("mean_rtt", "mean", "median"),
-            ("stddev_rtt", "stddev", "median"),
-            ("max_rtt", "max", "median"),
-            ("min_rtt","min","median")
-          ]
-
-        aggs_w_ntile = deepcopy(aggs)
-        aggs_w_ntile += [("\"{}_percentile_rtt\"".format(
-                      i), "percentile", "median, {}".format(i)) for i in range(5,100,5)]
 
         #self.dataindexes = []
 
