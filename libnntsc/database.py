@@ -303,7 +303,7 @@ class DatabaseCore(object):
             if row is None:
                 break
             col = {}
-            for k, v in row.items():
+            for k, v in row.iteritems():
                 col[k] = v
             collections.append(col)
         self._releasebasic()
@@ -344,7 +344,7 @@ class DatabaseCore(object):
         self._releasebasic()
 
         streams = []
-        for cid, (tname, sub) in streamtables.items():
+        for cid, (tname, sub) in streamtables.iteritems():
             sql = """ SELECT * FROM %s """ % (tname)
 
             self._basicquery(sql, (cid,))
@@ -354,7 +354,7 @@ class DatabaseCore(object):
                 if row == None:
                     break
                 row_dict = {"modsubtype":sub}
-                for k, v in row.items():
+                for k, v in row.iteritems():
                     if k == "id":
                         continue
                     row_dict[k] = v

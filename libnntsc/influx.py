@@ -303,7 +303,7 @@ class InfluxSelector(InfluxConnection):
                 yield(None, label, None, None, e)
 
             rows = []
-            for (table, tags), results in results.items():
+            for (table, tags), results in results.iteritems():
                 for result in results:
                     result["nntsclabel"] = label
                     result["timestamp"] = result["time"]
@@ -325,7 +325,7 @@ class InfluxSelector(InfluxConnection):
         except DBQueryException as e:
             return False
 
-        for (table, tags), results in results.items():
+        for (table, tags), results in results.iteritems():
             for r in results:
                 if r['count'] > 0:
                     return True
@@ -346,7 +346,7 @@ class InfluxSelector(InfluxConnection):
         except DBQueryException as e:
             return None
 
-        for (tbl, tags), results in results.items():
+        for (tbl, tags), results in results.iteritems():
             for r in results:
                 if r['count'] > 0:
                     if lasthour is None or r['time'] > lasthour:
@@ -363,7 +363,7 @@ class InfluxSelector(InfluxConnection):
         except DBQueryException as e:
             return None
 
-        for (tbl, tags), results in results.items():
+        for (tbl, tags), results in results.iteritems():
             for r in results:
                 return r['time'] / 1000000000
 
@@ -412,7 +412,7 @@ class InfluxSelector(InfluxConnection):
         except DBQueryException as e:
             return
 
-        for (tbl, tags), data in mdata.items():
+        for (tbl, tags), data in mdata.iteritems():
             for row in data:
                 if row['stream'] not in self.streams_to_labels:
                     continue
@@ -603,7 +603,7 @@ class InfluxSelector(InfluxConnection):
         #print querystring
 
         # Update the labels of the results
-        for (series, tags), generator in results.items():
+        for (series, tags), generator in results.iteritems():
             for result in generator:
                 label = self.streams_to_labels[tags["stream"]]
                 row = self._row_from_result(result, label)

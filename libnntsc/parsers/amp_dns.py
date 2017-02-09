@@ -162,17 +162,17 @@ class AmpDnsParser(NNTSCParser):
         stream = {}
         data = {}
 
-        for k, v in alldata.items():
+        for k, v in alldata.iteritems():
             if k == "results":
                 continue
             stream[k] = v
 
-        for k, v in result.items():
+        for k, v in result.iteritems():
             if k in streamkeys:
                 stream[k] = v
 
             elif k == "flags":
-                for f, fval in v.items():
+                for f, fval in v.iteritems():
                     if f in flagnames:
                         data["flag_" + f] = fval
                     else:

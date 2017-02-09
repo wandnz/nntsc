@@ -169,7 +169,7 @@ class DBSelector(DatabaseCore):
             if row is None:
                 break
             stream_dict = {}
-            for k, v in row.items():
+            for k, v in row.iteritems():
                 if k == "id":
                     continue
                 stream_dict[k] = v

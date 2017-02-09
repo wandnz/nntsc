@@ -176,7 +176,7 @@ class DBWorker(threading.Thread):
 
         if start is None or start >= now:
             # No historical data, send empty history for all streams
-            for label in labels.keys():
+            for label in labels.iterkeys():
                 err = self._enqueue_history(colid, label, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
                     return err
@@ -243,7 +243,7 @@ class DBWorker(threading.Thread):
 
         if start is None or start >= now:
             # No historical data, send empty history for all streams
-            for label in labels.keys():
+            for label in labels.iterkeys():
                 err = self._enqueue_history(colid, label, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
                     return err
@@ -284,7 +284,7 @@ class DBWorker(threading.Thread):
 
         if start >= now:
             # No historical data, send empty history for all streams
-            for label in labels.keys():
+            for label in labels.iterkeys():
                 err = self._enqueue_history(colid, label, [], False, 0, start)
                 if err != DBWORKER_SUCCESS:
                     return err
@@ -802,7 +802,7 @@ class DBWorker(threading.Thread):
         # Find a suitable mode amongst the timestamp differences. Make sure
         # the mode is reasonably strong -- shouldn't be much variation in
         # timestamp differences unless your measurements are patchy.
-        for td, count in freqdata['tsdiffs'].items():
+        for td, count in freqdata['tsdiffs'].iteritems():
             if count >= 0.5 * freqdata['totaldiffs']:
                 freq = td
                 break
@@ -1220,7 +1220,7 @@ class NNTSCExporter:
         # Always need these
         results = {"label":stream_id, "timestamp":timestamp}
 
-        for k, v in data.items():
+        for k, v in data.iteritems():
             if k in cols:
                 results[k] = v
 
@@ -1293,7 +1293,7 @@ class NNTSCExporter:
 
         active = {}
         self.clientlock.acquire()
-        for sock, subbed in self.collections[collid].items():
+        for sock, subbed in self.collections[collid].iteritems():
             if sock not in self.clients.keys():
                 continue
             if subbed == 0:
@@ -1354,7 +1354,7 @@ class NNTSCExporter:
         active = {}
 
         self.clientlock.acquire()
-        for sock, subbed in self.collections[coll_id].items():
+        for sock, subbed in self.collections[coll_id].iteritems():
             if sock not in self.clients.keys():
                 continue
             try:
