@@ -29,8 +29,6 @@
 #
 
 
-import sys
-
 nntsc_hdr_fmt = "!BBL"
 nntsc_req_fmt = "!LLQ"
 

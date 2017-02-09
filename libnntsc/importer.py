@@ -29,9 +29,7 @@
 #
 
 
-import os, sys
-
-import libnntsc.parsers
+import sys
 
 def import_parsers(enabled):
     modules = {}

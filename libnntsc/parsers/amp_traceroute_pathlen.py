@@ -32,7 +32,6 @@
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
-import operator, time
 
 class AmpTraceroutePathlenParser(AmpIcmpParser):
     def __init__(self, db, influxdb=None):

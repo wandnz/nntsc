@@ -30,7 +30,8 @@
 #
 
 
-import sys,getopt,struct,pickle,time
+import struct
+import pickle
 from socket import *
 from libnntscclient.protocol import *
 import libnntscclient.logger as logger

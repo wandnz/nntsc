@@ -28,11 +28,7 @@
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 
-import psycopg2
-import psycopg2.extras
 from libnntscclient.logger import *
-from libnntsc.parsers import amp_traceroute
-import time
 
 class QueryBuilder:
     def __init__(self):

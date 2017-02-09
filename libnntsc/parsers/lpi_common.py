@@ -29,7 +29,7 @@
 #
 
 
-import sys, struct
+import struct
 from socket import *
 import libnntscclient.logger as logger
 

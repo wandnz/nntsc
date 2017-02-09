@@ -31,7 +31,7 @@
 #
 
 
-import sys, socket, time, struct, getopt, signal
+import sys, socket, time, struct, getopt
 import cPickle as pickle
 from socket import *
 from multiprocessing import Pipe, Queue

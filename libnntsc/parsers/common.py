@@ -30,7 +30,6 @@
 
 from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
-import time
 
 class NNTSCParser(object):
     def __init__(self, db, influxdb=None):

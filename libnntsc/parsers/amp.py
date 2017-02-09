@@ -30,13 +30,13 @@
 
 
 import sys
+import signal
+import logging
 
 from libnntsc.database import DBInsert
 from libnntsc.influx import InfluxInsertor
 from libnntsc.configurator import *
-from libnntsc.pikaqueue import PikaConsumer, initExportPublisher, \
-        PikaNNTSCException, PIKA_CONSUMER_HALT, PIKA_CONSUMER_RETRY
-import pika
+from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
 from ampsave.importer import import_data_functions
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
@@ -48,8 +48,6 @@ from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 from libnntsc.dberrorcodes import *
 from google.protobuf.message import DecodeError
-import time, signal
-import logging
 
 import libnntscclient.logger as logger
 

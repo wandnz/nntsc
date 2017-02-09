@@ -30,7 +30,6 @@
 
 
 import libnntscclient.logger as logger
-import sys, string
 from libnntsc.dberrorcodes import *
 from libnntsc.parsers.common import NNTSCParser
 

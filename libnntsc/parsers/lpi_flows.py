@@ -32,7 +32,6 @@
 import libnntscclient.logger as logger
 from libnntsc.dberrorcodes import *
 from libnntsc.parsers.lpi_bytes import LPIBytesParser
-import sys, string
 
 # We can only really borrow process_data from the LPI bytes parser but
 # that's better than nothing...
