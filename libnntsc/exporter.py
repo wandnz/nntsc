@@ -34,7 +34,7 @@
 import sys, socket, time, struct, getopt
 import cPickle as pickle
 from socket import *
-from multiprocessing import Pipe, Queue
+from multiprocessing import Queue
 import Queue as StdQueue
 import threading, select
 
@@ -43,8 +43,7 @@ from libnntsc.influx import InfluxSelector
 from libnntsc.configurator import *
 from libnntscclient.protocol import *
 from libnntscclient.logger import *
-from libnntsc.pikaqueue import initExportConsumer, PIKA_CONSUMER_HALT, \
-        PIKA_CONSUMER_RETRY
+from libnntsc.pikaqueue import initExportConsumer
 from libnntsc.dberrorcodes import *
 
 # There are 4 classes defined in this file that form a hierarchy for

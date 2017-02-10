@@ -30,7 +30,8 @@
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 
-import sys, getopt, socket, time, os, imp
+import sys
+import getopt
 
 from libnntsc.database import DBInsert
 from libnntsc.influx import InfluxInsertor

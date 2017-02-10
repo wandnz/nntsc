@@ -35,7 +35,7 @@ import libnntscclient.logger as logger
 from libnntsc.configurator import get_nntsc_config
 import logging
 
-from multiprocessing import Queue, Process
+from multiprocessing import Queue
 from threading import Thread
 import Queue as StdQueue
 
