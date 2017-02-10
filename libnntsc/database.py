@@ -311,7 +311,7 @@ class DatabaseCore(object):
 
     def select_streams_by_module(self, mod):
         """ Fetches all streams that belong to collections that have a common
-            parent module, e.g. amp, lpi or rrd.
+            parent module, e.g. amp or rrd.
 
             For example, passing "amp" into this function would give you
             all amp-icmp and amp-traceroute streams.
@@ -323,7 +323,7 @@ class DatabaseCore(object):
             describing all of the stream parameters.
         """
 
-        # Find all streams for a given parent collection, e.g. amp, lpi
+        # Find all streams for a given parent collection, e.g. amp
         #
         # For each stream:
         #   Form a dictionary containing all the relevant information about

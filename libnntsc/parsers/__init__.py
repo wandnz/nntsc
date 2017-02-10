@@ -28,4 +28,4 @@
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 
-__all__ = ['rrd', 'lpi', 'amp']
+__all__ = ['rrd', 'amp']

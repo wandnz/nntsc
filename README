@@ -156,8 +156,6 @@ and their options are as follows:
            you've configured Influx to use another port.
     keepdata - the length of time to keep raw unaggregated data in the database.
                For example, '30d' will keep data for 30 days.
-    keeprollups - the length of time to keep aggregated data in the database.
-               For example, '365d' will keep data for a year.
 
 [liveexport]
   Options relating to the Rabbit queue that funnels newly collected data to
@@ -176,18 +174,6 @@ and their options are as follows:
 
   Available options:
         amp - controls whether NNTSC accepts data from AMP.
-        lpi - controls whether NNTSC accepts data from the libprotoident
-              collector.
-        rrd - controls whether NNTSC can read data from RRD files.
-
-[lpi]
-  Options relating to accepting and storing data from a libprotoident collector
-
-  Available options:
-  	server - the host that the LPI collector is running on. Leave blank if
-	         you do not wish to collect LPI data.
-	port - the port that the LPI collector is running on. If blank, this
-	       will default to 3678.
 
 [amp]
   Options relating to connecting to an AMP message queue and receiving AMP data
@@ -201,38 +187,6 @@ and their options are as follows:
 	queue - the name of the message queue to read AMP data from.
         commitfreq - the number of AMP messages to process before committing.
 
-[rrd]
-  Options relating to RRD file parsing.
-
-  Available options:
-  	rrdlist - the full path to another config file describing the RRD files
-	          that data should be read from. An example rrdlist file is
-		  given in conf/rrd.examples.
-
-RRD Lists
-=========
-Some supported NNTSC dataparsers harvest measurements from the RRD files
-created by other measurement tools. This allows users to deploy NNTSC
-alongside their existing monitoring setup. The canonical example is the
-Smokeping dataparser. In this case, the smokeping tool runs as per usual,
-writing its results to an RRD file. NNTSC will then read the most recent
-measurements from the RRD file and store them in its own database for later
-analysis. Unlike the RRD, though, NNTSC will keep the original measurements
-forever rather than aggregating them once they reach a certain age.
-
-The purpose of the RRD list file is tell NNTSC which RRD files it should read
-and what is being measured by each file. Currently, an RRD list will be
-required to use the following dataparsers:
- * Smokeping
- * Munin
-
-When build_nntsc_db is run, the RRD list file will be parsed and streams will
-be created in the NNTSC database for each described RRD. Once NNTSC itself is
-running, the specified RRDs will be frequently checked for new measurements.
-
-An example RRD list file is provided in conf/rrd.examples and it should be
-sufficient to help you write your own RRD list file.
-
 
 Building the Database
 =====================
@@ -243,9 +197,10 @@ collecting. NNTSC uses a postgresql database for its storage. First, decide
 on a name for your database -- in the following examples, I am going to use
 'nntsc' as the database name but you can choose anything you like.
 
-Next, create a Postgresql database and ensure that it is owned by the user that you will be ultimately connecting to the database as. In the simplest case, I
-will be connecting using my own username so I can create the nntsc database
-using:
+Next, create a Postgresql database and ensure that it is owned by the user
+that you will be ultimately connecting to the database as. In the simplest
+case, I will be connecting using my own username so I can create the nntsc
+database using:
 
 	createdb nntsc
 
