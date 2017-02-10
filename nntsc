@@ -71,14 +71,14 @@ class DataCollector():
         self.config = config
 
         # Work out which modules to blacklist
-        nntsc_conf      = load_nntsc_config(self.config)
+        nntsc_conf = load_nntsc_config(self.config)
         enabled_modules = []
         for module in nntsc_conf.options('modules'):
             if nntsc_conf.get('modules', module) == "yes":
                 enabled_modules.append(module)
         self.modules = import_parsers(enabled_modules)
 
-        self.exporter = NNTSCExporter(listen_port);
+        self.exporter = NNTSCExporter(listen_port)
         self.backgrounded = backgrounded
         self.exportonly = exportonly
         self.querytimeout = querytimeout
@@ -167,7 +167,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    if (args.configfile == None):
+    if args.configfile is None:
         print >> sys.stderr, "Must provide a config file using -C!"
         sys.exit(1)
     else:
@@ -177,7 +177,7 @@ if __name__ == '__main__':
 
     if args.background:
 
-        if args.pidfile == None:
+        if args.pidfile is None:
             pidfile = None
         else:
             pidfile = PidFile(args.pidfile)

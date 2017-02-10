@@ -47,7 +47,7 @@ class NNTSCClient:
         self.sock = None
 
     def send_request(self, reqtype, col, start=0):
-        if self.sock == None:
+        if self.sock is None:
             logger.log("Cannot send NNTSC_REQUEST on a closed socket!")
             return -1
 
@@ -72,7 +72,7 @@ class NNTSCClient:
         return 0
 
     def subscribe_streams(self, name, columns, labels, start, end, aggs):
-        if self.sock == None:
+        if self.sock is None:
             logger.log("Cannot send NNTSC_SUBSCRIBE on a closed socket!")
             return -1
 
@@ -94,7 +94,7 @@ class NNTSCClient:
         return 0
 
     def unsubscribe_streams(self, colid, streams):
-        if self.sock == None:
+        if self.sock is None:
             logger.log("Cannot send NNTSC_UNSUBSCRIBE on a closed socket!")
             return -1
 
@@ -110,7 +110,7 @@ class NNTSCClient:
         return 0
 
     def request_matrix(self, col, labels, start, end, aggcolumns, aggfunc):
-        if self.sock == None:
+        if self.sock is None:
             logger.log("Cannot send NNTSC_MATRIX on a closed socket!")
             return -1
 
@@ -134,7 +134,7 @@ class NNTSCClient:
     def request_aggregate(self, col, labels, start, end, aggcolumns, binsize,
             groupcolumns=[], aggfunc="avg"):
 
-        if self.sock == None:
+        if self.sock is None:
             logger.log("Cannot send NNTSC_AGGREGATE on a closed socket!")
             return -1
 
@@ -160,7 +160,7 @@ class NNTSCClient:
             ntilecolumns, othercolumns=[], ntileaggfunc="avg",
             otheraggfunc="avg"):
 
-        if self.sock == None:
+        if self.sock is None:
             logger.log("Cannot send NNTSC_PERCENTILE on a closed socket!")
             return -1
 
@@ -186,7 +186,7 @@ class NNTSCClient:
 
 
     def receive_message(self):
-        if self.sock == None:
+        if self.sock is None:
             logger.log("Cannot receive messages on a closed socket!")
             return -1
 

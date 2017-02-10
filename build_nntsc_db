@@ -55,12 +55,12 @@ def print_usage(prog):
     print
     sys.exit(0)
 
-clean_db        = False
+clean_db = False
 enabled_modules = []
 
-opts, rest = getopt.getopt(sys.argv[1:],'D:C:Fh')
+opts, rest = getopt.getopt(sys.argv[1:], 'D:C:Fh')
 
-for o,a in opts:
+for o, a in opts:
     if o == '-C':
         conf_fname = a
     if o == '-F':
