@@ -37,6 +37,7 @@ from libnntsc.parsers.rrd_muninbytes import RRDMuninbytesParser
 import libnntscclient.logger as logger
 import sys, rrdtool, time, signal
 from libnntsc.pikaqueue import initExportPublisher
+from libnntsc.influx import InfluxInsertor
 
 RRD_RETRY = 0
 RRD_CONTINUE = 1
@@ -56,8 +57,20 @@ class RRDModule:
                 dbconf["host"], cachetime=dbconf['cachetime'])
         self.db.connect_db(15)
 
-        self.smokeparser = RRDSmokepingParser(self.db)
-        self.muninparser = RRDMuninbytesParser(self.db)
+        self.influxconf = get_influx_config(nntsc_conf)
+        if self.influxconf == {}:
+            sys.exit(1)
+
+        if self.influxconf["useinflux"]:
+            self.influxdb = InfluxInsertor(
+                self.influxconf["name"], self.influxconf["user"], self.influxconf["pass"],
+                self.influxconf["host"], self.influxconf["port"])
+        else:
+            self.influxdb = None
+
+
+        self.smokeparser = RRDSmokepingParser(self.db, self.influxdb)
+        self.muninparser = RRDMuninbytesParser(self.db, self.influxdb)
 
         self.smokepings = {}
         self.muninbytes = {}
@@ -147,18 +160,21 @@ class RRDModule:
         update_needed = False
         datatable = None
 
+        if r['modsubtype'] == "smokeping":
+            parser = self.smokeparser
+        elif r['modsubtype'] == "muninbytes":
+            parser = self.muninparser
+        else:
+            parser = None
+
         for line in data:
 
+            if parser is None:
+                break
             if current == last:
                 break
 
             code = DB_DATA_ERROR
-            if r['modsubtype'] == "smokeping":
-                parser = self.smokeparser
-            elif r['modsubtype'] == "muninbytes":
-                parser = self.muninparser
-            else:
-                break
 
             parser.process_data(r['stream_id'], current, line)
             if datatable is None:
@@ -174,10 +190,17 @@ class RRDModule:
             return
 
         self.db.commit_data()
+        if self.influxdb:
+            try:
+                self.influxdb.commit_data()
+            except DBQueryException as e:
+                logger.log("Unexpected error while committing RRD data")
+                return
 
-        if datatable is not None:
+
+        if datatable is not None and parser is not None:
             self.db.update_timestamp(datatable, [r['stream_id']],
-                r['lasttimestamp'])
+                r['lasttimestamp'], parser.have_influx)
 
     def rrdloop(self):
         for fname,rrds in self.rrds.items():
@@ -241,7 +264,7 @@ def create_rrd_stream(db, rrdtype, params, index, existing, parser):
 
     parser.insert_stream(params)
 
-def insert_rrd_streams(db, conf):
+def insert_rrd_streams(db, influxdb, conf):
     smoke = RRDSmokepingParser(db)
     munin = RRDMuninbytesParser(db)
 
@@ -329,6 +352,14 @@ def run_module(rrds, config, key, exchange, queueid):
 
     if rrd.pubthread:
         rrd.pubthread.join()
+
+def create_cqs(db, influxdb):
+    
+    smoke = RRDSmokepingParser(db, influxdb)
+    smoke.build_cqs()
+
+    #munin = RRDMuninbytesParser(db, influxdb)
+    #munin.build_cqs()
 
 def tables(db):
 

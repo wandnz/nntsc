@@ -33,8 +33,8 @@ import libnntscclient.logger as logger
 
 class RRDMuninbytesParser(NNTSCParser):
 
-    def __init__(self, db):
-        super(RRDMuninbytesParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(RRDMuninbytesParser, self).__init__(db, influxdb)
 
         self.streamtable = "streams_rrd_muninbytes"
         self.datatable = "data_rrd_muninbytes"
