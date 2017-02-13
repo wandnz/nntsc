@@ -7,7 +7,7 @@ type=smokeping
 source=smokeping.example.org
 
 # This should be a short name identifying the host being tested to
-host=google.com
+host=www.google.com
 
 # The full path to the RRD file containing the smokeping results
 file=/var/lib/smokeping/google.rrd
@@ -16,4 +16,27 @@ file=/var/lib/smokeping/google.rrd
 # etc, so try to make it as descriptive as possible.
 name=Google Smokeping (IPv4)
 
+# Specifies which address family (ipv4 or ipv6) is being measured by this
+# RRD
+family=ipv4
+
+
+################
+
+# You can specify more RRDs just as long as each RRD described starts
+# with the "type=" line. For instance:
+
+type=smokeping
+source=smokeping.example.org
+host=www.wand.net.nz
+file=/var/lib/smokeping/wand.rrd
+name=WAND (IPv6)
+family=ipv6
+
+type=smokeping
+file=/var/lib/smokeping/github.rrd
+source=smokeping.example.org
+host=www.github.com
+family=ipv4
+name=GitHub (IPv4)
 

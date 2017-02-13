@@ -174,6 +174,7 @@ and their options are as follows:
 
   Available options:
         amp - controls whether NNTSC accepts data from AMP.
+        rrd - controls whether NNTSC should scrape data from RRDs.
 
 [amp]
   Options relating to connecting to an AMP message queue and receiving AMP data
@@ -186,6 +187,40 @@ and their options are as follows:
 	ssl - if True, encrypt all messages using SSL. If False, use plain-text.
 	queue - the name of the message queue to read AMP data from.
         commitfreq - the number of AMP messages to process before committing.
+
+[rrd]
+  Options relating to scraping data from existing RRD files. See "RRD
+  Scraping" below for more details on how to configure RRD scraping.
+
+  Available options:
+        rrdlist - the full path to a file describing the RRDs file to scrape.
+
+
+RRD Scraping
+============
+NNTSC includes the ability to harvest measurements from the RRD files
+created by other measurement tools. This allows users to deploy NNTSC
+alongside their existing monitoring setup. At present, NNTSC only supports
+scraping the RRD files produced by Smokeping.
+
+In the Smokeping case, the Smokeping tool runs as per usual, writing its
+results to an RRD file. NNTSC will then read the most recent measurements
+from the RRD file and store them in its own database for later analysis.
+Unlike the RRD, though, NNTSC will keep the measurements in their original
+format for as long as they remain in the database, rather than aggregating
+them once they reach a certain age.
+
+The RRD list file is used to tell NNTSC which RRD files it should read and
+what is being measured by each file. A documented example RRD list file is
+provided in conf/rrd.examples which should be sufficient to help you write
+your own RRD list file.
+
+When you run the script to build your NNTSC database, the RRD list file
+will be parsed and appropriate streams will be created for each RRD that
+is described in the file. Once NNTSC itself is running, the specified
+RRDs will be periodically checked for new datapoints. Should you decide
+you add new RRDs to your RRD list, you must re-run the database build script
+for NNTSC to recognise them.
 
 
 Building the Database
