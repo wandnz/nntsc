@@ -70,8 +70,6 @@ NNTSC has support for the following data sources:
 
   AMP -- the Active Measurement Project
   Smokeping RRDs
-  Libprotoident Collector
-  Munin RRDs
 
 
 Glossary
@@ -88,9 +86,8 @@ inserts them into the NNTSC database. Each collection has its own dataparser.
 metric: A term that describes what the data value for a time series actually
 represents. For instance, the ping values stored by the NNTSC smokeping
 collection and the rtt values stored by the AMP ICMP collection both measure
-latency, so the metric for these is 'latency'. Munin interface usage and LPI
-byte counts both measure traffic observed in bytes, so the metric there is
-'bytes'.
+latency, so the metric for these is 'latency'. A traceroute path length is
+measured in hops, so the metric in this case is 'hops'.
 
 module: Refers to the input source for a collection. The name 'module' is used
 because many collections share the same basic input source, e.g. all the AMP
