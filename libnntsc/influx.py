@@ -648,7 +648,7 @@ class InfluxSelector(InfluxConnection):
 
         for meas, agg in self.aggcols:
             if agg == 'smokearray':
-                if meas == "rtts":
+                if meas in ["rtts", 'pings']:
                     meas = '"median"'
                 col_names += ["percentile({0}, {1}) as \"{1}_percentile_rtt\"".format(
                     meas, i) for i in range(5,100,5)] + ["max({}) as \"max_rtt\"".format(
