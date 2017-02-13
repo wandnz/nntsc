@@ -100,6 +100,7 @@ if influxconf == {}:
     logger.log("Invalid options for influx database")
     sys.exit(1)
 
+influxdb = None
 if influxconf["useinflux"] and "amp" in modules.keys():
     try:
         influxdb = InfluxInsertor(
@@ -130,7 +131,7 @@ if 'rrd' in enabled_modules:
         sys.exit(0)
 
     try:
-        insert_rrd_streams(db, rrd_conf)
+        insert_rrd_streams(db, influxdb, rrd_conf)
     except DBQueryException as e:
         if e.code == DB_DATA_ERROR:
             logger.log("Failed to create RRD streams -- check RRD List for invalid content")

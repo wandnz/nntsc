@@ -17,28 +17,3 @@ file=/var/lib/smokeping/google.rrd
 name=Google Smokeping (IPv4)
 
 
-
-# Example configuration to read a munin RRD
-
-# type must be set to muninbytes -- type MUST be the first option
-type=muninbytes
-
-# This should be a label describing the device that measurements are coming from
-switch=Example Switch
-
-# This should be a unique value identifying the interface being measured, e.g.
-# the port number
-interface=20
-
-# This is an optional parameter that can be used to provide a textual
-# description of what the interface is used for / connected to
-interfacelabel=Steve's Desk
-
-# This is the direction measured, must be either 'sent' or 'received'.
-direction=received
-
-# The full path to the RRD file containing the munin byte counts for the
-# given switch / interface / direction combination.
-file=/var/lib/munin/internal/example-sw.internal-snmp_example_sw_internal_if_20-recv-d.rrd
-
-

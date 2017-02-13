@@ -29,12 +29,15 @@
 #
 
 from libnntsc.parsers.common import NNTSCParser
+from libnntsc.dberrorcodes import *
+import libnntscclient.logger as logger
 
 class RRDSmokepingParser(NNTSCParser):
 
-    def __init__(self, db):
-        super(RRDSmokepingParser, self).__init__(db)
+    def __init__(self, db, influxdb=None):
+        super(RRDSmokepingParser, self).__init__(db, influxdb)
 
+        self.influxdb = influxdb
         self.streamtable = "streams_rrd_smokeping"
         self.datatable = "data_rrd_smokeping"
         self.colname = "rrd_smokeping"
@@ -45,20 +48,34 @@ class RRDSmokepingParser(NNTSCParser):
             {"name":"filename", "type":"varchar", "null":False},
             {"name":"source", "type":"varchar", "null":False},
             {"name":"host", "type":"varchar", "null":False},
+            {"name":"family", "type":"varchar", "null":False},
             {"name":"minres", "type":"integer", "null":False, "default":"300"},
             {"name":"highrows", "type":"integer", "null":False,
                     "default":"1008"}
         ]
 
-        self.uniquecolumns = ['filename', 'source', 'host']
-        self.streamindexes = []
+        self.uniquecolumns = ['filename', 'source', 'host', 'family']
+        self.streamindexes = [
+            {"name": "", "columns": ['source']},
+            {"name": "", "columns": ['host']},
+        ]
 
         self.datacolumns = [
-            {"name":"loss", "type":"smallint"},
-            {"name":"median", "type":"double precision"},
-            {"name":"pings", "type":"double precision[]"}
+            {"name":"loss", "type":"smallint", "null":True},
+            {"name":"pingsent", "type": "smallint", "null": True},
+            {"name":"median", "type":"double precision", "null": True},
+            {"name":"pings", "type":"double precision[]", "null": True},
+            {"name":"lossrate", "type": "float", "null": False},
         ]
+
         self.dataindexes = []
+
+        self.matrix_cq = [
+            ("median", "mean", "median_avg"),
+            ("median", "stddev", "median_stddev"),
+            ("median", "count", "median_count"),
+            ("loss", "sum", "loss_sum"),
+        ]
 
     def insert_stream(self, streamparams):
         if 'source' not in streamparams:
@@ -70,10 +87,13 @@ class RRDSmokepingParser(NNTSCParser):
         if 'name' not in streamparams:
             logger.log("Missing 'name' parameter for Smokeping RRD")
             return DB_DATA_ERROR
+        if 'family' not in streamparams:
+            logger.log("Missing 'family' parameter for Smokeping RRD")
+            return DB_DATA_ERROR
 
         streamparams['filename'] = streamparams.pop('file')
 
-        return self.create_new_stream(streamparams, 0)
+        return self.create_new_stream(streamparams, 0, not self.have_influx)
 
 
     def process_data(self, stream, ts, line):
@@ -93,7 +113,9 @@ class RRDSmokepingParser(NNTSCParser):
 
         kwargs['pings'] = []
 
+        sent = 0
         for i in range(3, len(line)):
+            sent += 1
             if line[i] == None:
                 val = None
             else:
@@ -101,7 +123,16 @@ class RRDSmokepingParser(NNTSCParser):
 
             kwargs['pings'].append(val)
 
-        casts = {"pings":"double precision[]"}
+        kwargs['pingsent'] = sent
+        if sent == 0 or kwargs['loss'] is None:
+            kwargs['lossrate'] = None
+        else:
+            kwargs['lossrate'] = kwargs['loss'] / float(sent)
+
+        if self.influxdb:
+            casts = {"pings": str}
+        else:
+            casts = {"pings":"double precision[]"}
         self.insert_data(stream, ts, kwargs, casts)
 
 
