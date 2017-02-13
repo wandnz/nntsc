@@ -33,7 +33,6 @@ from libnntsc.database import DBInsert
 from libnntsc.dberrorcodes import *
 from libnntsc.configurator import *
 from libnntsc.parsers.rrd_smokeping import RRDSmokepingParser
-from libnntsc.parsers.rrd_muninbytes import RRDMuninbytesParser
 import libnntscclient.logger as logger
 import sys, rrdtool, time, signal
 from libnntsc.pikaqueue import initExportPublisher
@@ -70,20 +69,13 @@ class RRDModule:
 
 
         self.smokeparser = RRDSmokepingParser(self.db, self.influxdb)
-        self.muninparser = RRDMuninbytesParser(self.db, self.influxdb)
-
         self.smokepings = {}
-        self.muninbytes = {}
         self.rrds = {}
         for r in rrds:
             if r['modsubtype'] == 'smokeping':
                 lastts = self.smokeparser.get_last_timestamp(r['stream_id'])
                 r['lasttimestamp'] = lastts
                 self.smokepings[r['stream_id']] = r
-            elif r['modsubtype'] == 'muninbytes':
-                lastts = self.muninparser.get_last_timestamp(r['stream_id'])
-                r['lasttimestamp'] = lastts
-                self.muninbytes[r['stream_id']] = r
             else:
                 continue
 
@@ -107,7 +99,6 @@ class RRDModule:
                     initExportPublisher(nntsc_conf, routekey, exchange, queueid)
 
             self.smokeparser.add_exporter(self.exporter)
-            self.muninparser.add_exporter(self.exporter)
 
     def rejig_ts(self, endts, r):
         # Doing dumbass stuff that I shouldn't have to do to ensure
@@ -162,8 +153,6 @@ class RRDModule:
 
         if r['modsubtype'] == "smokeping":
             parser = self.smokeparser
-        elif r['modsubtype'] == "muninbytes":
-            parser = self.muninparser
         else:
             parser = None
 
@@ -266,7 +255,6 @@ def create_rrd_stream(db, rrdtype, params, index, existing, parser):
 
 def insert_rrd_streams(db, influxdb, conf):
     smoke = RRDSmokepingParser(db)
-    munin = RRDMuninbytesParser(db)
 
     try:
         rrds = db.select_streams_by_module("rrd")
@@ -308,8 +296,6 @@ def insert_rrd_streams(db, influxdb, conf):
             if parameters != {}:
                 if subtype == "smokeping":
                     parser = smoke
-                elif subtype == "muninbytes":
-                    parser = munin
                 else:
                     parser = None
 
@@ -330,8 +316,6 @@ def insert_rrd_streams(db, influxdb, conf):
     if parameters != {}:
         if subtype == "smokeping":
             parser = smoke
-        elif subtype == "muninbytes":
-            parser = munin
         else:
             parser = None
 
@@ -358,16 +342,10 @@ def create_cqs(db, influxdb):
     smoke = RRDSmokepingParser(db, influxdb)
     smoke.build_cqs()
 
-    #munin = RRDMuninbytesParser(db, influxdb)
-    #munin.build_cqs()
-
 def tables(db):
 
     smoke = RRDSmokepingParser(db)
-    munin = RRDMuninbytesParser(db)
-
     smoke.register()
-    munin.register()
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
