@@ -48,12 +48,13 @@ class RRDSmokepingParser(NNTSCParser):
             {"name":"filename", "type":"varchar", "null":False},
             {"name":"source", "type":"varchar", "null":False},
             {"name":"host", "type":"varchar", "null":False},
+            {"name":"family", "type":"varchar", "null":False},
             {"name":"minres", "type":"integer", "null":False, "default":"300"},
             {"name":"highrows", "type":"integer", "null":False,
                     "default":"1008"}
         ]
 
-        self.uniquecolumns = ['filename', 'source', 'host']
+        self.uniquecolumns = ['filename', 'source', 'host', 'family']
         self.streamindexes = [
             {"name": "", "columns": ['source']},
             {"name": "", "columns": ['host']},
@@ -85,6 +86,9 @@ class RRDSmokepingParser(NNTSCParser):
             return DB_DATA_ERROR
         if 'name' not in streamparams:
             logger.log("Missing 'name' parameter for Smokeping RRD")
+            return DB_DATA_ERROR
+        if 'family' not in streamparams:
+            logger.log("Missing 'family' parameter for Smokeping RRD")
             return DB_DATA_ERROR
 
         streamparams['filename'] = streamparams.pop('file')
