@@ -50,11 +50,13 @@ class AmpThroughputParser(NNTSCParser):
             {"name":"duration", "type":"integer", "null":False},
             {"name":"writesize", "type":"integer", "null":False},
             {"name":"tcpreused", "type":"boolean", "null":False},
+            {"name":"protocol", "type":"varchar", "null":False},
         ]
 
         self.uniquecolumns = [
-            'source', 'destination', 'direction', \
-            'address', 'duration', 'writesize', 'tcpreused']
+            'source', 'destination', 'direction', 'address',
+            'duration', 'writesize', 'tcpreused', 'protocol',
+        ]
 
         self.streamindexes = [
             {"name": "", "columns": ['source']},
@@ -83,8 +85,10 @@ class AmpThroughputParser(NNTSCParser):
         duration = str(stream_data["duration"])
         writesize = str(stream_data["writesize"])
         reused = stream_data["tcpreused"]
+        protocol = str(stream_data["protocol"])
 
-        key = (src, dest, direction, remote, duration, writesize, reused)
+        key = (src, dest, direction, remote, duration, writesize, reused,
+                protocol)
         return key
 
     def create_existing_stream(self, stream_data):
@@ -127,6 +131,7 @@ class AmpThroughputParser(NNTSCParser):
             resdict['duration'] = result['duration']
             resdict['runtime'] = result['runtime']
             resdict['bytes'] = result['bytes']
+            resdict['protocol'] = data['protocol']
 
             if result['duration'] is not None and result['duration'] > 0:
                 resdict['rate'] = result['bytes'] / float(result['duration'])

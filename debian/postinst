@@ -58,6 +58,34 @@ case "$1" in
              /usr/sbin/rabbitmqctl set_permissions nntsc ".*" ".*" ".*" && \
              sed -i "s/username = guest/username = nntsc/" $CONF && \
              sed -i "s/password = guest/password = $PASSWD/" $CONF)
+
+        if [ -n $2 ]; then
+            if dpkg --compare-versions "$2" le-nl "2.11-1"; then
+                # add new protocol column and update table constraints
+                su postgres -c "psql -q -c \
+                    \"ALTER TABLE streams_amp_throughput \
+                    ADD COLUMN protocol \
+                    VARCHAR NOT NULL DEFAULT 'default'\" -d nntsc || true"
+
+                su postgres -c "psql -q -c \
+                    \"ALTER TABLE streams_amp_throughput DROP CONSTRAINT \
+                    streams_amp_throughput_source_destination_direction_address_key; \
+                    \" -d nntsc || true"
+
+                su postgres -c "psql -q -c \
+                    \"ALTER TABLE streams_amp_throughput ADD CONSTRAINT \
+                    streams_amp_throughput_source_destination_direction_address_key \
+                    UNIQUE (            \
+                        source,         \
+                        destination,    \
+                        direction,      \
+                        address,        \
+                        duration,       \
+                        writesize,      \
+                        tcpreused,      \
+                        protocol);\" -d nntsc || true"
+            fi
+        fi
     ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
