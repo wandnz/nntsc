@@ -1,3 +1,14 @@
+nntsc (2.12-1) unstable; urgency=low
+
+  * Remove unused collections (lpi, munin, etc) and other unused files.
+  * Update RRD smokeping to work again.
+  * Remove pywandevent - it is now standalone and not part of nntsc.
+  * Update license to GPL version 2.
+  * Add "protocol" column to throughput test results.
+  * Catch errors when dropping continuous queries from influx during install.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Mon, 10 May 2017 15:45:28 +1200
+
 nntsc (2.11-1) unstable; urgency=low
 
   * Add lossrate and throughput rate metrics to data tables.
