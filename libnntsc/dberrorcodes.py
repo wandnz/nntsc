@@ -37,6 +37,7 @@ DB_CODING_ERROR = -5
 DB_DUPLICATE_KEY = -6
 DB_NO_CURSOR = -7
 DB_QUERY_TIMEOUT = -8
+DB_CQ_ERROR = -9
 
 class DBQueryException(Exception):
     def __init__(self, code):
@@ -58,6 +59,8 @@ class DBQueryException(Exception):
             return "Connection to NNTSC database was lost"
         if self.code == DB_NO_CURSOR:
             return "Could not execute query as had no valid cursor"
+        if self.code == DB_CQ_ERROR:
+            return "Attempted to modify a continuous query that doesn't exist"
         if self.code == DB_NO_ERROR:
             return "No error occurred, why are we getting this exception?"
         return "Unknown error code for DBQueryException: %d" % (self.code)

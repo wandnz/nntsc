@@ -81,16 +81,19 @@ class InfluxConnection(object):
         try:
             return self.client.query(query, epoch='s')
         except Exception as e:
-            print query
-            self.handler(e)
+            self.handler(e, query)
 
-    def handler(self, db_exception):
+    def handler(self, db_exception, query=None):
         """
         A basic error handler for queries to database
         """
         try:
             raise db_exception
         except InfluxDBClientError as e:
+            if "continuous query not found" in e:
+                raise DBQueryException(DB_CQ_ERROR)
+            if query is not None:
+                print query
             logger.log(e)
             raise DBQueryException(DB_GENERIC_ERROR)
         except InfluxDBServerError as e:
@@ -154,13 +157,21 @@ class InfluxInsertor(InfluxConnection):
                 countcols.append(cq[0])
                 aggstring += ", count({}) AS magiccount_{}".format(cq[0], cq[0].replace('"', ''))
 
-        query = """ DROP CONTINUOUS QUERY {0} ON {1}
-                """.format(daycqname, self.dbname)
-        self.query(query)
+        try:
+            query = """ DROP CONTINUOUS QUERY {0} ON {1}
+                    """.format(daycqname, self.dbname)
+            self.query(query)
+        except DBQueryException as e:
+            if e.code != DB_CQ_ERROR:
+                raise
 
-        query = """ DROP CONTINUOUS QUERY {0} ON {1}
-                """.format(shortcqname, self.dbname)
-        self.query(query)
+        try:
+            query = """ DROP CONTINUOUS QUERY {0} ON {1}
+                    """.format(shortcqname, self.dbname)
+            self.query(query)
+        except DBQueryException as e:
+            if e.code != DB_CQ_ERROR:
+                raise
 
         query = """
             CREATE CONTINUOUS QUERY {0} ON {1} RESAMPLE EVERY 1h FOR 3h BEGIN
