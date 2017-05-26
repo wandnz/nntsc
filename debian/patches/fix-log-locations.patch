@@ -1,8 +1,8 @@
 Log to /var/log/nntsc/ rather than /tmp/.
 --- a/nntsc
 +++ b/nntsc
-@@ -58,7 +58,7 @@
-     def __init__(self, listen_port, config, backgrounded, exportonly, 
+@@ -67,7 +67,7 @@
+     def __init__(self, listen_port, config, backgrounded, exportonly,
              querytimeout):
          if backgrounded:
 -            logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
