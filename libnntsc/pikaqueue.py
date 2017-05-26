@@ -52,6 +52,12 @@ class PikaNNTSCException(Exception):
         else:
             return "NNTSC Exception encountered while reading Rabbit Queue -- halting"
 
+class PikaReconnectionException(Exception):
+    def __init__(self):
+        pass
+    def __str__(self):
+        return "Pika Disconnection: try to reconnect"
+
 class PikaBasicAsync(object):
     def __init__(self, exchange, queuename, host, port, ssl, user, pword,
             durable):
@@ -80,22 +86,12 @@ class PikaBasicAsync(object):
         return connection
 
     def connect(self):
+        logger.log("Pika connect")
         self._connection = self._pikaConnect(self._host, self._port, self._ssl,
                 self._credentials)
 
     def reconnect(self):
-        self._connection.ioloop.stop()
-        while not self._closing:
-            self._connection = self._pikaConnect(self._host, self._port,
-                    self._ssl, self._credentials)
-
-            try:
-                self._connection.ioloop.start()
-            except EOFError as e:
-                time.sleep(5)
-                continue
-
-            break
+        raise PikaReconnectionException()
 
     def close_channel(self):
         if self._channel:
@@ -119,7 +115,8 @@ class PikaBasicAsync(object):
         if self._closing:
             self._connection.ioloop.stop()
         else:
-            logger.log("Pika connection closed, retrying")
+            logger.log("Pika connection closed, retrying: %s %s" % \
+                    (reply_code, reply_text))
             self._connection.add_timeout(5, self.reconnect)
 
     def _pikaChannelOpen(self, channel):
@@ -148,8 +145,12 @@ class PikaBasicAsync(object):
         return
 
     def run(self):
-        self.connect()
-        self._connection.ioloop.start()
+        while not self._closing:
+            try:
+                self.connect()
+                self._connection.ioloop.start()
+            except PikaReconnectionException:
+                self._connection.ioloop.stop()
 
 class PikaPublisher(PikaBasicAsync):
 
