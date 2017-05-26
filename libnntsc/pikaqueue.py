@@ -86,7 +86,6 @@ class PikaBasicAsync(object):
         return connection
 
     def connect(self):
-        logger.log("Pika connect")
         self._connection = self._pikaConnect(self._host, self._port, self._ssl,
                 self._credentials)
 
