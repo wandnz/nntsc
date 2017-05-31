@@ -41,7 +41,7 @@ from requests import ConnectionError
 import requests
 import math
 
-DEFAULT_RP = "default"
+DEFAULT_RP = "nntscdefault"
 MATRIX_LONG_RP = "matrixlong"
 MATRIX_SHORT_RP = "matrixshort"
 
