@@ -1,3 +1,11 @@
+nntsc (2.13-1) unstable; urgency=low
+
+  * Avoid recursive pika connections so that unstable connections don't cause
+    python to crash when reaching maximum recursion depth.
+  * Avoid using "default" (now a reserved word) as influx retention policy name.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Thu,  6 Jul 2017 11:39:24 +1200
+
 nntsc (2.12-1) unstable; urgency=low
 
   * Remove unused collections (lpi, munin, etc) and other unused files.
