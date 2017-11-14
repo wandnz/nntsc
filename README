@@ -151,8 +151,8 @@ and their options are as follows:
            database is on the local machine.
     port - the port that the Influx daemon is listening on. Use 8086 unless
            you've configured Influx to use another port.
-    keepdata - the length of time to keep raw unaggregated data in the database.
-               For example, '30d' will keep data for 30 days.
+    keepdata - the length of time to keep data in the database. For example,
+               '30d' will keep data for 30 days.
 
 [liveexport]
   Options relating to the Rabbit queue that funnels newly collected data to
