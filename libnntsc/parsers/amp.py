@@ -46,6 +46,7 @@ from libnntsc.parsers.amp_http import AmpHttpParser
 from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
+from libnntsc.parsers.amp_youtube import AmpYoutubeParser
 from libnntsc.dberrorcodes import *
 from google.protobuf.message import DecodeError
 
@@ -104,7 +105,8 @@ class AmpModule:
             "dns": [AmpDnsParser(self.db, self.influxdb)],
             "http": [AmpHttpParser(self.db, self.influxdb)],
             "udpstream": [AmpUdpstreamParser(self.db, self.influxdb)],
-            "tcpping": [AmpTcppingParser(self.db, self.influxdb)]
+            "tcpping": [AmpTcppingParser(self.db, self.influxdb)],
+            "youtube": [AmpYoutubeParser(self.db, self.influxdb)],
         }
 
         # set all the streams that we already know about for easy lookup of
@@ -327,7 +329,7 @@ def create_cqs(db, influxdb):
 
     for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
                 AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
-                AmpTraceroutePathlenParser]:
+                AmpTraceroutePathlenParser, AmpYoutubeParser]:
         parser = p(db, influxdb)
         parser.build_cqs()
 
@@ -336,6 +338,7 @@ def tables(db):
     for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
                 AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
                 AmpTraceroutePathlenParser, AmpTracerouteParser,
+                AmpYoutubeParser,
                 ]:
         parser = p(db)
         parser.register()
