@@ -70,6 +70,24 @@ def get_nntsc_config_bool(nntsc_config, section, option):
 
     return result
 
+def get_nntsc_config_integer(nntsc_config, section, option):
+    if nntsc_config == 0:
+        log("Attempted to get a config option after loading failed!")
+        return "NNTSCConfigError"
+
+    try:
+        result = nntsc_config.getint(section, option)
+    except ConfigParser.NoSectionError:
+        return "NNTSCConfigMissing"
+    except ConfigParser.NoOptionError:
+        return "NNTSCConfigMissing"
+    except ValueError:
+        logger.log("Option '%s' in section '%s' must be an integer" % (
+                    option, section))
+        return "NNTSCConfigError"
+
+    return result
+
 def get_nntsc_config(nntsc_config, section, option):
 
     if nntsc_config == 0:
@@ -154,5 +172,18 @@ def get_nntsc_db_config(nntsc_config):
     return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass,
             "cachetime":int(cachetime)}
 
+
+def get_nntsc_net_config(nntsc_config):
+    address = get_nntsc_config(nntsc_config, 'nntsc', 'address')
+    if address == "NNTSCConfigMissing":
+        address = ""
+    port = get_nntsc_config_integer(nntsc_config, 'nntsc', 'port')
+    if port == "NNTSCConfigMissing":
+        port = 61234
+
+    if "NNTSCConfigError" in [address, port]:
+        return {}
+
+    return {"address": address, "port": port}
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -1180,7 +1180,8 @@ class NNTSCClient(threading.Thread):
             self.jobs.put((-1, None), True, 60)
 
 class NNTSCExporter:
-    def __init__(self, port):
+    def __init__(self, address, port):
+        self.listen_address = address
         self.listen_port = port
         self.listen_sock = None
         self.dbconf = None
@@ -1498,7 +1499,7 @@ class NNTSCExporter:
         if key not in self.sources:
             self.sources.append(key)
 
-    def create_listener(self, port):
+    def create_listener(self, address, port):
 
         try:
             s = socket(AF_INET, SOCK_STREAM)
@@ -1513,9 +1514,9 @@ class NNTSCExporter:
             return -1
 
         try:
-            s.bind(('', port))
+            s.bind((address, port))
         except error, msg:
-            log("Failed to bind to port %d: %s" % (port, msg[1]))
+            log("Failed to bind to %s:%d: %s" % (address, port, msg[1]))
             return -1
 
         try:
@@ -1543,7 +1544,8 @@ class NNTSCExporter:
         self.influxconf = influxconf
         self.dbtimeout = dbtimeout
 
-        self.listen_sock = self.create_listener(self.listen_port)
+        self.listen_sock = self.create_listener(self.listen_address,
+                self.listen_port)
 
         if self.listen_sock == -1:
             return -1
@@ -1627,7 +1629,7 @@ if __name__ == '__main__':
         if o == '-h':
             print_usage(sys.argv[0])
 
-    exp = NNTSCExporter(listen_port)
+    exp = NNTSCExporter("", listen_port)
     exp.configure(rest[0])
     exp.run()
 

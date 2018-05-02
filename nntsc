@@ -64,8 +64,7 @@ class DataCollector():
         except Exception, e:
             raise
 
-    def __init__(self, listen_port, config, backgrounded, exportonly,
-            querytimeout):
+    def __init__(self, config, backgrounded, exportonly, querytimeout):
         if backgrounded:
             logger.createLogger(True, "/tmp/nntsc.log", "NNTSC")
         self.config = config
@@ -78,7 +77,11 @@ class DataCollector():
                 enabled_modules.append(module)
         self.modules = import_parsers(enabled_modules)
 
-        self.exporter = NNTSCExporter(listen_port)
+        netconf = get_nntsc_net_config(nntsc_conf)
+        if netconf == {}:
+            sys.exit(1)
+
+        self.exporter = NNTSCExporter(netconf["address"], netconf["port"])
         self.backgrounded = backgrounded
         self.exportonly = exportonly
         self.querytimeout = querytimeout
@@ -159,7 +162,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-C", "--configfile", help="Specify the location of the NNTSC config file")
-    parser.add_argument("-p", "--port", help="The port to listen for incoming connections on (default: 61234)", default=61234, type=int)
     parser.add_argument("-b", "--background", help="Run as a daemon", action="store_true")
     parser.add_argument("-P", "--pidfile", help="PID file location (if running backgrounded)", default=None)
     parser.add_argument("-E", "--exportonly", help="Run the exporter only -- do not collect any new data", action="store_true")
@@ -173,8 +175,6 @@ if __name__ == '__main__':
     else:
         config = args.configfile
 
-    listen_port = args.port
-
     if args.background:
 
         if args.pidfile is None:
@@ -186,13 +186,12 @@ if __name__ == '__main__':
         context.pidfile = pidfile
 
         with context:
-            dc = DataCollector(listen_port, config, True, args.exportonly,
+            dc = DataCollector(config, True, args.exportonly,
                     args.querytimeout)
             dc.run()
 
     else:
-        dc = DataCollector(listen_port, config, False, args.exportonly,
-                args.querytimeout)
+        dc = DataCollector(config, False, args.exportonly, args.querytimeout)
         try:
             dc.run()
         except KeyboardInterrupt:
