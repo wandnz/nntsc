@@ -42,6 +42,7 @@ import requests
 import math
 
 DEFAULT_RP = "nntscdefault"
+OLD_DEFAULT_RP = "default"
 MATRIX_LONG_RP = "matrixlong"
 MATRIX_SHORT_RP = "matrixshort"
 
@@ -114,9 +115,25 @@ class InfluxInsertor(InfluxConnection):
     def __init__(self, dbname, user, password, host, port, timeout=None):
         super(InfluxInsertor, self).__init__(dbname, user, password, host, port, timeout)
         self.to_write = []
+        self.default_rp = DEFAULT_RP
 
-    def commit_data(self, retention_policy=DEFAULT_RP):
+        # old installations are still using the retention policy named
+        # "default", and changing policy will cause a break in the data.
+        # Just let them keep using it for now.
+        try:
+            rps = self.client.get_list_retention_policies()
+        except Exception as e:
+            self.handler(e)
+
+        for rp in rps:
+            if rp["name"] == OLD_DEFAULT_RP and rp["default"]:
+                self.default_rp = OLD_DEFAULT_RP
+                break
+
+    def commit_data(self, retention_policy=None):
         """Send all data that has been observed"""
+        if retention_policy is None:
+            retention_policy = self.default_rp
         try:
             self.client.write_points(self.to_write, time_precision="s",
                                      retention_policy=retention_policy)
@@ -236,7 +253,7 @@ class InfluxInsertor(InfluxConnection):
             extra_rps = []
 
             for rp in rps:
-                if rp["name"] == DEFAULT_RP:
+                if rp["name"] == self.default_rp:
                     default_exists = True
                 elif rp["name"] == MATRIX_SHORT_RP:
                     matrixshort_exists = True
@@ -247,10 +264,10 @@ class InfluxInsertor(InfluxConnection):
 
             if default_exists:
                 self.client.alter_retention_policy(
-                    DEFAULT_RP, duration=keepdata, default=True)
+                    self.default_rp, duration=keepdata, default=True)
             else:
                 self.client.create_retention_policy(
-                    DEFAULT_RP, duration=keepdata, replication=1, default=True)
+                    self.default_rp, duration=keepdata, replication=1, default=True)
 
             if matrixlong_exists:
                 self.client.alter_retention_policy(
