@@ -1,3 +1,11 @@
+nntsc (2.14-1) unstable; urgency=low
+
+  * Add basic support for AMP YouTube test data.
+  * Allow setting local address and port in configuration file.
+  * Try not to break legacy installations using old "default" retention policy.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Wed,  1 Aug 2018 11:58:39 +1200
+
 nntsc (2.13-1) unstable; urgency=low
 
   * Avoid recursive pika connections so that unstable connections don't cause
