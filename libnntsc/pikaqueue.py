@@ -126,7 +126,7 @@ class PikaBasicAsync(object):
         if self._exchangename != '':
             self._channel.exchange_declare(self._pikaExchangeDeclared,
                     exchange=self._exchangename,
-                    type='direct')
+                    exchange_type='direct')
         else:
             self._channel.queue_declare(self._pikaQueueDeclared,
                     self._queuename, durable=self._durable)
