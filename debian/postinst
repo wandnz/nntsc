@@ -22,14 +22,13 @@ case "$1" in
     configure)
         CONF=/etc/nntsc/nntsc.conf
 
-        echo "============================================================"
-        echo "Debian has old python packages, if you haven't already:"
-        echo
-        echo "pip install influxdb"
         if [ `lsb_release -c -s` = "wheezy" ]; then
-            echo "pip install --upgrade pika"
+            echo "============================================================"
+            echo "Debian Wheezy has old python packages, run:"
+            echo
+            echo "  sudo pip install --upgrade pika"
+            echo "============================================================"
         fi
-        echo "============================================================"
 
         # ensure the cuz system user exists
         if ! getent passwd cuz > /dev/null; then
