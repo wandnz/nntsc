@@ -1,3 +1,10 @@
+nntsc (2.15-1) unstable; urgency=low
+
+  * Stop using deprecated parameter that has been removed in the latest pika.
+  * Add python-influxdb as a dependency.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Fri, 14 Sep 2018 16:22:59 +1200
+
 nntsc (2.14-1) unstable; urgency=low
 
   * Add basic support for AMP YouTube test data.
