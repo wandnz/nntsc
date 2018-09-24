@@ -9,7 +9,7 @@ Homepage: http://wand.net.nz/projects/details/storage-network-monitoring-and-mea
 #Vcs-Browser: http://git.debian.org/?p=collab-maint/nntsc.git;a=summary
 
 Package: libnntsc-client
-Architecture: any
+Architecture: all
 Depends: ${shlibs:Depends}, ${misc:Depends}, ${python:Depends}
 Description: Client API for NNTSC time series collector
  Client API that allows other programs to connect to the NNTSC
