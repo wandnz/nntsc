@@ -1,3 +1,10 @@
+libnntsc-client (1.7-2) unstable; urgency=low
+
+  * Change package architecture from "any" to "all".
+  * Force using older gzip compression when building package.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Mon, 24 Sep 2018 15:01:24 +1200
+
 libnntsc-client (1.7-1) unstable; urgency=low
 
   * Updated to include new messages used for the InfluxDB backed matrix.
