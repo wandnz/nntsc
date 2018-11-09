@@ -1,3 +1,12 @@
+nntsc (2.16-1) unstable; urgency=low
+
+  * Change package architecture from "any" to "all".
+  * Force using older gzip compression when building package.
+  * Add adduser as a package dependency.
+  * Fix some minor issues as identified by pylint.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Thu,  9 Nov 2018 15:29:30 +1300
+
 nntsc (2.15-1) unstable; urgency=low
 
   * Stop using deprecated parameter that has been removed in the latest pika.
