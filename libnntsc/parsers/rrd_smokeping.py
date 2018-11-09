@@ -29,7 +29,7 @@
 #
 
 from libnntsc.parsers.common import NNTSCParser
-from libnntsc.dberrorcodes import *
+from libnntsc.dberrorcodes import DB_DATA_ERROR
 import libnntscclient.logger as logger
 
 class RRDSmokepingParser(NNTSCParser):
@@ -100,13 +100,13 @@ class RRDSmokepingParser(NNTSCParser):
         kwargs = {}
 
         if len(line) >= 1:
-            if line[1] == None:
+            if line[1] is None:
                 kwargs['loss'] = None
             else:
                 kwargs['loss'] = int(float(line[1]))
 
         if len(line) >= 2:
-            if line[2] == None:
+            if line[2] is None:
                 kwargs['median'] = None
             else:
                 kwargs['median'] = round(float(line[2]) * 1000.0, 6)
@@ -116,7 +116,7 @@ class RRDSmokepingParser(NNTSCParser):
         sent = 0
         for i in range(3, len(line)):
             sent += 1
-            if line[i] == None:
+            if line[i] is None:
                 val = None
             else:
                 val = round(float(line[i]) * 1000.0, 6)

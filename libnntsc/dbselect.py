@@ -56,7 +56,7 @@ class DBSelector(DatabaseCore):
                  timeout=0, cachetime=0):
 
         super(DBSelector, self).__init__(dbname, dbuser, dbpass, dbhost,
-                False, False, timeout, cachetime)
+                timeout, cachetime)
 
         self.qb = QueryBuilder()
         self.dbselid = uniqueid
@@ -87,7 +87,7 @@ class DBSelector(DatabaseCore):
 
     def _dataquery(self, query, params=None):
 
-        while 1:
+        while True:
             try:
                 self.data.closecursor()
             except DBQueryException as e:

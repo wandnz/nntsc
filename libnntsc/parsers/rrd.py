@@ -29,12 +29,16 @@
 #
 
 
+import signal
+import sys
+import time
+
+import rrdtool
 from libnntsc.database import DBInsert
 from libnntsc.dberrorcodes import *
 from libnntsc.configurator import *
 from libnntsc.parsers.rrd_smokeping import RRDSmokepingParser
 import libnntscclient.logger as logger
-import sys, rrdtool, time, signal
 from libnntsc.pikaqueue import initExportPublisher
 from libnntsc.influx import InfluxInsertor
 
@@ -117,7 +121,7 @@ class RRDModule:
 
         startts = endts - (r['highrows'] * r['minres'])
 
-        if (r['lasttimestamp'] is not None and r["lasttimestamp"] > startts):
+        if r['lasttimestamp'] is not None and r["lasttimestamp"] > startts:
             startts = r["lasttimestamp"]
 
         # XXX Occasionally we manage to push our endts back past our last
@@ -192,7 +196,7 @@ class RRDModule:
                 r['lasttimestamp'], parser.have_influx)
 
     def rrdloop(self):
-        for fname,rrds in self.rrds.items():
+        for fname, rrds in self.rrds.items():
             for r in rrds:
                 try:
                     self.read_from_rrd(r, fname)
@@ -228,7 +232,7 @@ class RRDModule:
 
     def revert_rrds(self):
         logger.log("Reverting RRD timestamps to previous safe value")
-        for fname,rrds in self.rrds.items():
+        for fname, rrds in self.rrds.items():
             for r in rrds:
                 if 'lastcommit' in r:
                     r['lasttimestamp'] = r['lastcommit']
@@ -338,12 +342,10 @@ def run_module(rrds, config, key, exchange, queueid):
         rrd.pubthread.join()
 
 def create_cqs(db, influxdb):
-    
     smoke = RRDSmokepingParser(db, influxdb)
     smoke.build_cqs()
 
 def tables(db):
-
     smoke = RRDSmokepingParser(db)
     smoke.register()
 

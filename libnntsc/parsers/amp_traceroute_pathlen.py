@@ -29,7 +29,7 @@
 #
 
 
-from libnntsc.dberrorcodes import *
+from libnntsc.dberrorcodes import DB_DATA_ERROR
 import libnntscclient.logger as logger
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 

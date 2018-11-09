@@ -132,11 +132,14 @@ class NNTSCClient:
         return 0
 
     def request_aggregate(self, col, labels, start, end, aggcolumns, binsize,
-            groupcolumns=[], aggfunc="avg"):
+            groupcolumns=None, aggfunc="avg"):
 
         if self.sock is None:
             logger.log("Cannot send NNTSC_AGGREGATE on a closed socket!")
             return -1
+
+        if groupcolumns is None:
+            groupcolumns = []
 
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for
@@ -157,13 +160,15 @@ class NNTSCClient:
         return 0
 
     def request_percentiles(self, col, labels, start, end, binsize,
-            ntilecolumns, othercolumns=[], ntileaggfunc="avg",
+            ntilecolumns, othercolumns=None, ntileaggfunc="avg",
             otheraggfunc="avg"):
 
         if self.sock is None:
             logger.log("Cannot send NNTSC_PERCENTILE on a closed socket!")
             return -1
 
+        if othercolumns is None:
+            othercolumns = []
 
         # Our "labels" are actually a list of streams, which is how we used to
         # manage this sort of thing. Convert to the new label format for

@@ -28,16 +28,15 @@
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 
-import pika
-import time
 import pickle
-import libnntscclient.logger as logger
-from libnntsc.configurator import get_nntsc_config
 import logging
-
 from multiprocessing import Queue
 from threading import Thread
 import Queue as StdQueue
+
+import pika
+import libnntscclient.logger as logger
+from libnntsc.configurator import get_nntsc_config
 
 PIKA_CONSUMER_HALT = 0
 PIKA_CONSUMER_RETRY = 1
@@ -182,7 +181,7 @@ class PikaPublisher(PikaBasicAsync):
         self._publish()
 
     def _publish(self):
-        while 1:
+        while True:
             if self._stopping:
                 return
 

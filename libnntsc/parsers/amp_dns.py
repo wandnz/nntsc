@@ -29,7 +29,6 @@
 #
 
 
-from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 from libnntsc.parsers.common import NNTSCParser
 

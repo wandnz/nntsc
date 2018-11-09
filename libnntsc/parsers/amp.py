@@ -52,7 +52,7 @@ from google.protobuf.message import DecodeError
 
 import libnntscclient.logger as logger
 
-DEFAULT_COMMIT_FREQ=50
+DEFAULT_COMMIT_FREQ = 50
 
 class AmpModule:
     def __init__(self, tests, nntsc_config, routekey, exchange, queueid):
@@ -116,7 +116,7 @@ class AmpModule:
             testtype = i["modsubtype"]
             if testtype in self.parsers:
                 for p in self.parsers[testtype]:
-                    key = p.create_existing_stream(i)
+                    p.create_existing_stream(i)
 
         self.initSource(nntsc_config)
 

@@ -29,7 +29,7 @@
 #
 
 from libnntsc.parsers.common import NNTSCParser
-from libnntsc.dberrorcodes import *
+from libnntsc.dberrorcodes import DB_DATA_ERROR
 import libnntscclient.logger as logger
 
 class AmpIcmpParser(NNTSCParser):

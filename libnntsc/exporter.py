@@ -31,12 +31,17 @@
 #
 
 
-import sys, socket, time, struct, getopt
+import getopt
+import select
+import socket
+import struct
+import sys
+import threading
+import time
 import cPickle as pickle
 from socket import *
 from multiprocessing import Queue
 import Queue as StdQueue
-import threading, select
 
 from libnntsc.dbselect import DBSelector
 from libnntsc.influx import InfluxSelector
@@ -248,7 +253,7 @@ class DBWorker(threading.Thread):
                     return err
             return DBWORKER_SUCCESS
 
-        while 1:
+        while True:
             generator = self.db.select_matrix_data(colid, aggs, labels,
                     start, end, self.influxdb)
 
@@ -275,7 +280,6 @@ class DBWorker(threading.Thread):
 
         now = int(time.time())
 
-        origstart = start
         if start == 0 or start is None:
             start = now
         if end == 0:
@@ -630,7 +634,7 @@ class DBWorker(threading.Thread):
             return self._enqueue_streams(NNTSC_STREAMS, col, False, [])
 
         i = 0
-        while (i < len(streams)):
+        while i < len(streams):
             start = i
             if len(streams) <= i + 1000:
                 end = len(streams)
@@ -682,7 +686,7 @@ class DBWorker(threading.Thread):
         self.db = DBSelector(self.threadid, self.dbconf["name"],
                 self.dbconf["user"],
                 self.dbconf["pass"], self.dbconf["host"], self.timeout,
-                cachetime = self.dbconf["cachetime"])
+                cachetime=self.dbconf["cachetime"])
         self.db.connect_db(30)
 
     def _connect_influx(self):
@@ -931,11 +935,11 @@ class NNTSCClient(threading.Thread):
                 log("Dropping client")
                 return -1
 
-        del(self.savedlive[label])
+        del self.savedlive[label]
 
         for s in streams:
             if s in self.waitstreams:
-                del(self.waitstreams[s])
+                del self.waitstreams[s]
 
         del self.waitlabels[label]
 
@@ -996,7 +1000,7 @@ class NNTSCClient(threading.Thread):
 
     def receive_live(self):
 
-        while 1:
+        while True:
             try:
                 obj = self.livequeue.get(False)
             except StdQueue.Empty:
@@ -1023,7 +1027,7 @@ class NNTSCClient(threading.Thread):
         return 0
 
     def send_released(self):
-        while 1:
+        while True:
             try:
                 obj = self.releasedlive.get(False)
             except StdQueue.Empty:
@@ -1054,7 +1058,7 @@ class NNTSCClient(threading.Thread):
         if sent == 0:
             return -1
 
-        if (sent < len(result)):
+        if sent < len(result):
             self.outstanding = result[sent:]
         else:
             self.outstanding = ""
@@ -1065,7 +1069,7 @@ class NNTSCClient(threading.Thread):
 
         # Only deal with one worker result at a time - we want to
         # prioritise live data over processing history
-        while 1:
+        while True:
 
             # If we haven't finished a previous transmit, finish that off
             # first before fetching new results
@@ -1143,7 +1147,7 @@ class NNTSCClient(threading.Thread):
 
             # Timeout of zero is bad, will use lots of CPU. Hopefully, 0.01
             # won't keep us from serving the live queue for too long.
-            inpready, outready, exready = select.select(input, writer, [], 0.01)
+            inpready, outready, _ = select.select(input, writer, [], 0.01)
             for s in inpready:
                 if s == self.sock:
                     if self.receive_client() == 0:
@@ -1579,7 +1583,7 @@ class NNTSCExporter:
                 log("Unknown exception while reading from live queue")
                 raise
         else:
-            while 1:
+            while True:
                 try:
                     listenthread.join(1)
                 #except KeyboardInterrupt:
@@ -1596,12 +1600,12 @@ class NNTSCListener(threading.Thread):
         self.sock = sock
 
     def run(self):
-        while 1:
+        while True:
             # Wait for any sign of an incoming connection
             listener = [self.sock]
 
             try:
-                inpready, outready, exready = select.select(listener, [], [])
+                inpready, _, _ = select.select(listener, [], [])
             except:
                 break
 

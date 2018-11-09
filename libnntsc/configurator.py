@@ -139,12 +139,12 @@ def get_influx_config(nntsc_config):
         keeprollups = "inf"
 
 
-    if "NNTSCConfigError" in [useinflux,dbname,dbuser,dbpass,dbhost,dbport,keepdata,
-                              keeprollups]:
+    if "NNTSCConfigError" in [useinflux, dbname, dbuser, dbpass, dbhost,
+                              dbport, keepdata, keeprollups]:
         return {}
 
     return {"host":dbhost, "name":dbname, "user":dbuser, "pass":dbpass,
-            "port":dbport,"useinflux":useinflux,"keepdata":keepdata,
+            "port":dbport, "useinflux":useinflux, "keepdata":keepdata,
             "keeprollups":keeprollups}
 
 

@@ -34,7 +34,9 @@ class QueryBuilder:
     def __init__(self):
         self.clauses = {}
 
-    def add_clause(self, name, clause, params=[]):
+    def add_clause(self, name, clause, params=None):
+        if params is None:
+            params = []
         self.clauses[name] = (clause, params)
 
     def reset(self):

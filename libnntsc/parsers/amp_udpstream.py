@@ -29,7 +29,6 @@
 #
 
 
-from libnntsc.dberrorcodes import *
 from libnntsc.parsers.common import NNTSCParser
 import libnntscclient.logger as logger
 
@@ -106,7 +105,7 @@ class AmpUdpstreamParser(NNTSCParser):
         src = str(streamdata["source"])
         dest = str(streamdata["destination"])
         address = streamdata["address"]
-        direction  = str(streamdata["direction"])
+        direction = str(streamdata["direction"])
         packet_size = str(streamdata["packet_size"])
         packet_spacing = str(streamdata["packet_spacing"])
         packet_count = str(streamdata["packet_count"])
@@ -168,7 +167,7 @@ class AmpUdpstreamParser(NNTSCParser):
                 resdict['lossrate'] = 0.0
 
             if 'voip' in result and result['voip'] is not None:
-                resdict['itu_mos' ] = result['voip']['itu_mos']
+                resdict['itu_mos'] = result['voip']['itu_mos']
 
             if len(result['percentiles']) < 10:
                 step = len(result['percentiles']) / 10.0

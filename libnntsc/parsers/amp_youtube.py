@@ -30,7 +30,6 @@
 
 import json
 from libnntsc.parsers.common import NNTSCParser
-from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 class AmpYoutubeParser(NNTSCParser):

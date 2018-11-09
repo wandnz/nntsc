@@ -29,7 +29,6 @@
 #
 
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
-from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 

@@ -28,7 +28,7 @@
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 
-from libnntsc.dberrorcodes import *
+from libnntsc.dberrorcodes import DBQueryException
 import libnntscclient.logger as logger
 
 class NNTSCParser(object):
@@ -211,8 +211,11 @@ class NNTSCParser(object):
                 streamprops)
         return streamid
 
-    def insert_data(self, stream, ts, result, casts={}):
+    def insert_data(self, stream, ts, result, casts=None):
         filtered = {}
+        if casts is None:
+            casts = {}
+
         for col in self.datacolumns:
             if col["name"] in result:
                 filtered[col["name"]] = result[col["name"]]

@@ -29,7 +29,6 @@
 #
 
 from libnntsc.parsers.common import NNTSCParser
-from libnntsc.dberrorcodes import *
 import libnntscclient.logger as logger
 
 class AmpHttpParser(NNTSCParser):

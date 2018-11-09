@@ -28,7 +28,6 @@
 # Please report any bugs, questions or comments to contact@wand.net.nz
 #
 
-from libnntsc.dberrorcodes import *
 from libnntsc.parsers.common import NNTSCParser
 import libnntscclient.logger as logger
 
@@ -127,7 +126,7 @@ class AmpThroughputParser(NNTSCParser):
             resdict['source'] = source
             resdict['destination'] = data['target']
             resdict['address'] = data['address']
-            resdict['direction']  = result['direction']
+            resdict['direction'] = result['direction']
             resdict['duration'] = result['duration']
             resdict['runtime'] = result['runtime']
             resdict['bytes'] = result['bytes']

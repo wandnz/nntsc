@@ -232,8 +232,8 @@ class NNTSCCursor(object):
 
 
 class DatabaseCore(object):
-    def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False, timeout=0, cachetime=0):
+    def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None,
+            timeout=0, cachetime=0):
 
         #no host means use the unix socket
         if dbhost == "":
@@ -277,7 +277,7 @@ class DatabaseCore(object):
             pass
 
     def _basicquery(self, query, params=None):
-        while 1:
+        while True:
             try:
                 self.basic.executequery(query, params)
             except DBQueryException as e:
@@ -351,7 +351,7 @@ class DatabaseCore(object):
 
             while True:
                 row = self.basic.cursor.fetchone()
-                if row == None:
+                if row is None:
                     break
                 row_dict = {"modsubtype":sub}
                 for k, v in row.iteritems():
@@ -367,11 +367,11 @@ class DatabaseCore(object):
 
 
 class DBInsert(DatabaseCore):
-    def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None, \
-            new=False, debug=False, cachetime=0):
+    def __init__(self, dbname, dbuser=None, dbpass=None, dbhost=None,
+            cachetime=0):
 
-        super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost, \
-                new, debug, cachetime=cachetime)
+        super(DBInsert, self).__init__(dbname, dbuser, dbpass, dbhost,
+                cachetime=cachetime)
 
     def connect_db(self, retrywait):
         self.streams = NNTSCCursor(self.connstr, False, None)
@@ -654,8 +654,7 @@ class DBInsert(DatabaseCore):
         self._basicquery("""DROP SEQUENCE IF EXISTS "streams_id_seq" """)
         self._releasebasic()
 
-    def update_timestamp(self, datatable, stream_ids, lasttimestamp,
-            is_influx, first=None):
+    def update_timestamp(self, datatable, stream_ids, lasttimestamp, is_influx):
 
         if is_influx:
             return
@@ -687,7 +686,7 @@ class DBInsert(DatabaseCore):
                 raise DBQueryException(DB_CODING_ERROR)
 
             row = self.basic.cursor.fetchone()
-            if row[0] == None:
+            if row[0] is None:
                 return 0
 
             lastts = int(row[0])
@@ -770,7 +769,7 @@ class DBInsert(DatabaseCore):
 
         # Create a new data table for this stream, using the "base" data
         # table as a template
-        if (createdatatable):
+        if createdatatable:
             self.clone_table(datatable, newid)
 
         # Resist the urge to commit streams or do any live exporting here!
@@ -792,11 +791,15 @@ class DBInsert(DatabaseCore):
         result = self.data.cursor.fetchone()
         return result
 
-    def insert_data(self, tablename, collection, stream, ts, result, casts={}):
+    def insert_data(self, tablename, collection, stream, ts, result,
+            casts=None):
 
         colstr = "(stream_id, timestamp"
         valstr = "%s, %s"
         values = [stream, ts]
+
+        if casts is None:
+            casts = {}
 
         for k, v in result.iteritems():
             colstr += ', "%s"' % (k)
@@ -830,25 +833,25 @@ class DBInsert(DatabaseCore):
 
             basesql += ', "%s" %s ' % (c["name"], c["type"])
 
-            if "null" in c and c["null"] == False:
+            if "null" in c and c["null"] is False:
                 basesql += "NOT NULL "
 
             if "default" in c:
                 basesql += "DEFAULT %s " % (c["default"])
 
-            if "unique" in c and c["unique"] == True:
+            if "unique" in c and c["unique"] is True:
                 basesql += "UNIQUE "
 
         return basesql
 
-    def create_misc_table(self, name, columns, uniquecols=[]):
+    def create_misc_table(self, name, columns, uniquecols=None):
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
         coltext = self._columns_sql(name, columns)
 
         # Remove the leading comma
         basesql += coltext[1:]
 
-        if len(uniquecols) != 0:
+        if uniquecols:
             basesql += ", UNIQUE ("
 
             for i in range(0, len(uniquecols)):
@@ -862,7 +865,7 @@ class DBInsert(DatabaseCore):
         self._basicquery(basesql)
         self._releasebasic()
 
-    def create_data_table(self, name, columns, indexes=[]):
+    def create_data_table(self, name, columns):
 
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
 
@@ -875,17 +878,17 @@ class DBInsert(DatabaseCore):
         self._releasebasic()
 
         # Automatically create an index on timestamp
-        self.create_index("%s_%s_idx" % (name, "timestamp"), name, \
+        self.create_index("%s_%s_idx" % (name, "timestamp"), name,
                     ["timestamp"])
 
-    def create_streams_table(self, name, columns, uniquecols=[]):
+    def create_streams_table(self, name, columns, uniquecols=None):
 
         basesql = "CREATE TABLE IF NOT EXISTS %s (" % (name)
         basesql += "stream_id integer PRIMARY KEY "
         basesql += "DEFAULT nextval('streams_id_seq')"
         basesql += self._columns_sql(name, columns)
 
-        if len(uniquecols) != 0:
+        if uniquecols:
             basesql += ", UNIQUE ("
 
             for i in range(0, len(uniquecols)):

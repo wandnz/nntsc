@@ -30,6 +30,9 @@
 #
 
 
+from requests import ConnectionError
+import requests
+import math
 
 from influxdb import InfluxDBClient
 from influxdb.exceptions import InfluxDBClientError, InfluxDBServerError
@@ -37,9 +40,6 @@ from libnntsc.dberrorcodes import *
 from libnntsc.querybuilder import QueryBuilder
 from libnntsc.cqs import getMatrixCQ, get_parser
 import libnntscclient.logger as logger
-from requests import ConnectionError
-import requests
-import math
 
 DEFAULT_RP = "nntscdefault"
 OLD_DEFAULT_RP = "default"
@@ -141,11 +141,12 @@ class InfluxInsertor(InfluxConnection):
         except Exception as e:
             self.handler(e)
 
-    def insert_data(self, tablename, stream, ts, result, casts = {}):
+    def insert_data(self, tablename, stream, ts, result, casts=None):
         """Prepare data for sending to database"""
-        for cast in casts:
-            if cast in result.keys():
-                result[cast] = casts[cast](result[cast])
+        if casts:
+            for cast in casts:
+                if cast in result.keys():
+                    result[cast] = casts[cast](result[cast])
         self.to_write.append(
             {
                 "measurement": tablename,
@@ -726,7 +727,7 @@ class InfluxSelector(InfluxConnection):
                 range_bottom = range_top - range_step * (num_results - 1)
                 ntile_range = range(range_bottom, range_top, range_step)
             else:
-                ntile_range = range(5,100,5)
+                ntile_range = range(5, 100, 5)
                 range_bottom = 5
 
             # Also take the max_rtt, as this acts as the 100 percentile

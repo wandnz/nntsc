@@ -29,10 +29,11 @@
 #
 
 
-from libnntsc.dberrorcodes import *
+import time
+from libnntsc.dberrorcodes import DBQueryException
+from libnntsc.dberrorcodes import DB_CODING_ERROR, DB_DATA_ERROR
 import libnntscclient.logger as logger
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
-import time
 
 PATH_FLUSH_FREQ = 60 * 60
 
@@ -175,7 +176,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         # Don't forget to set the 'first' timestamp (just like insert_stream
         # does).
         self.db.update_timestamp("data_amp_astraceroute", [streamid],
-                timestamp, timestamp, False)
+                timestamp, False)
 
         try:
             self.db.clone_table("data_amp_traceroute_aspaths",
@@ -274,14 +275,14 @@ class AmpTracerouteParser(AmpIcmpParser):
         return self.ipcollectionid
 
     def _ippath_insertion_sql(self, stream, pathdata):
-        pathtable = "data_amp_traceroute_paths_%d" % (stream)
+        pathtable = "data_amp_traceroute_paths_%d" % stream
 
-        pathinsert="WITH s AS (SELECT path_id, path FROM %s " % (pathtable)
+        pathinsert = "WITH s AS (SELECT path_id, path FROM %s " % pathtable
         pathinsert += "WHERE path = CAST (%s as inet[])), "
-        pathinsert += "i AS (INSERT INTO %s (path, length) " % (pathtable)
+        pathinsert += "i AS (INSERT INTO %s (path, length) " % pathtable
         pathinsert += "SELECT CAST(%s as inet[]), %s "
         pathinsert += "WHERE NOT EXISTS "
-        pathinsert += "(SELECT path FROM %s WHERE path " % (pathtable)
+        pathinsert += "(SELECT path FROM %s WHERE path " % pathtable
         pathinsert += "= CAST(%s as inet[])) RETURNING path_id, path) "
         pathinsert += "SELECT path_id,path FROM i UNION ALL "
         pathinsert += "SELECT path_id,path FROM s"
@@ -292,15 +293,15 @@ class AmpTracerouteParser(AmpIcmpParser):
         return pathinsert, params
 
     def _aspath_insertion_sql(self, stream, pathdata):
-        pathtable = "data_amp_traceroute_aspaths_%d" % (stream)
+        pathtable = "data_amp_traceroute_aspaths_%d" % stream
 
-        pathinsert="WITH s AS (SELECT aspath_id, aspath FROM %s " % (pathtable)
+        pathinsert = "WITH s AS (SELECT aspath_id, aspath FROM %s " % pathtable
         pathinsert += "WHERE aspath = CAST (%s as varchar[])), "
-        pathinsert += "i AS (INSERT INTO %s " % (pathtable)
+        pathinsert += "i AS (INSERT INTO %s " % pathtable
         pathinsert += "(aspath, aspath_length, uniqueas, responses) "
         pathinsert += "SELECT CAST(%s as varchar[]), %s, %s, %s "
         pathinsert += "WHERE NOT EXISTS "
-        pathinsert += "(SELECT aspath FROM %s WHERE aspath " % (pathtable)
+        pathinsert += "(SELECT aspath FROM %s WHERE aspath " % pathtable
         pathinsert += "= CAST(%s as varchar[])) RETURNING aspath_id, aspath) "
         pathinsert += "SELECT aspath_id,aspath FROM i UNION ALL "
         pathinsert += "SELECT aspath_id,aspath FROM s"
@@ -329,7 +330,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             logger.log("Error was: %s" % (str(e)))
             raise
 
-        if queryret == None:
+        if queryret is None:
             logger.log("No query result when getting path_id for %s (stream %d)" % \
                     (self.colname, stream))
             raise DBQueryException(DB_DATA_ERROR)
@@ -522,7 +523,7 @@ class AmpTracerouteParser(AmpIcmpParser):
                 toremove.append(k)
 
         for k in toremove:
-            del(self.aspaths[k])
+            del self.aspaths[k]
 
         toremove = []
         for k, v in self.paths.iteritems():
@@ -530,7 +531,7 @@ class AmpTracerouteParser(AmpIcmpParser):
                 toremove.append(k)
 
         for k in toremove:
-            del(self.paths[k])
+            del self.paths[k]
 
     def insert_aspath(self, stream, ts, result):
         filtered = {}

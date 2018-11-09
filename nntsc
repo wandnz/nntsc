@@ -31,7 +31,7 @@
 
 import sys
 import argparse
-from multiprocessing import *
+from multiprocessing import Process
 
 from libnntsc.database import DBInsert
 from libnntsc.configurator import *
