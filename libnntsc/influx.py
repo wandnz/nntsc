@@ -290,15 +290,6 @@ class InfluxInsertor(InfluxConnection):
         except Exception as e:
             self.handler(e)
 
-    def new_db(self):
-        """Drop the database and start again"""
-        try:
-            self.client.drop_database(self.dbname)
-            self.client.create_database(self.dbname)
-            self.cqs_in_db = []
-        except Exception as e:
-            self.handler(e)
-
 class InfluxSelector(InfluxConnection):
     """A class for selecting things from influx database"""
     def __init__(self, thread_id, dbname, user, password, host, port, timeout):

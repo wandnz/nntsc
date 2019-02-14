@@ -33,6 +33,8 @@
 import sys
 import getopt
 
+from influxdb import InfluxDBClient
+from influxdb.exceptions import InfluxDBClientError
 from libnntsc.database import DBInsert
 from libnntsc.influx import InfluxInsertor
 from libnntsc.configurator import *
@@ -103,22 +105,38 @@ if influxconf == {}:
 influxdb = None
 if influxconf["useinflux"] and "amp" in modules.keys():
     try:
+        # at this point we can't be sure the database exists, so don't
+        # connect to a database initially
+        client = InfluxDBClient(
+                influxconf["host"], influxconf["port"],
+                influxconf["user"], influxconf["pass"], database=None)
+        if clean_db:
+            client.drop_database(influxconf["name"])
+        # create_database() should be idempotent, so always safe to run
+        client.create_database(influxconf["name"])
+        #client.close() # only present in version >= 5.0.0
+    except DBQueryException as e:
+        logger.log("Failed to create influx database: %s" % e)
+        sys.exit(1)
+    except InfluxDBClientError as e:
+        if e.code == 403:
+            logger.log("ERROR: Influx user '%s' missing admin privileges" % influxconf["user"])
+        else:
+            logger.log("Failed to create influx database: %s" % e)
+        sys.exit(1)
+
+    try:
         influxdb = InfluxInsertor(
             influxconf["name"], influxconf["user"], influxconf["pass"],
             influxconf["host"], influxconf["port"])
     except DBQueryException as e:
-        logger.log("Failed to connect to InfluxDB")
+        logger.log("Failed to connect to influx database: %s" % e)
         sys.exit(1)
-    if clean_db:
-        try:
-            influxdb.new_db()
-        except DBQueryException as e:
-            logger.log("Failed to empty InfluxDB")
-            sys.exit(1)
+
     try:
         influxdb.create_retention_policies(influxconf["keepdata"])
     except DBQueryException as e:
-        logger.log("Failed to create retention policies for influx")
+        logger.log("Failed to create retention policies for influx: %s" % e)
         sys.exit(1)
 
     for base, mod in modules.items():

@@ -42,10 +42,6 @@ case "$1" in
         su postgres -c "psql --list | cut -d ' ' -f 2 | grep -qx nntsc || \
             createdb -O cuz nntsc"
 
-        # ensure the influx database exists
-        influx -execute "show databases" | grep -qx nntsc || \
-            influx -execute "CREATE DATABASE nntsc"
-
         # apply the schema and config to the nntsc database
         su cuz -s /bin/bash -c "build_nntsc_db -C $CONF"
 
