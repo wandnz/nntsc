@@ -40,7 +40,7 @@ except ImportError:
 
 requires = [
         'python-rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12', 'python-daemon',
-	'libnntsc-client', 'pylibmc', 'influxdb'
+	'libnntsc-client', 'pylibmc', 'influxdb>=2.12.0', 'requests'
 ]
 
 if sys.version_info < (2, 7):
