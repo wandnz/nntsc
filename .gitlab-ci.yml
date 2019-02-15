@@ -1,6 +1,6 @@
 stages:
  - build
- - deploy
+ - upload
 
 .generic_apt_build_template: &generic_apt_build
   apt-get update && apt-get -y upgrade &&
@@ -65,14 +65,10 @@ build-jessie:
   only:
     - tags
 
-deploy-packages:
-  stage: deploy
+upload-packages:
+  stage: upload
   image: ubuntu:bionic
   script:
-    - ls built-packages/
-  artifacts:
-    paths:
-      - built-packages/*
-    expire_in: 1 month
+    - ./bintray-upload.sh
   only:
     - tags
