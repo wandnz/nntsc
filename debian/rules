@@ -9,18 +9,8 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-ifeq ($(shell lsb_release -c -s),jessie)
-    INFLUXDEP = -Vinfluxdb:Depends="influxdb (>= 1.0.2)"
-else
-    INFLUXDEP = -Vinfluxdb:Depends="influxdb (>= 1.0.2), influxdb-client"
-endif
-
-
 %:
 	dh $@ --with python2
-
-override_dh_gencontrol:
-	dh_gencontrol -- $(INFLUXDEP)
 
 override_dh_builddeb:
 	dh_builddeb -- -Zgzip
