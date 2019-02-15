@@ -1,3 +1,11 @@
+nntsc (2.17-1) unstable; urgency=low
+
+  * Move influx setup to build_nntsc_db from postinst.
+  * Updated package build dependencies.
+  * Use GitLab CI/CD to upload built packages to bintray.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Fri, 15 Feb 2019 15:13:38 +1300
+
 nntsc (2.16-1) unstable; urgency=low
 
   * Change package architecture from "any" to "all".
