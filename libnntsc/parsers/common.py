@@ -154,6 +154,9 @@ class NNTSCParser(object):
             logger.log("Error was: %s" % (str(e)))
             raise
 
+    def post_commit(self):
+        pass
+
     def _get_collection_id(self):
         if self.collectionid is None:
             try:

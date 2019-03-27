@@ -259,6 +259,13 @@ class AmpModule:
                 self.pending = []
                 return
 
+            # some parsers need to update internal caches after confirming
+            # that data has been committed successfully
+            # TODO limit this to parsers that recently processed data
+            for parsers in self.parsers.values():
+                for parser in parsers:
+                    parser.post_commit()
+
         # ack all data up to and including the most recent message
         channel.basic_ack(method.delivery_tag, True)
 

@@ -50,6 +50,8 @@ class AmpTracerouteParser(AmpIcmpParser):
 
         self.paths = {}
         self.aspaths = {}
+        self.pending_paths = {}
+        self.pending_aspaths = {}
 
         self.ipdatacolumns = [
             {"name":"path_id", "type":"integer", "null":False},
@@ -355,7 +357,7 @@ class AmpTracerouteParser(AmpIcmpParser):
                 return
 
             result['path_id'] = pathid
-            self.paths[keystr] = (pathid, int(time.time()))
+            self.pending_paths[keystr] = (pathid, int(time.time()))
 
         if result['aspath'] != None:
             keystr = "%s" % (stream)
@@ -370,7 +372,7 @@ class AmpTracerouteParser(AmpIcmpParser):
                     return
 
                 result['aspath_id'] = pathid
-                self.aspaths[keystr] = (pathid, int(time.time()))
+                self.pending_aspaths[keystr] = (pathid, int(time.time()))
 
         # XXX Could almost just call parent insert_data here, except for the
         # line where we have to add an entry for "path" before exporting live
@@ -430,7 +432,7 @@ class AmpTracerouteParser(AmpIcmpParser):
                     return
 
                 aspath_id = pathid
-                self.aspaths[keystr] = (pathid, int(time.time()))
+                self.pending_aspaths[keystr] = (pathid, int(time.time()))
 
             if aspath_id not in observed[streamid]['paths']:
                 observed[streamid]['paths'][aspath_id] = { \
@@ -515,6 +517,14 @@ class AmpTracerouteParser(AmpIcmpParser):
             self._flush_unused_paths(now)
             self.nextpathflush = (now - (now % PATH_FLUSH_FREQ)) + \
                     PATH_FLUSH_FREQ
+
+    def post_commit(self):
+        # all pending paths are confirmed to have been committed, move them
+        # into the main cache
+        self.paths.update(self.pending_paths)
+        self.aspaths.update(self.pending_aspaths)
+        self.pending_paths.clear()
+        self.pending_aspaths.clear()
 
     def _flush_unused_paths(self, now):
         toremove = []
