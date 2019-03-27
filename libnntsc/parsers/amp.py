@@ -181,7 +181,7 @@ class AmpModule:
         """
 
         # push every new message onto the end of the list to be processed
-        self.pending.append((channel, method, properties, body))
+        self.pending.append((method, properties, body))
 
         # once there are enough messages ready to go, process them all
         if len(self.pending) < self.commitfreq:
@@ -190,7 +190,7 @@ class AmpModule:
         # track how many messages were successfully written to the database
         processed = 0
 
-        for channel, method, properties, body in self.pending:
+        for method, properties, body in self.pending:
             # ignore any messages that don't have user_id set
             if not hasattr(properties, "user_id"):
                 continue
@@ -232,67 +232,30 @@ class AmpModule:
                             properties.user_id)
                 processed += 1
             except DBQueryException as e:
-                if e.code == DB_OPERATIONAL_ERROR:
-                    # Disconnect while inserting data, need to reprocess the
-                    # entire set of messages
-                    logger.log("Database disconnect while processing AMP data")
-                    channel.close()
-                    return
+                logger.log(e)
 
-                elif e.code == DB_DATA_ERROR:
+                if e.code == DB_DATA_ERROR:
                     # Data was bad so we couldn't insert into the database.
                     # Acknowledge the message so we can dump it from the queue
                     # and move on but don't try to export it to clients.
-                    logger.log("AMP -- Data error, acknowledging and moving on")
+                    # TODO I assume this doesn't break the current transaction
+                    logger.log("Acknowledging data and moving on")
                     continue
 
-                elif e.code == DB_INTERRUPTED:
-                    logger.log("Interrupt while processing AMP data")
-                    channel.close()
-                    return
-
-                elif e.code == DB_GENERIC_ERROR:
-                    logger.log("Database error while processing AMP data")
-                    channel.close()
-                    return
-
-                elif e.code == DB_QUERY_TIMEOUT:
-                    logger.log("Database timeout while processing AMP data")
-                    channel.close()
-                    return
-
-                elif e.code == DB_CODING_ERROR:
-                    logger.log("Bad database code encountered while processing AMP data")
-                    channel.close()
-                    return
-
-                elif e.code == DB_DUPLICATE_KEY:
-                    logger.log("Duplicate key error while processing AMP data")
-                    channel.close()
-                    return
-
-                else:
-                    logger.log("Unknown error code returned by database: %d" %
-                            (e.code))
-                    logger.log("Shutting down AMP module")
-                    channel.close()
-                    return
+                # disconnect and restart processing in a new transaction
+                channel.close()
+                return
 
         # commit the data if anything was successfully processed
         if processed > 0:
-            self.db.commit_data()
-            if self.influxdb:
-                try:
+            try:
+                self.db.commit_data()
+                if self.influxdb:
                     self.influxdb.commit_data()
-                except DBQueryException as e:
-                    if e.code == DB_QUERY_TIMEOUT:
-                        logger.log("Database timeout while committing AMP data")
-                        channel.close()
-                        return
-                    else:
-                        logger.log("Unexpected error while committing AMP data")
-                        channel.close()
-                        return
+            except DBQueryException as e:
+                logger.log(e)
+                channel.close()
+                return
 
         # ack all data up to and including the most recent message
         channel.basic_ack(method.delivery_tag, True)
