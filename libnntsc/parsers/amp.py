@@ -244,6 +244,7 @@ class AmpModule:
 
                 # disconnect and restart processing in a new transaction
                 channel.close()
+                self.pending = []
                 return
 
         # commit the data if anything was successfully processed
@@ -255,6 +256,7 @@ class AmpModule:
             except DBQueryException as e:
                 logger.log(e)
                 channel.close()
+                self.pending = []
                 return
 
         # ack all data up to and including the most recent message
