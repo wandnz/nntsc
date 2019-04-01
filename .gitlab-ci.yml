@@ -11,11 +11,7 @@ stages:
   mk-build-deps -i -r -t 'apt-get -f -y --force-yes' &&
   dpkg-buildpackage -b -us -uc -rfakeroot &&
   mkdir -p built-packages/$CODENAME/ || true &&
-  mv ../*.deb built-packages/$CODENAME/ &&
-  cd clientapi &&
-  mk-build-deps -i -r -t 'apt-get -f -y --force-yes' &&
-  dpkg-buildpackage -b -us -uc -rfakeroot &&
-  mv ../*.deb ../built-packages/$CODENAME/
+  mv ../*.deb built-packages/$CODENAME/
 
 build-bionic:
   stage: build
