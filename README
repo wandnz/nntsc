@@ -45,11 +45,11 @@ NNTSC uses Python setuptools to install both itself and its dependencies.
 
 In version 2.3 there has been a significant change to the installation
 process -- some of the NNTSC dependencies are now distributed and installed
-separately, namely libnntsc-client.
+separately, namely libnntscclient.
 
-If you have checked out a copy of NNTSC from our git repository,
-libnntsc-client will be included (in the clientapi/ directory). Install it
-by changing into the directory and running 'python setup.py install' prior to
+If you have checked out a copy of NNTSC from our git repository, you will also
+need to get libnntscclient from the repository as well. Install it by
+changing into the directory and running 'python setup.py install' prior to
 attempting to install NNTSC itself.
 
 Once these are installed, simply run the following to install NNTSC:
@@ -312,11 +312,11 @@ connections. Connected clients may query NNTSC to access any data currently
 stored in the time series database or register an interest in live data as it
 arrives from the various input sources.
 
-Included with NNTSC is a Python API for writing a client that can connect to
-and query NNTSC, without the programmer needing to know
-the underlying communication protocol. The code for this API is located in
-clientapi/nntscclient.py -- it's not very well-documented at the moment but
-hopefully we can improve that in future releases.
+There is a Python API for writing a client that can connect to and query NNTSC,
+without the programmer needing to know the underlying communication protocol.
+The code for this API is located in the libnntscclient repository -- it's not
+very well-documented at the moment but hopefully we can improve that in future
+releases.
 
 To use the client API, just add the following imports to your Python program:
 
@@ -352,4 +352,3 @@ you want to apply the aggregation to.
 
 Supported aggregation functions are: max, min, sum, avg and count. They should
 be fairly self-explanatory as to how they will aggregate the data within a bin.
-
