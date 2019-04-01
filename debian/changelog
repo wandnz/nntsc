@@ -1,3 +1,9 @@
+nntsc (2.19-1) unstable; urgency=low
+
+  * Move pidfile code into nntsc from libnntscclient.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Mon,  1 Apr 2019 16:09:12 +1300
+
 nntsc (2.18-1) unstable; urgency=low
 
   * Close currently active AMQP channel on error rather than an old channel.
