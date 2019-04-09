@@ -47,6 +47,7 @@ from libnntsc.parsers.amp_throughput import AmpThroughputParser
 from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 from libnntsc.parsers.amp_youtube import AmpYoutubeParser
+from libnntsc.parsers.amp_fastping import AmpFastpingParser
 from libnntsc.dberrorcodes import *
 from google.protobuf.message import DecodeError
 
@@ -107,6 +108,7 @@ class AmpModule:
             "udpstream": [AmpUdpstreamParser(self.db, self.influxdb)],
             "tcpping": [AmpTcppingParser(self.db, self.influxdb)],
             "youtube": [AmpYoutubeParser(self.db, self.influxdb)],
+            "fastping": [AmpFastpingParser(self.db, self.influxdb)],
         }
 
         # set all the streams that we already know about for easy lookup of
@@ -283,8 +285,10 @@ class AmpModule:
             self.source.run()
         except KeyboardInterrupt:
             self.source.halt_consumer()
-        except:
+        except Exception as e:
+            # XXX if this fires, can we do something better than going defunct?
             logger.log("AMP: Unknown exception during consumer loop")
+            logger.log(e)
             raise
 
         logger.log("AMP: Closed connection to RabbitMQ")
@@ -301,7 +305,8 @@ def create_cqs(db, influxdb):
 
     for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
                 AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
-                AmpTraceroutePathlenParser, AmpYoutubeParser]:
+                AmpTraceroutePathlenParser, AmpYoutubeParser,
+                AmpFastpingParser]:
         parser = p(db, influxdb)
         parser.build_cqs()
 
@@ -310,7 +315,7 @@ def tables(db):
     for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
                 AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
                 AmpTraceroutePathlenParser, AmpTracerouteParser,
-                AmpYoutubeParser,
+                AmpYoutubeParser, AmpFastpingParser
                 ]:
         parser = p(db)
         parser.register()

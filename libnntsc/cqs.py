@@ -37,6 +37,7 @@ from libnntsc.parsers.amp_tcpping import AmpTcppingParser
 from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 from libnntsc.parsers.amp_traceroute_pathlen import AmpTraceroutePathlenParser
 from libnntsc.parsers.amp_youtube import AmpYoutubeParser
+from libnntsc.parsers.amp_fastping import AmpFastpingParser
 
 
 def get_parser(table_name):
@@ -57,6 +58,8 @@ def get_parser(table_name):
         parser = AmpTraceroutePathlenParser(None)
     elif table_name == "data_amp_youtube":
         parser = AmpYoutubeParser(None)
+    elif table_name == "data_amp_fastping":
+        parser = AmpFastpingParser(None)
     else:
         parser = None
 
@@ -95,6 +98,7 @@ def build_cqs(influxdb, retention_policy="default"):
     parsers.append(AmpUdpstreamParser(None, influxdb))
     parsers.append(AmpTraceroutePathlenParser(None, influxdb))
     parsers.append(AmpYoutubeParser(None, influxdb))
+    parsers.append(AmpFastpingParser(None, influxdb))
 
     for parser in parsers:
         parser.build_cqs(retention_policy)

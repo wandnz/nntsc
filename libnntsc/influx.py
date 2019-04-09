@@ -53,7 +53,6 @@ class InfluxConnection(object):
     """A class to represent a connection to an Influx Database"""
     def __init__(self, dbname, dbuser=None, dbpass=None, dbhost="localhost",
                  dbport="8086", timeout=None, cachetime=0):
-
         self.dbname = dbname
 
         if dbhost == "" or dbhost is None:
@@ -373,7 +372,6 @@ class InfluxSelector(InfluxConnection):
 
 
     def _was_stream_active(self, sid, table, start, end):
-
         field = get_parser(table).get_random_field(None)
 
         querystring = "SELECT count({}) FROM {} WHERE stream='{}' AND time >= {}s AND time <= {}s GROUP BY time(1h) fill(none) LIMIT 1".format( \
@@ -395,7 +393,6 @@ class InfluxSelector(InfluxConnection):
 
     def select_matrix_data(self, table, labels, start_time, stop_time):
         mcq = getMatrixCQ(table)
-
 
         if stop_time - start_time >= (60 * 60):
             fetchtable = MATRIX_LONG_RP + "." + table + "_matrix_day"
@@ -563,7 +560,6 @@ class InfluxSelector(InfluxConnection):
         dbselect, and assumes that column names have been sanitised already.
 
         """
-
         self.qb.reset()
 
         self.table = table
@@ -661,14 +657,18 @@ class InfluxSelector(InfluxConnection):
 
     def _get_rollup_functions(self):
         """
-        Returns a list of columns to select if ther is no pre-aggregated table
+        Returns a list of columns to select if there is no pre-aggregated table
         """
 
         col_names = []
 
         for meas, agg in self.aggcols:
+            # XXX smokearray doesn't do anything with the stored array of RTTs,
+            # it just does its thing over the aggregate median values - it
+            # appears to be because influx can't deal with arrays of data?
+            # Is this what we want?
             if agg == 'smokearray':
-                if meas in ["rtts", 'pings']:
+                if meas in ["rtts", 'pings', 'percentiles']:
                     meas = '"median"'
                 col_names += ["percentile({0}, {1}) as \"{1}_percentile_rtt\"".format(
                     meas, i) for i in range(5,100,5)] + ["max({}) as \"max_rtt\"".format(
@@ -686,7 +686,6 @@ class InfluxSelector(InfluxConnection):
         Fixes up the result to be ready to send by packing up any \
         smoke arrays and removing unwanted empty results
         """
-
         # Pack up the smoke array to be sent back
         aggs = [k[1] for k in self.aggcols]
 
