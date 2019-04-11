@@ -1,3 +1,10 @@
+nntsc (2.20-1) unstable; urgency=low
+
+  * Add basic support for AMP Fastping test data.
+  * Abort processing data after failing to create a stream.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Thu, 11 Apr 2019 15:21:04 +1200
+
 nntsc (2.19-1) unstable; urgency=low
 
   * Move pidfile code into nntsc from libnntscclient.
