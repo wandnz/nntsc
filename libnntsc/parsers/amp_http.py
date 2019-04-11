@@ -160,6 +160,7 @@ class AmpHttpParser(NNTSCParser):
                 logger.log("AMPModule: Cannot create stream for: ")
                 logger.log("AMPModule: dns %s %s\n", source, \
                         mangled['destination'])
+                return
             self.streams[key] = stream_id
 
         self.insert_data(stream_id, timestamp, mangled)

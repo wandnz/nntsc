@@ -137,7 +137,7 @@ class AmpDnsParser(NNTSCParser):
                     logger.log("AMPModule: Cannot create stream for:")
                     logger.log("AMPModule: %s %s %s %s\n" % ("dns", source,
                             streamresult['destination'], streamresult['query']))
-                    return stream_id
+                    return
                 self.streams[key] = stream_id
 
             dataresult['requests'] = 1
