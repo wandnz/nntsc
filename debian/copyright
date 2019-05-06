@@ -23,7 +23,7 @@ License: GPL-2
 
 Files: libnntsc/pidfile.py
 Copyright: 2011 Graham Poulter
-License: Expat
+License: MIT
  Permission is hereby granted, free of charge, to any person obtaining
  a copy of this software and associated documentation files (the
  "Software"), to deal in the Software without restriction, including
