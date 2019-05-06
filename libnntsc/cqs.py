@@ -38,6 +38,7 @@ from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 from libnntsc.parsers.amp_traceroute_pathlen import AmpTraceroutePathlenParser
 from libnntsc.parsers.amp_youtube import AmpYoutubeParser
 from libnntsc.parsers.amp_fastping import AmpFastpingParser
+from libnntsc.parsers.amp_external import AmpExternalParser
 
 
 def get_parser(table_name):
@@ -60,6 +61,8 @@ def get_parser(table_name):
         parser = AmpYoutubeParser(None)
     elif table_name == "data_amp_fastping":
         parser = AmpFastpingParser(None)
+    elif table_name == "data_amp_external":
+        parser = AmpExternalParser(None)
     else:
         parser = None
 
