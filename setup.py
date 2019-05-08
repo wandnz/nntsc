@@ -47,7 +47,7 @@ if sys.version_info < (2, 7):
         requires.append('argparse')
 
 setup(name="nntsc",
-	version="2.20",
+	version="2.21",
 	description='Nathan\'s Network Time Series Collector',
         author='Shane Alcock, Brendon Jones',
         author_email='contact@wand.net.nz',
