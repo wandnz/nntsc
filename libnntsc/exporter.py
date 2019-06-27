@@ -341,7 +341,7 @@ class DBWorker(threading.Thread):
                                                 queryend, influxdb=self.influxdb)
 
             error = self._query_history(generator, colid, labels, more, start,
-                    queryend)
+                    queryend, aggregate=(len(aggs) > 0))
 
             if error == DBWORKER_RETRY:
                 continue
@@ -376,7 +376,8 @@ class DBWorker(threading.Thread):
 
         return DBWORKER_SUCCESS
 
-    def _query_history(self, rowgen, colid, labels, more, start, end):
+    def _query_history(self, rowgen, colid, labels, more, start, end,
+            aggregate=True):
 
         currlabel = -1
         historysize = 0
@@ -401,7 +402,7 @@ class DBWorker(threading.Thread):
             if label != currlabel:
                 if currlabel != -1:
 
-                    if freq == 0:
+                    if aggregate and freq == 0:
                         freq = self._calc_frequency(freqstats, binsize)
 
                     if len(history) > 0:
@@ -432,7 +433,7 @@ class DBWorker(threading.Thread):
             # Don't keep more than 10,000 results without exporting some
             # of them to the client
             if historysize > 10000:
-                if freq == 0:
+                if aggregate and freq == 0:
                     freq = self._calc_frequency(freqstats, binsize)
                 lastts = history[-1]['timestamp']
                 err = self._enqueue_history(colid, currlabel, history, True,
@@ -442,7 +443,7 @@ class DBWorker(threading.Thread):
                 history = []
                 historysize = 0
 
-            if freq == 0:
+            if aggregate and freq == 0:
                 freq = self._update_frequency_stats(freqstats, rows, binsize,
                         tscol)
             history += rows
@@ -450,7 +451,7 @@ class DBWorker(threading.Thread):
 
         if historysize != 0:
             # Make sure we write out the last stream
-            if freq == 0:
+            if aggregate and freq == 0:
                 freq = self._calc_frequency(freqstats, binsize)
 
             lastts = history[-1]['timestamp']
