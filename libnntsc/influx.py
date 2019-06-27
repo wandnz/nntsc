@@ -614,7 +614,10 @@ class InfluxSelector(InfluxConnection):
                         "stream = '{}'".format(stream)
                                 for stream in all_streams])))
 
-        order = ["select", "from", "where", "group_by"]
+        # only return groups where there is data, don't generate empty groups
+        self.qb.add_clause("fill", "fill(none)")
+
+        order = ["select", "from", "where", "group_by", "fill"]
         querystring, _ = self.qb.create_query(order)
 
         results = self.query(querystring)
