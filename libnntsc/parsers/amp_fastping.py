@@ -119,9 +119,16 @@ class AmpFastpingParser(NNTSCParser):
         mangled['family'] = key[2]
 
         rtt = data['results'][0]['rtt']
-        mangled['median'] = int(rtt['percentiles'][9])
-        mangled['lossrate'] = 1.0 - (rtt['samples'] / float(key[5]))
-        mangled['percentiles'] = rtt['percentiles']
+        if rtt:
+            mangled['median'] = int(rtt['percentiles'][9])
+            mangled['lossrate'] = 1.0 - (rtt['samples'] / float(key[5]))
+            mangled['percentiles'] = rtt['percentiles']
+        else:
+            mangled['median'] = None
+            mangled['lossrate'] = 1.0
+            # TODO does this need to be padded out to the expected number of
+            # values in a working result?
+            mangled['percentiles'] = [None]
 
         return mangled, key
 
