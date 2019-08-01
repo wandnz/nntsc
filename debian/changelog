@@ -1,3 +1,11 @@
+nntsc (2.22-1) unstable; urgency=low
+
+  * Only aggregate groups where there is data, don't make empty groups.
+  * Don't calculate frequency for raw data (i.e. no aggregation).
+  * Fix the fastping parser to work in the case there is no RTT data.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Thu,  1 Aug 2019 11:37:30 +1200
+
 nntsc (2.21-1) unstable; urgency=low
 
   * Add basic support for AMP External test data.
