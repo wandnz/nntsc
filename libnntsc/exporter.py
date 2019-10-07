@@ -486,6 +486,7 @@ class DBWorker(threading.Thread):
             if freqstats['lastts'] == 0:
                 freqstats['lastts'] = row['timestamp']
                 freqstats['lastbin'] = row[tscol]
+                freqstats['mean'] = 0
             elif freqstats['lastts'] != row['timestamp']:
                 tsdiff = row['timestamp'] - freqstats['lastts']
                 bindiff = row[tscol] - freqstats['lastbin']
@@ -501,6 +502,8 @@ class DBWorker(threading.Thread):
                 freqstats['totaldiffs'] += 1
                 freqstats['lastts'] = row['timestamp']
                 freqstats['lastbin'] = row[tscol]
+                freqstats['mean'] += ((tsdiff - freqstats['mean']) /
+                        float(freqstats['totaldiffs']))
 
                 if freqstats['totaldiffs'] >= 200:
                     return self._calc_frequency(freqstats, binsize)
@@ -797,26 +800,46 @@ class DBWorker(threading.Thread):
         if freqdata['perfectbins'] / float(freqdata['totaldiffs']) > 0.9:
             return binsize
 
-        # Set some sensible defaults -- don't set the default binsize too small
-        if binsize < 300:
-            freq = 300
-        else:
-            freq = binsize
-
         # Find a suitable mode amongst the timestamp differences. Make sure
         # the mode is reasonably strong -- shouldn't be much variation in
         # timestamp differences unless your measurements are patchy.
+        freq = sys.maxsize
         for td, count in freqdata['tsdiffs'].iteritems():
             if count >= 0.5 * freqdata['totaldiffs']:
-                freq = td
-                break
+                return td
 
             # If there is no strong mode, go with the smallest somewhat
             # prominent value
             if count >= 0.2 * freqdata['totaldiffs'] and td < freq:
                 freq = td
 
-        return freq
+        # there was at least one prominent value, use it
+        if freq < sys.maxsize:
+            return freq
+
+        # otherwise calculate average interval and try to guess frequency
+        return self._round_frequency(freqdata['mean'])
+
+    def _round_frequency(self, mean):
+        # if there is no obvious common frequency then try to guess what it
+        # might be, with the assumption that tests are scheduled for nice
+        # values that fit evenly into round numbers of minutes/hours
+
+        # frequency less than 10 seconds will round to 10 seconds (how did
+        # it miss having a common value with so few available?)
+        if mean <= 10:
+            return 10
+        # frequency less than 60 seconds will round to the nearest 10s
+        if mean <= 60:
+            return (int(mean) + 5) / 10 * 10
+        # frequency between 1 and 5 minutes will round to the nearest minute
+        if mean <= 300:
+            return (int(mean) + 30) / 60 * 60
+        # frequency between 5 minutes and 1 hour will round to 5 minutes
+        if mean <= 3600:
+            return (int(mean) + 150) / 300 * 300
+        # frequency over an hour will get rounded to nearest hour
+        return (int(mean) + 1800) / 3600 * 3600
 
 class NNTSCClient(threading.Thread):
     def __init__(self, sock, parent, queue, dbconf, dbtimeout, influxconf):
