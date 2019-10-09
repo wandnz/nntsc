@@ -61,9 +61,9 @@ class AmpIcmpParser(NNTSCParser):
         self.datacolumns = [
             {"name":"median", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
-            {"name":"loss", "type":"smallint", "null":False},
-            {"name":"results", "type":"smallint", "null":False},
-            {"name":"lossrate", "type":"float", "null":False},
+            {"name":"loss", "type":"smallint", "null":True},
+            {"name":"results", "type":"smallint", "null":True},
+            {"name":"lossrate", "type":"float", "null":True},
             {"name":"rtts", "type":"integer[]", "null":True},
         ]
 
@@ -138,19 +138,27 @@ class AmpIcmpParser(NNTSCParser):
         # this function here
         return 1
 
-    def _update_stream(self, observed, streamid, datapoint):
+    def _update_stream(self, observed, streamid, data):
         if streamid not in observed:
-            observed[streamid] = {"loss":0, "rtts":[],
-                    "median":None, "packet_size":datapoint["packet_size"],
-                    "results":0}
+            observed[streamid] = {
+                "loss": None,
+                "rtts": [],
+                "median": None,
+                "packet_size": data["packet_size"],
+                "results": None
+            }
 
-        observed[streamid]["results"] += 1
+        stats = observed[streamid]
 
-        if 'loss' in datapoint:
-            observed[streamid]["loss"] += datapoint['loss']
+        if 'loss' in data and data['loss'] is not None:
+            stats["loss"] = self._add_maybe_none(stats["loss"], data["loss"])
 
-        if 'rtt' in datapoint and datapoint['rtt'] is not None:
-            observed[streamid]["rtts"].append(datapoint['rtt'])
+        if 'rtt' in data and data['rtt'] is not None:
+            stats["rtts"].append(data['rtt'])
+
+        # rtt will be > 0 or loss > 0 if there was a measurement result
+        if data.get('rtt', False) or data.get('loss', False):
+            stats["results"] = self._add_maybe_none(stats["results"], 1)
 
     def _aggregate_streamdata(self, streamdata):
         streamdata["rtts"].sort()
@@ -159,12 +167,13 @@ class AmpIcmpParser(NNTSCParser):
         # Add None entries to our array for lost measurements -- we
         # have to wait until now to add them otherwise they'll mess
         # with our median calculation
-        streamdata["rtts"] += [None] * streamdata['loss']
+        if streamdata["loss"]:
+            streamdata["rtts"] += [None] * streamdata["loss"]
 
-        if streamdata["results"] > 0:
+        if streamdata["results"]:
             streamdata["lossrate"] = streamdata["loss"] / float(streamdata["results"])
         else:
-            streamdata["lossrate"] = 0.0
+            streamdata["lossrate"] = None
 
     def process_data(self, timestamp, data, source):
         """ Process a AMP ICMP message, which can contain 1 or more sets of

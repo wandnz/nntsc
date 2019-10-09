@@ -65,7 +65,7 @@ class AmpFastpingParser(NNTSCParser):
         self.datacolumns = [
             {"name":"median", "type":"integer", "null":True},
             {"name":"percentiles", "type":"integer[]", "null":True},
-            {"name":"lossrate", "type":"float", "null":False},
+            {"name":"lossrate", "type":"float", "null":True},
         ]
 
         self.dataindexes = [
@@ -118,17 +118,22 @@ class AmpFastpingParser(NNTSCParser):
         mangled['destination'] = key[1]
         mangled['family'] = key[2]
 
-        rtt = data['results'][0]['rtt']
-        if rtt:
-            mangled['median'] = int(rtt['percentiles'][9])
-            mangled['lossrate'] = 1.0 - (rtt['samples'] / float(key[5]))
-            mangled['percentiles'] = rtt['percentiles']
+        # XXX why is there a results array when we can only have one?
+        if data['results'][0]['runtime']:
+            rtt = data['results'][0]['rtt']
+            if rtt:
+                # TODO we can do better than a random offset into a list
+                mangled['median'] = int(rtt['percentiles'][8])
+                mangled['lossrate'] = 1.0 - (rtt['samples'] / float(key[5]))
+                mangled['percentiles'] = rtt['percentiles']
+            else:
+                mangled['median'] = None
+                mangled['lossrate'] = 1.0
+                mangled['percentiles'] = []
         else:
             mangled['median'] = None
-            mangled['lossrate'] = 1.0
-            # TODO does this need to be padded out to the expected number of
-            # values in a working result?
-            mangled['percentiles'] = [None]
+            mangled['lossrate'] = None
+            mangled['percentiles'] = None
 
         return mangled, key
 

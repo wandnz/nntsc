@@ -44,12 +44,20 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
         self.module = "traceroute_pathlen"
 
         self.datacolumns = [
-            {"name":"path_length", "type":"float", "null":False},
+            {"name": "path_length", "type": "float", "null": True},
+            # unused column added so influx always has a value in the row
+            {"name": "unused", "type": "boolean", "null": False},
         ]
 
         self.matrix_cq = [
             ("path_length", "mode", "path_length"),
         ]
+
+
+    def is_null_address(self, address):
+        if address == "0.0.0.0" or address == "::":
+            return True
+        return False
 
 
     def process_data(self, timestamp, data, source):
@@ -86,18 +94,24 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
             # that case
             if 'ip' not in d or d['ip'] != 0:
 
-                if d['path'] is not None and d['path'][-1] is None:
-                    d['length'] += 0.5
-
-                    while len(d['path']) > 0 and d['path'][-1] is None:
-                        d['path'] = d['path'][:-1]
-                        d['length'] -= 1
-
-                elif d['path'] is not None:
-                    d['length'] += 0.0
+                if d['path'] is not None:
+                    if len(d['path']) == 0:
+                        # zero length path, it must have been incomplete
+                        d['length'] = 0.5
+                    elif d['path'][-1] is None:
+                        # last hop is None, it's incomplete
+                        d['length'] += 0.5
+                        # remove all the incomplete hops from the end
+                        while len(d['path']) > 0 and d['path'][-1] is None:
+                            d['path'] = d['path'][:-1]
+                            d['length'] -= 1
+                    else:
+                        # good path that reached the target, just add the
+                        # zero decimal so the types are correct
+                        d['length'] += 0.0
                 else:
-                    d['length'] = 0.0
-
+                    # test couldn't run, length doesn't make sense
+                    d['length'] = None
 
                 if streamid not in lengthseen:
                     lengthseen[streamid] = {d['length']: 1}
@@ -107,13 +121,15 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
                     lengthseen[streamid][d['length']] += 1
 
             elif 'as' in d and d['as'] != 0:
-
-                if d['aspath'] is not None and "-" in d['aspath'][-1]:
-                    d['responses'] += 0.5
-                elif d['responses'] is not None:
-                    d['responses'] += 0.0
+                if d['aspath'] is not None:
+                    if len(d['aspath']) == 0:
+                        d['responses'] = 0.5
+                    elif "-" in d['aspath'][-1]:
+                        d['responses'] += 0.5
+                    else:
+                        d['responses'] += 0.0
                 else:
-                    d['responses'] = 0.0
+                    d['responses'] = None
 
                 if streamid not in lengthseen:
                     lengthseen[streamid] = {d['responses']: 1}
@@ -124,7 +140,7 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
 
         for sid, lengths in lengthseen.iteritems():
             modelen = None
-            modelencount = 0.0
+            modelencount = 0
 
             for l, c in lengths.iteritems():
                 if c > modelencount:
@@ -132,7 +148,7 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
                     if l is not None:
                         modelen = float(l)
 
-            toinsert = {'path_length': modelen}
+            toinsert = {'path_length': modelen, 'unused': True}
 
             #print toinsert, sid, lengths
             self.insert_data(sid, timestamp, toinsert)
@@ -193,12 +209,14 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
             if currentas == -1:
                 responses -= count
 
-        if len(rtts) == 0:
+        if len(rtts) == 0 and self.is_null_address(result["address"]):
             result["hop_rtt"] = None
         else:
             result['hop_rtt'] = rtts
 
-        if len(aspath) == 0:
+        # TODO the information coming from the test should be more explicit
+        # so we don't have to guess based on the address
+        if len(aspath) == 0 and self.is_null_address(result["address"]):
             result["aspath"] = None
             result["aspathlen"] = None
             result["uniqueas"] = None
@@ -209,11 +227,9 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
             result["uniqueas"] = len(seenas)
             result["responses"] = responses
 
-        if len(ippath) == 0:
+        if len(ippath) == 0 and self.is_null_address(result["address"]):
             result["path"] = None
         else:
             result['path'] = ippath
-
-
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

@@ -576,7 +576,7 @@ class InfluxSelector(InfluxConnection):
             # use in postgres. Once we switch over to influx properly, we
             # can update ampy to ask for 'requests' directly.
             if meas == "timestamp" and agg == "count":
-                self.aggcols[i] = ("requests", agg)
+                self.aggcols[i] = ("requests", "sum")
 
         columns = self._get_rollup_functions()
 

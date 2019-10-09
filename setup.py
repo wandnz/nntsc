@@ -55,6 +55,8 @@ setup(name="nntsc",
 	scripts=['build_nntsc_db', 'nntsc'],
 	packages=['libnntsc', 'libnntsc.parsers'],
 	install_requires = requires,
+        tests_require = ["mock"],
+        test_suite="tests",
 	package_dir = {
 		'libnntsc':'libnntsc',
 		'libnntsc.parsers':'libnntsc/parsers',

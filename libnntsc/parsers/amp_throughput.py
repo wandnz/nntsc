@@ -66,7 +66,10 @@ class AmpThroughputParser(NNTSCParser):
             {"name":"bytes", "type":"bigint", "null":True},
             {"name":"packets", "type":"bigint", "null":True},
             {"name":"rate", "type":"float", "null":True},
-            {"name":"runtime", "type":"integer", "null":True}
+            {"name":"runtime", "type":"integer", "null":True},
+            # influx can't handle every column being null, so add one that
+            # is always true
+            {"name":"unused", "type":"boolean", "null":False},
         ]
 
         self.matrix_cq = [
@@ -131,9 +134,13 @@ class AmpThroughputParser(NNTSCParser):
             resdict['runtime'] = result['runtime']
             resdict['bytes'] = result['bytes']
             resdict['protocol'] = data['protocol']
+            resdict['unused'] = True
 
-            if result['duration'] is not None and result['duration'] > 0:
-                resdict['rate'] = result['bytes'] / float(result['duration'])
+            if result['runtime'] is not None:
+                if result['runtime'] > 0:
+                    resdict['rate'] = result['bytes'] / float(result['runtime'])
+                else:
+                    resdict['rate'] = 0.0
             else:
                 resdict['rate'] = None
 

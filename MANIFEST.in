@@ -2,3 +2,4 @@ include conf/*
 include initscripts/*
 include man/*
 include COPYING
+include tests/*

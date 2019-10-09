@@ -17,6 +17,58 @@ set -e
 # for details, see http://www.debian.org/doc/debian-policy/ or
 # the debian-policy package
 
+create_dummy_columns()
+{
+    if [ $# -ne 1 ]; then
+        echo "create_dummy_columns expects 1 argument, $# given"
+        return
+    fi
+
+    # add an extra field that won't be null to satisfy some
+    # influxdb issues that unfortunately need to match in postgres
+    su postgres -c "psql -q -c \
+        \"DO \
+        \\$\\$ \
+        DECLARE \
+            row record; \
+        BEGIN \
+            FOR row in SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE '$1%' \
+            LOOP \
+                BEGIN \
+                    EXECUTE 'ALTER TABLE public.' || quote_ident(row.tablename) || ' ADD COLUMN unused boolean NOT NULL DEFAULT TRUE;'; \
+                EXCEPTION \
+                    WHEN duplicate_column THEN \
+                        NULL; \
+                END; \
+            END LOOP; \
+        END; \
+        \\$\\$;\" -d nntsc"
+}
+
+relax_null_constraint()
+{
+    if [ $# -ne 2 ]; then
+        echo "relax_null_constraint expects 2 arguments, $# given"
+        return
+    fi
+
+    table=$1
+    column=$2
+
+    su postgres -c "psql -q -c \
+        \"DO \
+        \\$\\$ \
+        DECLARE \
+            row record; \
+        BEGIN \
+            FOR row in SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE '$table%' \
+            LOOP \
+                EXECUTE 'ALTER TABLE public.' || quote_ident(row.tablename) || ' ALTER COLUMN $column DROP NOT NULL;'; \
+            END LOOP; \
+        END; \
+        \\$\\$;\" -d nntsc"
+}
+
 
 case "$1" in
     configure)
@@ -79,6 +131,37 @@ case "$1" in
                         writesize,      \
                         tcpreused,      \
                         protocol);\" -d nntsc || true"
+            fi
+
+            if dpkg --compare-versions "$2" le-nl "2.22-1"; then
+                # relax some restrictions that shouldn't apply now that
+                # unresolved destinations are included in results. Generally
+                # only traceroute data is stored in postgres, but it's still
+                # possible to run without influx and store everything here
+                relax_null_constraint "data_amp_astraceroute" "addresses"
+                relax_null_constraint "data_amp_astraceroute" "errors"
+
+                relax_null_constraint "data_amp_udpstream" "packets_sent"
+                relax_null_constraint "data_amp_udpstream" "packets_recvd"
+                relax_null_constraint "data_amp_udpstream" "lossrate"
+
+                relax_null_constraint "data_amp_tcpping" "loss"
+                relax_null_constraint "data_amp_tcpping" "results"
+                relax_null_constraint "data_amp_tcpping" "icmperrors"
+                relax_null_constraint "data_amp_tcpping" "lossrate"
+
+                relax_null_constraint "data_amp_icmp" "loss"
+                relax_null_constraint "data_amp_icmp" "results"
+                relax_null_constraint "data_amp_icmp" "lossrate"
+
+                relax_null_constraint "data_amp_dns" "lossrate"
+                relax_null_constraint "data_amp_fastping" "lossrate"
+
+                # add an extra field that won't be null to satisfy some
+                # influxdb issues that unfortunately need to match in postgres
+                create_dummy_columns "data_amp_throughput"
+                create_dummy_columns "data_amp_udpstream"
+                create_dummy_columns "data_amp_traceroute_pathlen"
             fi
         fi
     ;;

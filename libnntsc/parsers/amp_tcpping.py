@@ -61,11 +61,11 @@ class AmpTcppingParser(AmpIcmpParser):
         self.datacolumns = [
             {"name":"median", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
-            {"name":"loss", "type":"smallint", "null":False},
-            {"name":"results", "type":"smallint", "null":False},
-            {"name":"icmperrors", "type":"smallint", "null":False},
+            {"name":"loss", "type":"smallint", "null":True},
+            {"name":"results", "type":"smallint", "null":True},
+            {"name":"icmperrors", "type":"smallint", "null":True},
             {"name":"rtts", "type":"integer[]", "null":True},
-            {"name":"lossrate", "type":"float", "null":False},
+            {"name":"lossrate", "type":"float", "null":True},
             #{"name":"replyflags", "type":"smallint", "null":True},
             #{"name":"icmptype", "type":"smallint", "null":True},
             #{"name":"icmpcode", "type":"smallint", "null":True},
@@ -126,24 +126,33 @@ class AmpTcppingParser(AmpIcmpParser):
         return props, key
 
 
-    def _update_stream(self, observed, streamid, datapoint):
+    def _update_stream(self, observed, streamid, data):
         if streamid not in observed:
-            observed[streamid] = {"loss":0, "rtts":[], "icmperrors":0,
-                    "median":None, "packet_size":datapoint["packet_size"],
-                    "results":0}
+            observed[streamid] = {
+                "loss": None,
+                "rtts":[],
+                "icmperrors": None,
+                "median":None,
+                "packet_size": data["packet_size"],
+                "results": None
+            }
 
-        observed[streamid]["results"] += 1
+        stats = observed[streamid]
 
-        # reply is deprecated, but we'll need it for backwards compatibility
-        if ('reply' in datapoint and datapoint['reply'] == 2) or \
-                ('icmptype' in datapoint and datapoint['icmptype'] is not None):
-            observed[streamid]["icmperrors"] += 1
+        if 'icmptype' in data and data['icmptype'] is not None:
+            # count the number of errors (non-zero type) received
+            stats["icmperrors"] = self._add_maybe_none(stats["icmperrors"],
+                    int(bool(data['icmptype'])))
 
-        if 'loss' in datapoint and datapoint['loss'] is not None:
-            observed[streamid]["loss"] += datapoint['loss']
+        if 'loss' in data and data['loss'] is not None:
+            stats["loss"] = self._add_maybe_none(stats["loss"], data["loss"])
 
-        if 'rtt' in datapoint and datapoint['rtt'] is not None:
-            observed[streamid]["rtts"].append(datapoint['rtt'])
+        if 'rtt' in data and data['rtt'] is not None:
+            observed[streamid]["rtts"].append(data['rtt'])
+
+        # rtt will be > 0 or loss > 0 if there was a measurement result
+        if data.get('rtt', False) or data.get('loss', False):
+            stats["results"] = self._add_maybe_none(stats["results"], 1)
 
     def _aggregate_streamdata(self, streamdata):
         streamdata["rtts"].sort()
@@ -152,13 +161,16 @@ class AmpTcppingParser(AmpIcmpParser):
         # Add None entries to our array for lost measurements -- we
         # have to wait until now to add them otherwise they'll mess
         # with our median calculation
-        nulls = [None] * (streamdata['loss'] + streamdata['icmperrors'])
-        streamdata["rtts"] += nulls
+        if streamdata["loss"]:
+            streamdata["rtts"] += [None] * streamdata["loss"]
 
-        if streamdata["results"] > 0:
+        if streamdata["icmperrors"]:
+            streamdata["rtts"] += [None] * streamdata["icmperrors"]
+
+        if streamdata["results"]:
             streamdata["lossrate"] = streamdata["loss"] / float(streamdata["results"])
         else:
-            streamdata["lossrate"] = 0.0
+            streamdata["lossrate"] = None
 
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

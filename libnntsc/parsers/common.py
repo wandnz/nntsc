@@ -259,5 +259,12 @@ class NNTSCParser(object):
 
         return (datapoints[half] + datapoints[half - 1]) / 2
 
+    def _add_maybe_none(self, a, b):
+        if a is None:
+            return b
+        if b is None:
+            return a
+        return a + b
+
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

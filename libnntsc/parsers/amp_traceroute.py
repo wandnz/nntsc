@@ -65,8 +65,8 @@ class AmpTracerouteParser(AmpIcmpParser):
         self.asdatacolumns = [
             {"name":"aspath_id", "type":"integer", "null":True},
             {"name":"packet_size", "type":"smallint", "null":False},
-            {"name":"errors", "type":"smallint", "null":False},
-            {"name":"addresses", "type":"smallint", "null":False},
+            {"name":"errors", "type":"smallint", "null":True},
+            {"name":"addresses", "type":"smallint", "null":True},
         ]
 
         self.ascollectionid = None
@@ -407,13 +407,23 @@ class AmpTracerouteParser(AmpIcmpParser):
 
     def _update_as_stream(self, observed, streamid, datapoint):
         if streamid not in observed:
-            observed[streamid] = {"packet_size":datapoint["packet_size"],
-                    "errors":0, "paths":{}, "addresses":0}
+            observed[streamid] = {
+                "packet_size": datapoint["packet_size"],
+                "errors": None,
+                "paths": {},
+                "addresses": None
+            }
 
-        observed[streamid]['addresses'] += 1
+        if datapoint['address'] != "0.0.0.0" and datapoint['address'] != "::":
+            observed[streamid]['addresses'] = self._add_maybe_none(
+                    observed[streamid]['addresses'], 1)
+            # update errors from None to at least zero if we have an address
+            observed[streamid]["errors"] = self._add_maybe_none(
+                    observed[streamid]['errors'], 0)
 
         if datapoint['error_type'] != None or datapoint['error_code'] != None:
-            observed[streamid]["errors"] += 1
+            observed[streamid]["errors"] = self._add_maybe_none(
+                    observed[streamid]['errors'], 1)
 
         if datapoint['aspath'] != None:
             keystr = "%s" % (streamid)
@@ -454,11 +464,18 @@ class AmpTracerouteParser(AmpIcmpParser):
                 commonpathid = pathid
                 maxfreq = pdata['count']
 
-        streamdata['aspath_id'] = commonpathid
-        streamdata['aspath'] = streamdata['paths'][commonpathid]['aspath']
-        streamdata['aspathlen'] = streamdata['paths'][commonpathid]['aspathlen']
-        streamdata['uniqueas'] = streamdata['paths'][commonpathid]['uniqueas']
-        streamdata['responses'] = streamdata['paths'][commonpathid]['responses']
+        if commonpathid < 0:
+            streamdata['aspath_id'] = None
+            streamdata['aspath'] = None
+            streamdata['aspathlen'] = None
+            streamdata['uniqueas'] = None
+            streamdata['responses'] = None
+        else:
+            streamdata['aspath_id'] = commonpathid
+            streamdata['aspath'] = streamdata['paths'][commonpathid]['aspath']
+            streamdata['aspathlen'] = streamdata['paths'][commonpathid]['aspathlen']
+            streamdata['uniqueas'] = streamdata['paths'][commonpathid]['uniqueas']
+            streamdata['responses'] = streamdata['paths'][commonpathid]['responses']
 
 
     def process_data(self, timestamp, data, source):
@@ -501,8 +518,6 @@ class AmpTracerouteParser(AmpIcmpParser):
                 self._update_as_stream(asobserved, streamid, d)
 
         for sid, streamdata in asobserved.iteritems():
-            if len(streamdata['paths']) == 0:
-                continue
             self._aggregate_streamdata(streamdata)
             self.insert_aspath(sid, timestamp, streamdata)
 
@@ -560,14 +575,13 @@ class AmpTracerouteParser(AmpIcmpParser):
             logger.log("Error was: %s" % (str(e)))
             raise
 
-        filtered['aspath'] = result['aspath']
-        filtered['aspath_length'] = result['aspathlen']
-        filtered['uniqueas'] = result["uniqueas"]
-        filtered['responses'] = result["responses"]
-
         colid = self._get_astraceroute_collection_id()
 
         if self.exporter != None and colid > 0:
+            filtered['aspath'] = result['aspath']
+            filtered['aspath_length'] = result['aspathlen']
+            filtered['uniqueas'] = result["uniqueas"]
+            filtered['responses'] = result["responses"]
             self.exporter.publishLiveData(colid, stream, ts, filtered)
 
 
@@ -623,10 +637,10 @@ class AmpTracerouteParser(AmpIcmpParser):
             if currentas == -1:
                 responses -= count
 
-        if len(rtts) == 0:
-            result["hop_rtt"] = None
-        else:
-            result['hop_rtt'] = rtts
+        # these are fine as empty arrays if there was no path (e.g. it
+        # couldn't be tested)
+        result['path'] = ippath
+        result['hop_rtt'] = rtts
 
         if len(aspath) == 0:
             result["aspath"] = None
@@ -638,11 +652,6 @@ class AmpTracerouteParser(AmpIcmpParser):
             result["aspathlen"] = aspathlen
             result["uniqueas"] = len(seenas)
             result["responses"] = responses
-
-        if len(ippath) == 0:
-            result["path"] = None
-        else:
-            result['path'] = ippath
 
 
 # Helper functions for dbselect module which deal with complications

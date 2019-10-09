@@ -85,7 +85,7 @@ class AmpDnsParser(NNTSCParser):
             {"name":"flag_ad", "type":"boolean", "null":True},
             {"name":"flag_ra", "type":"boolean", "null":True},
             {"name":"requests", "type":"smallint", "null":False},
-            {"name":"lossrate", "type":"float", "null": False},
+            {"name":"lossrate", "type":"float", "null": True},
         ]
 
         self.dataindexes = [
@@ -96,7 +96,7 @@ class AmpDnsParser(NNTSCParser):
             ('rtt', 'mean', 'rtt_avg'),
             ('rtt', 'stddev', 'rtt_stddev'),
             ('rtt', 'count', 'rtt_count'),
-            ('requests', 'sum', 'requests_count'),
+            ('requests', 'sum', 'requests_sum'),
             ('lossrate', 'stddev', 'lossrate_stddev')
         ]
 
@@ -140,11 +140,17 @@ class AmpDnsParser(NNTSCParser):
                     return
                 self.streams[key] = stream_id
 
-            dataresult['requests'] = 1
-            if 'response_size' in dataresult and dataresult['response_size']:
-                dataresult['lossrate'] = 0.0
+            if dataresult.get('query_len', 0) > 0:
+                # we sent a query, check if we got a result
+                dataresult['requests'] = 1
+                if dataresult.get('response_size', 0) > 0:
+                    dataresult['lossrate'] = 0.0
+                else:
+                    dataresult['lossrate'] = 1.0
             else:
-                dataresult['lossrate'] = 1.0
+                # no query could be sent, so this is an odd case of loss
+                dataresult['requests'] = 0
+                dataresult['lossrate'] = None
 
             self.insert_data(stream_id, timestamp, dataresult)
             done[stream_id] = 0

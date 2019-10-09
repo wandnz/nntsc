@@ -79,12 +79,14 @@ class AmpUdpstreamParser(NNTSCParser):
             {"name": "jitter_percentile_80", "type": "integer", "null": True},
             {"name": "jitter_percentile_90", "type": "integer", "null": True},
             {"name": "jitter_percentile_100", "type": "integer", "null": True},
-            {"name": "packets_sent", "type": "integer", "null": False},
-            {"name": "packets_recvd", "type": "integer", "null": False},
+            {"name": "packets_sent", "type": "integer", "null": True},
+            {"name": "packets_recvd", "type": "integer", "null": True},
             #{"name": "loss_periods", "type": "varchar", "null": True},
             {"name": "itu_mos", "type": "float", "null": True},
-            {"name": "lossrate", "type": "float", "null": False},
-
+            {"name": "lossrate", "type": "float", "null": True},
+            # influx can't handle every column being null, so add one that
+            # is always true
+            {"name": "unused", "type": "boolean", "null": False},
         ]
 
         self.matrix_cq = [
@@ -148,6 +150,7 @@ class AmpUdpstreamParser(NNTSCParser):
             resdict['packet_spacing'] = data['packet_spacing']
             resdict['packet_count'] = data['packet_count']
             resdict['dscp'] = data['dscp']
+            resdict['unused'] = True
 
             if 'rtt' in result and result['rtt'] is not None:
                 resdict['mean_rtt'] = result['rtt']['mean']
@@ -158,13 +161,17 @@ class AmpUdpstreamParser(NNTSCParser):
             if 'packets_received' in result:
                 resdict['packets_recvd'] = result['packets_received']
             else:
-                resdict['packets_recvd'] = 0
+                resdict['packets_recvd'] = None
 
-            resdict['packets_sent'] = data['packet_count']
-            if data['packet_count'] > 0:
-                resdict['lossrate'] = resdict['packets_recvd'] / float(resdict['packets_sent'])
+            # TODO actually report number of packets sent
+            if resdict['packets_recvd'] is None:
+                # no packets received with no loss periods means none were sent
+                resdict['packets_sent'] = None
             else:
-                resdict['lossrate'] = 0.0
+                # otherwise make the assumption they all were sent
+                resdict['packets_sent'] = data['packet_count']
+            # XXX should this be a percent or a ratio?
+            resdict['lossrate'] = result['loss_percent']
 
             if 'voip' in result and result['voip'] is not None:
                 resdict['itu_mos'] = result['voip']['itu_mos']
