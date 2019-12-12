@@ -1,3 +1,10 @@
+nntsc (2.23-1) unstable; urgency=low
+
+  * If there isn't a mode value, guess test frequency based on the mean.
+  * Accept, rather than discard, test data with missing values.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Thu, 12 Dec 2019 16:04:38 +1300
+
 nntsc (2.22-1) unstable; urgency=low
 
   * Only aggregate groups where there is data, don't make empty groups.
