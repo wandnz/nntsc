@@ -1,3 +1,9 @@
+nntsc (2.23-2) unstable; urgency=low
+
+  * Deal gracefully with missing database columns during package postinst.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Fri, 13 Dec 2019 10:44:31 +1300
+
 nntsc (2.23-1) unstable; urgency=low
 
   * If there isn't a mode value, guess test frequency based on the mean.
