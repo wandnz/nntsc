@@ -63,7 +63,12 @@ relax_null_constraint()
         BEGIN \
             FOR row in SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE '$table%' \
             LOOP \
-                EXECUTE 'ALTER TABLE public.' || quote_ident(row.tablename) || ' ALTER COLUMN $column DROP NOT NULL;'; \
+                BEGIN \
+                    EXECUTE 'ALTER TABLE public.' || quote_ident(row.tablename) || ' ALTER COLUMN $column DROP NOT NULL;'; \
+                EXCEPTION \
+                    WHEN undefined_column THEN \
+                        NULL; \
+                END; \
             END LOOP; \
         END; \
         \\$\\$;\" -d nntsc"
@@ -133,7 +138,7 @@ case "$1" in
                         protocol);\" -d nntsc || true"
             fi
 
-            if dpkg --compare-versions "$2" le-nl "2.22-1"; then
+            if dpkg --compare-versions "$2" le-nl "2.23-1"; then
                 # relax some restrictions that shouldn't apply now that
                 # unresolved destinations are included in results. Generally
                 # only traceroute data is stored in postgres, but it's still
