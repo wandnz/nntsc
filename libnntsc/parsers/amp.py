@@ -49,6 +49,7 @@ from libnntsc.parsers.amp_udpstream import AmpUdpstreamParser
 from libnntsc.parsers.amp_youtube import AmpYoutubeParser
 from libnntsc.parsers.amp_fastping import AmpFastpingParser
 from libnntsc.parsers.amp_external import AmpExternalParser
+from libnntsc.parsers.amp_sip import AmpSipParser
 from libnntsc.dberrorcodes import *
 from google.protobuf.message import DecodeError
 
@@ -111,6 +112,7 @@ class AmpModule:
             "youtube": [AmpYoutubeParser(self.db, self.influxdb)],
             "fastping": [AmpFastpingParser(self.db, self.influxdb)],
             "external": [AmpExternalParser(self.db, self.influxdb)],
+            "sip": [AmpSipParser(self.db, self.influxdb)],
         }
 
         # set all the streams that we already know about for easy lookup of
@@ -308,7 +310,7 @@ def create_cqs(db, influxdb):
     for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
                 AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
                 AmpTraceroutePathlenParser, AmpYoutubeParser,
-                AmpFastpingParser, AmpExternalParser]:
+                AmpFastpingParser, AmpExternalParser, AmpSipParser]:
         parser = p(db, influxdb)
         parser.build_cqs()
 
@@ -317,7 +319,8 @@ def tables(db):
     for p in [AmpIcmpParser, AmpDnsParser, AmpThroughputParser,
                 AmpTcppingParser, AmpHttpParser, AmpUdpstreamParser,
                 AmpTraceroutePathlenParser, AmpTracerouteParser,
-                AmpYoutubeParser, AmpFastpingParser, AmpExternalParser]:
+                AmpYoutubeParser, AmpFastpingParser, AmpExternalParser,
+                AmpSipParser]:
         parser = p(db)
         parser.register()
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :
