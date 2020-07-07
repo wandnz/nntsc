@@ -23,6 +23,7 @@ build-bionic:
       - built-packages/*
     expire_in: 1 day
   only:
+    - web
     - tags
 
 build-xenial:
@@ -35,6 +36,7 @@ build-xenial:
       - built-packages/*
     expire_in: 1 day
   only:
+    - web
     - tags
 
 build-stretch:
@@ -47,6 +49,7 @@ build-stretch:
       - built-packages/*
     expire_in: 1 day
   only:
+    - web
     - tags
 
 build-jessie:
@@ -59,6 +62,7 @@ build-jessie:
       - built-packages/*
     expire_in: 1 day
   only:
+    - web
     - tags
 
 upload-packages:
