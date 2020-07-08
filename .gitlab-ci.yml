@@ -39,6 +39,19 @@ build-xenial:
     - web
     - tags
 
+build-buster:
+  stage: build
+  image: debian:buster
+  script:
+    - *generic_apt_build
+  artifacts:
+    paths:
+      - built-packages/*
+    expire_in: 1 day
+  only:
+    - web
+    - tags
+
 build-stretch:
   stage: build
   image: debian:stretch
