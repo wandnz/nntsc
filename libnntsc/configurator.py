@@ -29,12 +29,12 @@
 #
 
 
-import ConfigParser
+import configparser
 import libnntscclient.logger as logger
 
 def load_nntsc_config(filename):
     # load in config file with database settings
-    nntsc_config = ConfigParser.SafeConfigParser()
+    nntsc_config = configparser.SafeConfigParser()
 
     # add some default values
     nntsc_config.add_section('multicast')
@@ -57,10 +57,10 @@ def get_nntsc_config_bool(nntsc_config, section, option):
 
     try:
         result = nntsc_config.getboolean(section, option)
-    except ConfigParser.NoSectionError:
+    except configparser.NoSectionError:
         #logger.log("The section '%s' does not exist in the config file" % (section))
         return "NNTSCConfigMissing"
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         #logger.log("The option '%s' does not exist in section '%s' from the config file" % (option, section))
         return "NNTSCConfigMissing"
     except ValueError:
@@ -77,9 +77,9 @@ def get_nntsc_config_integer(nntsc_config, section, option):
 
     try:
         result = nntsc_config.getint(section, option)
-    except ConfigParser.NoSectionError:
+    except configparser.NoSectionError:
         return "NNTSCConfigMissing"
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         return "NNTSCConfigMissing"
     except ValueError:
         logger.log("Option '%s' in section '%s' must be an integer" % (
@@ -96,10 +96,10 @@ def get_nntsc_config(nntsc_config, section, option):
 
     try:
         result = nntsc_config.get(section, option)
-    except ConfigParser.NoSectionError:
+    except configparser.NoSectionError:
         #logger.log("The section '%s' does not exist in the config file" % (section))
         return "NNTSCConfigMissing"
-    except ConfigParser.NoOptionError:
+    except configparser.NoOptionError:
         #logger.log("The option '%s' does not exist in section '%s' from the config file" % (option, section))
         return "NNTSCConfigMissing"
 

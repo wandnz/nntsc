@@ -138,11 +138,11 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
                 else:
                     lengthseen[streamid][d['responses']] += 1
 
-        for sid, lengths in lengthseen.iteritems():
+        for sid, lengths in lengthseen.items():
             modelen = None
             modelencount = 0
 
-            for l, c in lengths.iteritems():
+            for l, c in lengths.items():
                 if c > modelencount:
                     modelencount = c
                     if l is not None:
@@ -154,7 +154,7 @@ class AmpTraceroutePathlenParser(AmpIcmpParser):
             self.insert_data(sid, timestamp, toinsert)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.datatable, lengthseen.keys(),
+        self.db.update_timestamp(self.datatable, list(lengthseen.keys()),
                 timestamp, False)
 
     def _extract_paths(self, result):

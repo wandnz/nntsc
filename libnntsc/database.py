@@ -303,7 +303,7 @@ class DatabaseCore(object):
             if row is None:
                 break
             col = {}
-            for k, v in row.iteritems():
+            for k, v in row.items():
                 col[k] = v
             collections.append(col)
         self._releasebasic()
@@ -344,7 +344,7 @@ class DatabaseCore(object):
         self._releasebasic()
 
         streams = []
-        for cid, (tname, sub) in streamtables.iteritems():
+        for cid, (tname, sub) in streamtables.items():
             sql = """ SELECT * FROM %s """ % (tname)
 
             self._basicquery(sql, (cid,))
@@ -354,7 +354,7 @@ class DatabaseCore(object):
                 if row is None:
                     break
                 row_dict = {"modsubtype":sub}
-                for k, v in row.iteritems():
+                for k, v in row.items():
                     if k == "id":
                         continue
                     row_dict[k] = v
@@ -577,7 +577,7 @@ class DBInsert(DatabaseCore):
 
         self._releasebasic()
 
-        for mod in modules.values():
+        for mod in list(modules.values()):
             mod.tables(self)
 
     def get_collection_id(self, mod, subtype):
@@ -705,7 +705,7 @@ class DBInsert(DatabaseCore):
 
         wherecl = "WHERE "
         params = []
-        keys = props.keys()
+        keys = list(props.keys())
         for i in range(0, len(keys)):
             if i != 0:
                 wherecl += " AND "
@@ -734,7 +734,7 @@ class DBInsert(DatabaseCore):
         # insert stream into our stream table
         colstr = "(stream_id"
         values = []
-        for k, v in streamprops.iteritems():
+        for k, v in streamprops.items():
             colstr += ', "%s"' % (k)
             values.append(v)
         colstr += ") "
@@ -801,7 +801,7 @@ class DBInsert(DatabaseCore):
         if casts is None:
             casts = {}
 
-        for k, v in result.iteritems():
+        for k, v in result.items():
             colstr += ', "%s"' % (k)
             values.append(v)
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # This file is part of NNTSC.
 #
@@ -31,15 +31,13 @@
 
 import sys
 
-from pkg_resources import Requirement, resource_filename
-
 try:
         from setuptools import setup
 except ImportError:
         from distutils.core import setup
 
 requires = [
-        'python-rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12,<0.11.0', 'python-daemon',
+        'rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12,<0.11.0', 'daemon',
 	'libnntsc-client', 'pylibmc', 'influxdb>=2.12.0', 'requests'
 ]
 

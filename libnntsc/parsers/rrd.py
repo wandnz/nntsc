@@ -196,7 +196,7 @@ class RRDModule:
                 r['lasttimestamp'], parser.have_influx)
 
     def rrdloop(self):
-        for fname, rrds in self.rrds.items():
+        for fname, rrds in list(self.rrds.items()):
             for r in rrds:
                 try:
                     self.read_from_rrd(r, fname)
@@ -232,7 +232,7 @@ class RRDModule:
 
     def revert_rrds(self):
         logger.log("Reverting RRD timestamps to previous safe value")
-        for fname, rrds in self.rrds.items():
+        for fname, rrds in list(self.rrds.items()):
             for r in rrds:
                 if 'lastcommit' in r:
                     r['lasttimestamp'] = r['lastcommit']
@@ -276,7 +276,7 @@ def insert_rrd_streams(db, influxdb, conf):
 
     try:
         f = open(conf, "r")
-    except IOError, e:
+    except IOError:
         logger.log("WARNING: %s does not exist - no RRD streams will be added" % (conf))
         return
 

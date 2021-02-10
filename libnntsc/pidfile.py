@@ -34,9 +34,9 @@ class PidFile(object):
 
     def __enter__(self):
         try:
-		self.pidfile = open(self.path, "a+")
-	except IOError:
-		raise SystemExit("Failed to open pid file: %s" % self.path)
+            self.pidfile = open(self.path, "a+")
+        except IOError:
+            raise SystemExit("Failed to open pid file: %s" % self.path)
         try:
             fcntl.flock(self.pidfile.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError:

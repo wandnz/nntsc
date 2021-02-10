@@ -203,7 +203,7 @@ class AmpIcmpParser(NNTSCParser):
 
             self._update_stream(observed, streamid, d)
 
-        for sid, streamdata in observed.iteritems():
+        for sid, streamdata in observed.items():
             self._aggregate_streamdata(streamdata)
 
             if self.influxdb:
@@ -213,7 +213,7 @@ class AmpIcmpParser(NNTSCParser):
             self.insert_data(sid, timestamp, streamdata, casts)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.datatable, observed.keys(), timestamp,
+        self.db.update_timestamp(self.datatable, list(observed.keys()), timestamp,
                 self.have_influx)
 
 # vim: set sw=4 tabstop=4 softtabstop=4 expandtab :

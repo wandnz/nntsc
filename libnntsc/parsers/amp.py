@@ -33,11 +33,11 @@ import sys
 import signal
 import logging
 
+import ampsave
 from libnntsc.database import DBInsert
 from libnntsc.influx import InfluxInsertor
 from libnntsc.configurator import *
 from libnntsc.pikaqueue import PikaConsumer, initExportPublisher
-from ampsave.importer import import_data_functions
 from libnntsc.parsers.amp_icmp import AmpIcmpParser
 from libnntsc.parsers.amp_traceroute import AmpTracerouteParser
 from libnntsc.parsers.amp_traceroute_pathlen import AmpTraceroutePathlenParser
@@ -84,9 +84,6 @@ class AmpModule:
                 self.influxconf["host"], self.influxconf["port"])
         else:
             self.influxdb = None
-
-        # the amp modules understand how to extract the test data from the blob
-        self.amp_modules = import_data_functions()
 
         self.collections = {}
         try:
@@ -139,7 +136,7 @@ class AmpModule:
                     initExportPublisher(nntsc_config, routekey, exchange, \
                     queueid)
 
-            for parsers in self.parsers.itervalues():
+            for parsers in self.parsers.values():
                 for p in parsers:
                     p.add_exporter(self.exporter)
 
@@ -203,19 +200,12 @@ class AmpModule:
 
             test = properties.headers["x-amp-test-type"]
 
-            # ignore any messages for tests we don't have a module for
-            if test not in self.amp_modules:
-                logger.log("unknown test: '%s'" % (
-                        properties.headers["x-amp-test-type"]))
-                logger.log("AMP -- Data error, acknowledging and moving on")
-                continue
-
             # ignore any messages for tests we don't have a parser for
             if test not in self.parsers:
                 continue
 
             try:
-                data = self.amp_modules[test].get_data(body)
+                data = ampsave.get_data(test, body)
             except DecodeError as e:
                 # we got something that wasn't a valid protocol buffer message
                 logger.log("Failed to decode result from %s for %s test: %s" % (
@@ -225,6 +215,10 @@ class AmpModule:
                 # A lot of ampsave functions assert fail if something goes
                 # wrong, so we need to catch that and chuck the bogus data
                 logger.log("Ignoring AMP result for %s test (ampsave assertion failure): %s" % (test, e))
+                data = None
+            except ampsave.UnknownTestError as e:
+                logger.log("unknown test: '%s'" % test)
+                logger.log("AMP -- Data error, acknowledging and moving on")
                 data = None
 
             # ignore any broken messages and carry on
@@ -268,7 +262,7 @@ class AmpModule:
             # some parsers need to update internal caches after confirming
             # that data has been committed successfully
             # TODO limit this to parsers that recently processed data
-            for parsers in self.parsers.values():
+            for parsers in list(self.parsers.values()):
                 for parser in parsers:
                     parser.post_commit()
 
@@ -281,8 +275,7 @@ class AmpModule:
     def run(self):
         """ Run forever, calling the process_data callback for each message """
 
-        logger.log("Running amp modules: %s" % " ".join(self.amp_modules))
-
+        logger.log("Running amp modules: %s" % " ".join(ampsave.list_modules()))
 
         try:
             self.source.configure([], self.process_data, self.commitfreq)

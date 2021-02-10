@@ -93,7 +93,7 @@ class InfluxConnection(object):
             if "continuous query not found" in e:
                 raise DBQueryException(DB_CQ_ERROR)
             if query is not None:
-                print query
+                print(query)
             logger.log(e)
             raise DBQueryException(DB_GENERIC_ERROR)
         except InfluxDBServerError as e:
@@ -144,7 +144,7 @@ class InfluxInsertor(InfluxConnection):
         """Prepare data for sending to database"""
         if casts:
             for cast in casts:
-                if cast in result.keys():
+                if cast in list(result.keys()):
                     result[cast] = casts[cast](result[cast])
         self.to_write.append(
             {
@@ -220,7 +220,7 @@ class InfluxInsertor(InfluxConnection):
         except DBQueryException as e:
             return None
 
-        for (tbl, tags), results in results.items():
+        for (tbl, tags), results in list(results.items()):
             for r in results:
                 if r['count'] > 0:
                     if lasthour is None or r['time'] > lasthour:
@@ -237,7 +237,7 @@ class InfluxInsertor(InfluxConnection):
         except DBQueryException as e:
             return None
 
-        for (tbl, tags), results in results.items():
+        for (tbl, tags), results in list(results.items()):
             for r in results:
                 return r['time'] / 1000000000
 
@@ -338,7 +338,7 @@ class InfluxSelector(InfluxConnection):
 
         self.qb.add_clause("from", "from {}".format(table))
 
-        for label, streams in labels.iteritems():
+        for label, streams in labels.items():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
                 continue
@@ -361,7 +361,7 @@ class InfluxSelector(InfluxConnection):
                 yield(None, label, None, None, e)
 
             rows = []
-            for (table, tags), results in results.items():
+            for (table, tags), results in list(results.items()):
                 for result in results:
                     result["nntsclabel"] = label
                     result["timestamp"] = result["time"]
@@ -382,7 +382,7 @@ class InfluxSelector(InfluxConnection):
         except DBQueryException as e:
             return False
 
-        for (table, tags), results in results.items():
+        for (table, tags), results in list(results.items()):
             for r in results:
                 if r['count'] > 0:
                     return True
@@ -409,7 +409,7 @@ class InfluxSelector(InfluxConnection):
         results = []
         labels_and_rows = {}
 
-        for label, streams in labels.iteritems():
+        for label, streams in labels.items():
             if len(streams) == 0:
                 results.append({'data': None, 'label': label})
             else:
@@ -432,13 +432,13 @@ class InfluxSelector(InfluxConnection):
         except DBQueryException as e:
             return
 
-        for (tbl, tags), data in mdata.items():
+        for (tbl, tags), data in list(mdata.items()):
             for row in data:
                 if row['stream'] not in self.streams_to_labels:
                     continue
                 lab = self.streams_to_labels[row['stream']]
 
-                for col, value in row.iteritems():
+                for col, value in row.items():
                     if col in ['stream', 'time']:
                         continue
                     if col not in labels_and_rows[lab]:
@@ -446,7 +446,7 @@ class InfluxSelector(InfluxConnection):
                     else:
                         labels_and_rows[lab][col].append(value)
 
-        for k, v in labels_and_rows.iteritems():
+        for k, v in labels_and_rows.items():
             finaldata = {'binstart': start_time, 'timestamp': stop_time}
             for cq in mcq:
                 cq = (cq[0].replace('"', ''), cq[1], cq[2].replace('"', ''))
@@ -594,7 +594,7 @@ class InfluxSelector(InfluxConnection):
         all_streams = []
         labels_and_rows = {}
 
-        for label, streams in labels.iteritems():
+        for label, streams in labels.items():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
 
@@ -625,7 +625,7 @@ class InfluxSelector(InfluxConnection):
         #print querystring
 
         # Update the labels of the results
-        for (series, tags), generator in results.items():
+        for (series, tags), generator in list(results.items()):
             for result in generator:
                 label = self.streams_to_labels[tags["stream"]]
                 row = self._row_from_result(result, label)
@@ -634,14 +634,14 @@ class InfluxSelector(InfluxConnection):
                     if ts not in labels_and_rows[label]:
                         labels_and_rows[label][ts] = row
                     else:
-                        for k, v in row.iteritems():
+                        for k, v in row.items():
                             if k not in labels_and_rows[label][ts]:
                                 labels_and_rows[label][ts][k] = v
                             elif labels_and_rows[label][ts][k] is None:
                                 labels_and_rows[label][ts][k] = row[k]
                     #labels_and_rows[label].append(row)
 
-        for label, rows in labels_and_rows.iteritems():
+        for label, rows in labels_and_rows.items():
             if len(rows) == 0:
                 yield(None, label, None, None, None)
             else:
@@ -706,7 +706,7 @@ class InfluxSelector(InfluxConnection):
             meas = self.aggcols[index][0]
             num_results = result.get("results", 20)
             if num_results is None or num_results <= 1:
-                ntile_range = range(0)
+                ntile_range = list(range(0))
             elif num_results < 20:
                 # Don't return more percentiles than we have results
                 # This is a bit of a hack.. Would be better to do this
@@ -718,9 +718,9 @@ class InfluxSelector(InfluxConnection):
                 range_step = range_top // num_results
                 range_step = range_step - (range_step % 5)
                 range_bottom = range_top - range_step * (num_results - 1)
-                ntile_range = range(range_bottom, range_top, range_step)
+                ntile_range = list(range(range_bottom, range_top, range_step))
             else:
-                ntile_range = range(5, 100, 5)
+                ntile_range = list(range(5, 100, 5))
                 range_bottom = 5
 
             # Also take the max_rtt, as this acts as the 100 percentile

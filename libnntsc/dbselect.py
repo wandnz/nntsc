@@ -169,7 +169,7 @@ class DBSelector(DatabaseCore):
             if row is None:
                 break
             stream_dict = {}
-            for k, v in row.iteritems():
+            for k, v in row.items():
                 if k == "id":
                     continue
                 stream_dict[k] = v
@@ -341,7 +341,7 @@ class DBSelector(DatabaseCore):
 
         self.qb.add_clause("outgroup", outgroup, [])
 
-        for label, streams in labels.iteritems():
+        for label, streams in labels.items():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
                 continue
@@ -492,7 +492,7 @@ class DBSelector(DatabaseCore):
         orderclause = " ORDER BY nntsclabel, timestamp "
         self.qb.add_clause("order", orderclause, [])
 
-        for label, streams in labels.iteritems():
+        for label, streams in labels.items():
             if len(streams) == 0:
                 yield(None, label, None, None, None)
                 continue

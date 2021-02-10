@@ -459,7 +459,7 @@ class AmpTracerouteParser(AmpIcmpParser):
         maxfreq = 0
         commonpathid = -1
 
-        for pathid, pdata in streamdata['paths'].iteritems():
+        for pathid, pdata in streamdata['paths'].items():
             if pdata['count'] > maxfreq:
                 commonpathid = pathid
                 maxfreq = pdata['count']
@@ -517,14 +517,14 @@ class AmpTracerouteParser(AmpIcmpParser):
                 # Just insert the AS path
                 self._update_as_stream(asobserved, streamid, d)
 
-        for sid, streamdata in asobserved.iteritems():
+        for sid, streamdata in asobserved.items():
             self._aggregate_streamdata(streamdata)
             self.insert_aspath(sid, timestamp, streamdata)
 
         # update the last timestamp for all streams we just got data for
-        self.db.update_timestamp(self.ipdatatable, ipobserved.keys(),
+        self.db.update_timestamp(self.ipdatatable, list(ipobserved.keys()),
                 timestamp, False)
-        self.db.update_timestamp(self.asdatatable, asobserved.keys(),
+        self.db.update_timestamp(self.asdatatable, list(asobserved.keys()),
                 timestamp, False)
 
         now = int(time.time())
@@ -543,7 +543,7 @@ class AmpTracerouteParser(AmpIcmpParser):
 
     def _flush_unused_paths(self, now):
         toremove = []
-        for k, v in self.aspaths.iteritems():
+        for k, v in self.aspaths.items():
             if v[1] + PATH_FLUSH_FREQ < now:
                 toremove.append(k)
 
@@ -551,7 +551,7 @@ class AmpTracerouteParser(AmpIcmpParser):
             del self.aspaths[k]
 
         toremove = []
-        for k, v in self.paths.iteritems():
+        for k, v in self.paths.items():
             if v[1] + PATH_FLUSH_FREQ * 3 < now:
                 toremove.append(k)
 

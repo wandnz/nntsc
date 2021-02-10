@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # This file is part of NNTSC.
 #
@@ -38,10 +38,11 @@ import struct
 import sys
 import threading
 import time
-import cPickle as pickle
+import pickle
+import zlib
 from socket import *
 from multiprocessing import Queue
-import Queue as StdQueue
+import queue as StdQueue
 
 from libnntsc.dbselect import DBSelector
 from libnntsc.influx import InfluxSelector
@@ -180,7 +181,7 @@ class DBWorker(threading.Thread):
 
         if start is None or start >= now:
             # No historical data, send empty history for all streams
-            for label in labels.iterkeys():
+            for label in labels.keys():
                 err = self._enqueue_history(colid, label, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
                     return err
@@ -247,7 +248,7 @@ class DBWorker(threading.Thread):
 
         if start is None or start >= now:
             # No historical data, send empty history for all streams
-            for label in labels.iterkeys():
+            for label in labels.keys():
                 err = self._enqueue_history(colid, label, [], False, 0, now)
                 if err != DBWORKER_SUCCESS:
                     return err
@@ -287,7 +288,7 @@ class DBWorker(threading.Thread):
 
         if start >= now:
             # No historical data, send empty history for all streams
-            for label in labels.iterkeys():
+            for label in labels.keys():
                 err = self._enqueue_history(colid, label, [], False, 0, start)
                 if err != DBWORKER_SUCCESS:
                     return err
@@ -516,7 +517,7 @@ class DBWorker(threading.Thread):
 
         try:
             self.queue.put((NNTSC_QUERY_CANCELLED, header + contents), False)
-        except error, msg:
+        except error:
             log("Unable to push query cancelled message onto full worker queue")
             return DBWORKER_FULLQUEUE
         return DBWORKER_SUCCESS
@@ -524,7 +525,7 @@ class DBWorker(threading.Thread):
     def _enqueue_history(self, colid, label, history, more, freq, lastts):
 
         contents = pickle.dumps((colid, label, history, more, freq))
-        contents = contents.encode("zlib")
+        contents = zlib.compress(contents)
         header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_HISTORY, len(contents))
 
         try:
@@ -804,7 +805,7 @@ class DBWorker(threading.Thread):
         # the mode is reasonably strong -- shouldn't be much variation in
         # timestamp differences unless your measurements are patchy.
         freq = sys.maxsize
-        for td, count in freqdata['tsdiffs'].iteritems():
+        for td, count in freqdata['tsdiffs'].items():
             if count >= 0.5 * freqdata['totaldiffs']:
                 return td
 
@@ -849,10 +850,10 @@ class NNTSCClient(threading.Thread):
         self.parent = parent
         self.livequeue = queue
         self.workdone = Queue(20000)
-        self.recvbuf = ""
+        self.recvbuf = b""
         self.jobs = Queue(100000)
         self.releasedlive = Queue(100000)
-        self.outstanding = ""
+        self.outstanding = b""
         self.sockfd = sock.fileno()
 
         self.running = 0
@@ -874,7 +875,7 @@ class NNTSCClient(threading.Thread):
     def subscribe_stream(self, submsg):
         colid, start, end, columns, labels, aggs = pickle.loads(submsg)
 
-        for label, streams in labels.iteritems():
+        for label, streams in labels.items():
 
             if label not in self.waitlabels:
                 self.waitlabels[label] = streams
@@ -1000,8 +1001,8 @@ class NNTSCClient(threading.Thread):
 
         try:
             received = self.sock.recv(4096)
-        except Exception, msg:
-            log("Error receiving data from client %d: %s" % (fd, msg))
+        except Exception as e:
+            log("Error receiving data from client %d: %s" % (fd, e))
             return 0
 
         if len(received) == 0:
@@ -1069,14 +1070,14 @@ class NNTSCClient(threading.Thread):
     def transmit_client(self, result):
         try:
             fd = self.sock.fileno()
-        except error, msg:
-            log("Tried to transmit on a broken socket: %s" % (msg[1]))
+        except error as e:
+            log("Tried to transmit on a broken socket: %s" % e)
             return -1
 
         try:
             sent = self.sock.send(result)
-        except error, msg:
-            log("Error sending message to client fd %d: %s" % (fd, msg[1]))
+        except error as e:
+            log("Error sending message to client fd %d: %s" % (fd, e))
             return -1
 
         if sent == 0:
@@ -1085,7 +1086,7 @@ class NNTSCClient(threading.Thread):
         if sent < len(result):
             self.outstanding = result[sent:]
         else:
-            self.outstanding = ""
+            self.outstanding = b""
         return 0
 
 
@@ -1159,8 +1160,8 @@ class NNTSCClient(threading.Thread):
 
             try:
                 fd = self.sock.fileno()
-            except error, msg:
-                log("Client is no longer active: " % (msg[1]))
+            except error as e:
+                log("Client is no longer active: " % e)
                 break
 
             input = [self.sock]
@@ -1248,7 +1249,7 @@ class NNTSCExporter:
         # Always need these
         results = {"label":stream_id, "timestamp":timestamp}
 
-        for k, v in data.iteritems():
+        for k, v in data.items():
             if k in cols:
                 results[k] = v
 
@@ -1262,7 +1263,7 @@ class NNTSCExporter:
             end = None
 
         for s in streams:
-            if self.subscribers.has_key(s):
+            if s in self.subscribers:
                 self.subscribers[s].append((sock, columns, start, end, colid))
             else:
                 self.subscribers[s] = [(sock, columns, start, end, colid)]
@@ -1276,7 +1277,7 @@ class NNTSCExporter:
         self.sublock.acquire()
 
         for s in streams:
-            if not self.subscribers.has_key(s):
+            if s not in self.subscribers:
                 continue
 
             # Maybe consider changing this from a list to a dict?
@@ -1292,7 +1293,7 @@ class NNTSCExporter:
 
     def register_collection(self, sock, col):
         self.sublock.acquire()
-        if self.collections.has_key(col):
+        if col in self.collections:
             if sock not in self.collections[col]:
                 self.collections[col][sock] = 0
         else:
@@ -1321,8 +1322,8 @@ class NNTSCExporter:
 
         active = {}
         self.clientlock.acquire()
-        for sock, subbed in self.collections[collid].iteritems():
-            if sock not in self.clients.keys():
+        for sock, subbed in self.collections[collid].items():
+            if sock not in list(self.clients.keys()):
                 continue
             if subbed == 0:
                 active[sock] = subbed
@@ -1367,7 +1368,7 @@ class NNTSCExporter:
                 len(ns_data))
 
         self.sublock.acquire()
-        if coll_id not in self.collections.keys():
+        if coll_id not in list(self.collections.keys()):
             self.sublock.release()
             return 0
 
@@ -1382,8 +1383,8 @@ class NNTSCExporter:
         active = {}
 
         self.clientlock.acquire()
-        for sock, subbed in self.collections[coll_id].iteritems():
-            if sock not in self.clients.keys():
+        for sock, subbed in self.collections[coll_id].items():
+            if sock not in list(self.clients.keys()):
                 continue
             try:
                 self.clients[sock]['queue'].put((header, ns_data), True, 10)
@@ -1419,7 +1420,7 @@ class NNTSCExporter:
 
         self.sublock.acquire()
         self.clientlock.acquire()
-        if stream_id in self.subscribers.keys():
+        if stream_id in list(self.subscribers.keys()):
             active = []
 
             for sock, columns, start, end, col in self.subscribers[stream_id]:
@@ -1445,7 +1446,7 @@ class NNTSCExporter:
                 header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE,
                         len(contents))
 
-                if sock in self.clients.keys():
+                if sock in list(self.clients.keys()):
                     try:
                         self.clients[sock]['queue'].put((header, contents, timestamp), True, 10)
                     except StdQueue.Full:
@@ -1471,7 +1472,7 @@ class NNTSCExporter:
                 header = struct.pack(nntsc_hdr_fmt, 1, NNTSC_LIVE,
                         len(contents))
 
-                if s in self.clients.keys():
+                if s in list(self.clients.keys()):
                     try:
                         self.clients[s]['queue'].put((header, contents, timestamp), True, 10)
                     except StdQueue.Full:
@@ -1531,26 +1532,26 @@ class NNTSCExporter:
 
         try:
             s = socket(AF_INET, SOCK_STREAM)
-        except error, msg:
-            log("Failed to create socket: %s" % (msg[1]))
+        except error as e:
+            log("Failed to create socket: %s" % e)
             return -1
 
         try:
             s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
-        except error, msg:
-            log("Failed to set SO_REUSEADDR: %s" % (msg[1]))
+        except error as e:
+            log("Failed to set SO_REUSEADDR: %s" % e)
             return -1
 
         try:
             s.bind((address, port))
-        except error, msg:
-            log("Failed to bind to %s:%d: %s" % (address, port, msg[1]))
+        except error as e:
+            log("Failed to bind to %s:%d: %s" % (address, port, e))
             return -1
 
         try:
             s.listen(5)
-        except error, msg:
-            log("Failed to listen on port %d: %s" % (port, msg[1]))
+        except error as e:
+            log("Failed to listen on port %d: %s" % (port, e))
             return -1
 
         return s
@@ -1639,8 +1640,8 @@ class NNTSCListener(threading.Thread):
             # Accept the connection
             try:
                 client, addr = self.sock.accept()
-            except error, msg:
-                log("Error accepting connection: %s" % (msg[1]))
+            except error as e:
+                log("Error accepting connection: %s" % e)
                 break
 
             # Create a new client entry

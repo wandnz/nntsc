@@ -32,7 +32,7 @@ import pickle
 import logging
 from multiprocessing import Queue
 from threading import Thread
-import Queue as StdQueue
+import queue as StdQueue
 
 import pika
 import libnntscclient.logger as logger

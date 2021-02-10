@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # This file is part of NNTSC.
 #
@@ -61,7 +61,7 @@ class DataCollector():
 
             self.exporter.register_source(routingkey, self.queueid)
             self.processes.append(p)
-        except Exception, e:
+        except Exception:
             raise
 
     def __init__(self, config, backgrounded, exportonly, querytimeout):
@@ -170,7 +170,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.configfile is None:
-        print >> sys.stderr, "Must provide a config file using -C!"
+        print("Must provide a config file using -C!", file=sys.stderr)
         sys.exit(1)
     else:
         config = args.configfile

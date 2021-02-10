@@ -29,7 +29,7 @@
 #
 
 import time
-import cPickle
+import pickle
 import zlib
 import pylibmc
 
@@ -112,7 +112,7 @@ class StreamCache(object):
             try:
                 if key in mc:
                     fetched = mc.get(key)
-                    coldict = cPickle.loads(zlib.decompress(fetched))
+                    coldict = pickle.loads(zlib.decompress(fetched))
             except pylibmc.SomeErrors as e:
                 log("Warning: pylibmc error while fetching collection timestamps")
                 log(e)
@@ -128,7 +128,7 @@ class StreamCache(object):
     def _set_timestamps(self, db, collection, coldict, style):
         key = self._dict_cache_key(db, collection, style)
 
-        tostore = zlib.compress(cPickle.dumps(coldict), 1)
+        tostore = zlib.compress(pickle.dumps(coldict), 1)
         #print "Storing using key", key, time.time()
         with self.mcpool.reserve() as mc:
             try:

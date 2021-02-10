@@ -155,7 +155,7 @@ class AmpDnsParser(NNTSCParser):
             self.insert_data(stream_id, timestamp, dataresult)
             done[stream_id] = 0
 
-        self.db.update_timestamp(self.datatable, done.keys(), timestamp,
+        self.db.update_timestamp(self.datatable, list(done.keys()), timestamp,
                 self.have_influx)
 
 
@@ -167,17 +167,17 @@ class AmpDnsParser(NNTSCParser):
         stream = {}
         data = {}
 
-        for k, v in alldata.iteritems():
+        for k, v in alldata.items():
             if k == "results":
                 continue
             stream[k] = v
 
-        for k, v in result.iteritems():
+        for k, v in result.items():
             if k in streamkeys:
                 stream[k] = v
 
             elif k == "flags":
-                for f, fval in v.iteritems():
+                for f, fval in v.items():
                     if f in flagnames:
                         data["flag_" + f] = fval
                     else:
