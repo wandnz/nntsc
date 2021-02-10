@@ -41,6 +41,7 @@ class PidFile(object):
             fcntl.flock(self.pidfile.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except IOError:
             raise SystemExit("Already running according to " + self.path)
+        os.chmod(self.path, 0o644)
         self.pidfile.seek(0)
         self.pidfile.truncate()
         self.pidfile.write(str(os.getpid()))

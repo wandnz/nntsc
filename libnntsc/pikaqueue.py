@@ -342,7 +342,7 @@ def startPubThread(conf, key, exchange, queuename, src):
 def initExportPublisher(conf, key, exchange, queuename):
     src = Queue(200000)
     p = Thread(target=startPubThread, \
-            args=(conf, key, exchange, queuename, src))
+            args=(conf, key, exchange, queuename, src), daemon=True)
     p.start()
     publisher = PikaPubQueue(src)
 
