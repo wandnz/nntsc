@@ -1,0 +1,65 @@
+name: Packaging for Debian and Ubuntu
+
+on:
+  workflow_dispatch:
+  release:
+    types:
+      - published
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DEBEMAIL: "brendonj@waikato.ac.nz"
+  DEBFULLNAME: "Brendon Jones"
+
+jobs:
+  debian-package:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.target.distro }}:${{ matrix.target.codename }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { distro: debian, codename: jessie }
+          - { distro: debian, codename: stretch }
+          - { distro: debian, codename: buster }
+          - { distro: ubuntu, codename: xenial }
+          - { distro: ubuntu, codename: bionic }
+          - { distro: ubuntu, codename: focal }
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v2
+
+      - name: Install prereq packages
+        run: |
+          apt-get update
+          apt-get -y upgrade
+          apt-get install -y ca-certificates devscripts dpkg-dev equivs
+
+      - name: Build packages
+        run: |
+          mk-build-deps -i -r -t 'apt-get -f -y --force-yes'
+          dpkg-buildpackage -b -us -uc -rfakeroot
+
+      - name: Store packages for publishing
+        run: |
+          export DIRNAME=${{ matrix.target.distro }}_${{ matrix.target.codename }}
+          mkdir -p packages/${DIRNAME}
+          cp ../*.deb packages/${DIRNAME}/
+
+      - name: Store artifacts for checking
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{ matrix.target.distro }} ${{ matrix.target.codename }} packages
+          path: packages/
+          retention-days: 7
+
+      - name: Publish packages to cloudsmith
+        if: ${{ github.event_name == 'release' }}
+        uses: wanduow/action-cloudsmith-upload-packages@v1
+        with:
+          path: packages/
+          repo: ${{ secrets.CLOUDSMITH_OWNER }}/amp
+          username: ${{ secrets.CLOUDSMITH_USERNAME }}
+          api_key: ${{ secrets.CLOUDSMITH_API_KEY }}
