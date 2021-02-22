@@ -1,3 +1,10 @@
+nntsc (2.25-1) unstable; urgency=low
+
+  * Update to use python3 rather than python2.
+  * Fix start-stop-daemon not stopping all nntsc processes.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Mon, 22 Feb 2021 15:37:10 +1300
+
 nntsc (2.24-1) unstable; urgency=low
 
   * Add basic support for AMP SIP test data.
