@@ -257,7 +257,9 @@ class NNTSCParser(object):
         if (len(datapoints) % 2) == 1:
             return datapoints[half]
 
-        return (datapoints[half] + datapoints[half - 1]) / 2
+        # return the integer result to match the old python2 behaviour - all
+        # the schemas expect an integer for median latency values
+        return int((datapoints[half] + datapoints[half - 1]) / 2)
 
     def _add_maybe_none(self, a, b):
         if a is None:
