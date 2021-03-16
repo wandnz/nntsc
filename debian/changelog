@@ -1,3 +1,10 @@
+nntsc (2.26-1) unstable; urgency=low
+
+  * Ensure median latency is an integer.
+  * Don't check for unknown continuous queries, dropping always works.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Tue, 16 Mar 2021 14:26:08 +1300
+
 nntsc (2.25-1) unstable; urgency=low
 
   * Update to use python3 rather than python2.
