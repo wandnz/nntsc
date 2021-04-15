@@ -140,10 +140,10 @@ class AmpDnsParser(NNTSCParser):
                     return
                 self.streams[key] = stream_id
 
-            if dataresult.get('query_len', 0) > 0:
+            if dataresult.get('query_len') is not None:
                 # we sent a query, check if we got a result
                 dataresult['requests'] = 1
-                if dataresult.get('response_size', 0) > 0:
+                if dataresult.get('response_size') is not None:
                     dataresult['lossrate'] = 0.0
                 else:
                     dataresult['lossrate'] = 1.0
