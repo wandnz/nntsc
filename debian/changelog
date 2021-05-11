@@ -1,3 +1,9 @@
+nntsc (2.27-1) unstable; urgency=low
+
+  * Deal with some DNS result values that are explicitly set to None.
+
+ -- Brendon Jones <brendonj@waikato.ac.nz>  Tue, 11 May 2021 17:01:53 +1200
+
 nntsc (2.26-1) unstable; urgency=low
 
   * Ensure median latency is an integer.
