@@ -1,3 +1,9 @@
+nntsc (2.27-2) unstable; urgency=low
+
+  * Build packages for Debian Bullseye, Bookworm and Ubuntu Jammy.
+
+ -- Brendon Jones <brendon.jones@gmail.com>  Mon, 26 Feb 2024 17:28:33 +1300
+
 nntsc (2.27-1) unstable; urgency=low
 
   * Deal with some DNS result values that are explicitly set to None.
