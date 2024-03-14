@@ -48,6 +48,7 @@ class NNTSCCursor(object):
 
     def destroy(self):
         if self.cursor is not None:
+            # XXX why was this line commented out? Should it be?
             #self.cursor.close()
             self.cursor = None
 
@@ -276,6 +277,9 @@ class DatabaseCore(object):
         except DBQueryException as e:
             pass
 
+    def get_pg_version(self):
+        return self.basic.conn.server_version
+
     def _basicquery(self, query, params=None):
         while True:
             try:
@@ -405,21 +409,28 @@ class DBInsert(DatabaseCore):
     def create_aggregators(self):
         # Create a useful function to select a mode from any data
         # http://scottrbailey.wordpress.com/2009/05/22/postgres-adding-custom-aggregates-most/
+        if self.get_pg_version() <= 13:
+            arraytype = "anyarray"
+            singletype = "anyelement"
+        else:
+            arraytype = "anycompatiblearray"
+            singletype = "anycompatible"
+
         mostfunc = """
-            CREATE OR REPLACE FUNCTION _final_most(anyarray)
-                RETURNS anyelement AS
+            CREATE OR REPLACE FUNCTION _final_most(%s)
+                RETURNS %s AS
             $BODY$
                 SELECT a
                 FROM unnest($1) a
                 GROUP BY 1 ORDER BY count(1) DESC
                 LIMIT 1;
             $BODY$
-                LANGUAGE 'sql' IMMUTABLE;"""
+                LANGUAGE 'sql' IMMUTABLE;""" % (arraytype, singletype)
 
         self._basicquery(mostfunc)
 
         smokefunc = """
-            CREATE OR REPLACE FUNCTION _final_smoke(anyarray)
+            CREATE OR REPLACE FUNCTION _final_smoke(%s)
                 RETURNS numeric[] AS
             $BODY$
                 SELECT array_agg(avg)::numeric[] FROM (
@@ -430,7 +441,7 @@ class DBInsert(DatabaseCore):
                     ) as b GROUP BY ntile ORDER BY ntile
                 ) as c;
             $BODY$
-                LANGUAGE 'sql' IMMUTABLE;"""
+                LANGUAGE 'sql' IMMUTABLE;""" % (arraytype)
 
         self._basicquery(smokefunc)
 
@@ -442,12 +453,12 @@ class DBInsert(DatabaseCore):
         # _final_most to multiple rows of data
         if self.basic.cursor.rowcount == 0:
             aggfunc = """
-                CREATE AGGREGATE most(anyelement) (
+                CREATE AGGREGATE most(%s) (
                     SFUNC=array_append,
-                    STYPE=anyarray,
+                    STYPE=%s,
                     FINALFUNC=_final_most,
                     INITCOND='{}'
-                );"""
+                );""" % (singletype, arraytype)
             self._basicquery(aggfunc)
 
         self._basicquery(
@@ -455,12 +466,12 @@ class DBInsert(DatabaseCore):
 
         if self.basic.cursor.rowcount == 0:
             aggfunc = """
-                CREATE AGGREGATE smokearray(anyarray) (
+                CREATE AGGREGATE smokearray(%s) (
                 SFUNC=array_cat,
-                STYPE=anyarray,
+                STYPE=%s,
                 FINALFUNC=_final_smoke,
                 INITCOND='{}'
-            );"""
+            );""" % (arraytype, arraytype)
             self._basicquery(aggfunc)
 
         self._basicquery(
@@ -787,6 +798,7 @@ class DBInsert(DatabaseCore):
         return newid
 
     def custom_insert(self, customsql, values):
+        # XXX investigate here too for broken traceroute insertion?
         self._dataquery(customsql, values)
         result = self.data.cursor.fetchone()
         return result
