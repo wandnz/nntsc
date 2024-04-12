@@ -156,8 +156,8 @@ class AmpModule:
         if port == "NNTSCConfigMissing":
             port = "5672"
         ssl = get_nntsc_config_bool(nntsc_config, "amp", "ssl")
-        if ssl == "NNTSCConfigMissing":
-            ssl = False
+        if ssl != "NNTSCConfigMissing" and ssl != False:
+            logger.log("SSL temporarily disabled for transition to newer pika")
         queue = get_nntsc_config(nntsc_config, "amp", "queue")
         if queue == "NNTSCConfigMissing":
             queue = "amp-nntsc"
@@ -168,14 +168,14 @@ class AmpModule:
         else:
             self.commitfreq = int(self.commitfreq)
 
-        if "NNTSCConfigError" in [username, password, host, port, ssl, queue]:
+        if "NNTSCConfigError" in [username, password, host, port, queue]:
             logger.log("Failed to configure AMP source")
             sys.exit(1)
 
-        logger.log("Connecting to RabbitMQ queue %s on host %s:%s (ssl=%s), username %s" % (queue, host, port, ssl, username))
+        logger.log("Connecting to RabbitMQ queue %s on host %s:%s, username %s" % (queue, host, port, username))
 
         self.source = PikaConsumer('', queue, host, port,
-                ssl, username, password, True)
+                username, password, True)
 
 
     def process_data(self, channel, method, properties, body):

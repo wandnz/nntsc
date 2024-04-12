@@ -10,7 +10,7 @@ Homepage: http://wand.net.nz/projects/details/storage-network-monitoring-and-mea
 
 Package: nntsc
 Architecture: all
-Depends: ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}, influxdb (>= 1.0.2), rabbitmq-server (>= 3.1.5), libnntsc-client (>= 1.9), postgresql, postgresql-client, amplet2-server (>= 0.11.3), python3-ampsave, python3-influxdb (>= 2.12.0), adduser, python3-daemon, lsb-base
+Depends: ${shlibs:Depends}, ${misc:Depends}, ${python3:Depends}, influxdb (>= 1.0.2), rabbitmq-server (>= 3.1.5), libnntsc-client (>= 1.9), postgresql, postgresql-client, amplet2-server (>= 0.11.3), python3-ampsave, python3-influxdb (>= 2.12.0), adduser, python3-daemon, lsb-base, python3-pika (>= 1.2.0)
 Description: Collects, stores and examines network time series data
  NNTSC is a system designed for collecting, storing and examining network
  time series data. Unlike RRDs, NNTSC does not attempt to aggregate

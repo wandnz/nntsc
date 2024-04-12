@@ -58,13 +58,12 @@ class PikaReconnectionException(Exception):
         return "Pika Disconnection: try to reconnect"
 
 class PikaBasicAsync(object):
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword,
+    def __init__(self, exchange, queuename, host, port, user, pword,
             durable):
         self._connection = None
         self._channel = None
         self._host = host
         self._port = port
-        self._ssl = ssl
         self._credentials = pika.PlainCredentials(user, pword)
         self._exchangename = exchange
         self._closing = False
@@ -73,19 +72,18 @@ class PikaBasicAsync(object):
 
         logging.basicConfig()
 
-    def _pikaConnect(self, host, port, ssl, creds):
+    def _pikaConnect(self, host, port, creds):
         connection = pika.SelectConnection(
                 pika.ConnectionParameters(host=host,
                         port=int(port),
-                        ssl=ssl,
                         credentials=creds,
                         retry_delay=5,
-                        connection_attempts=25), self._pikaConnectionOpen,
-                        stop_ioloop_on_close=False)
+                        connection_attempts=25),
+                        self._pikaConnectionOpen)
         return connection
 
     def connect(self):
-        self._connection = self._pikaConnect(self._host, self._port, self._ssl,
+        self._connection = self._pikaConnect(self._host, self._port,
                 self._credentials)
 
     def reconnect(self):
@@ -123,21 +121,26 @@ class PikaBasicAsync(object):
         self._channel.add_on_close_callback(self._pikaChannelClosed)
 
         if self._exchangename != '':
-            self._channel.exchange_declare(self._pikaExchangeDeclared,
+            self._channel.exchange_declare(
                     exchange=self._exchangename,
-                    exchange_type='direct')
+                    exchange_type='direct',
+                    callback=self._pikaExchangeDeclared)
         else:
-            self._channel.queue_declare(self._pikaQueueDeclared,
-                    self._queuename, durable=self._durable)
+            self._channel.queue_declare(
+                    queue=self._queuename,
+                    durable=self._durable,
+                    callback=self._pikaQueueDeclared)
 
-    def _pikaChannelClosed(self, channel, replycode, replytext):
-        logger.log("Pika Channel was closed: %s %s" % (replycode, replytext))
+    def _pikaChannelClosed(self, channel, reason):
+        logger.log("Pika Channel was closed: %s" % reason)
         #if not self._closing:
         self._connection.close()
 
     def _pikaExchangeDeclared(self, unused):
-        self._channel.queue_declare(self._pikaQueueDeclared, self._queuename,
-                durable=self._durable)
+        self._channel.queue_declare(
+                queue=self._queuename,
+                durable=self._durable,
+                callback=self._pikaQueueDeclared)
 
     def _pikaQueueDeclared(self, methodframe):
         return
@@ -152,10 +155,10 @@ class PikaBasicAsync(object):
 
 class PikaPublisher(PikaBasicAsync):
 
-    def __init__(self, exchange, queuename, key, host, port, ssl, user, pword,
+    def __init__(self, exchange, queuename, key, host, port, user, pword,
             sourcequeue, durable=True):
         super(PikaPublisher, self).__init__(exchange, queuename, host, port,
-                ssl, user, pword, durable)
+                user, pword, durable)
         self._pubkey = key
         self._halted = False
         self._stopping = False
@@ -173,8 +176,11 @@ class PikaPublisher(PikaBasicAsync):
 
 
     def _pikaQueueDeclared(self, unused):
-        self._channel.queue_bind(self._pikaQueueBound, self._queuename,
-                self._exchangename, self._pubkey)
+        self._channel.queue_bind(
+                queue=self._queuename,
+                exchange=self._exchangename,
+                routing_key=self._pubkey,
+                callback=self._pikaQueueBound)
 
     def _pikaQueueBound(self, unused):
         logger.log("Ready to start publishing")
@@ -237,10 +243,10 @@ class PikaPubQueue(object):
 
 
 class PikaConsumer(PikaBasicAsync):
-    def __init__(self, exchange, queuename, host, port, ssl, user, pword,
+    def __init__(self, exchange, queuename, host, port, user, pword,
             durable=True):
         super(PikaConsumer, self).__init__(exchange, queuename, host, port,
-                ssl, user, pword, durable)
+                user, pword, durable)
         self._consumer_tag = None
         self._unbound = []
         self._keys = []
@@ -251,7 +257,9 @@ class PikaConsumer(PikaBasicAsync):
     def halt_consumer(self):
         self._closing = True
         if self._channel:
-            self._channel.basic_cancel(self._pikaCancelled, self._consumer_tag)
+            self._channel.basic_cancel(
+                    consumer_tag=self._consumer_tag,
+                    callback=self._pikaCancelled)
 
         # This will cause the IO loop to restart and close our connection
         # to rabbitMQ nicely
@@ -279,8 +287,11 @@ class PikaConsumer(PikaBasicAsync):
             return 0
 
         nextkey = self._unbound[0]
-        self._channel.queue_bind(self._pikaQueueBound, self._queuename,
-                self._exchangename, nextkey)
+        self._channel.queue_bind(
+                queue=self._queuename,
+                exchange=self._exchangename,
+                routing_key=nextkey,
+                callback=self._pikaQueueBound)
         self._unbound = self._unbound[1:]
         return 1
 
@@ -289,8 +300,10 @@ class PikaConsumer(PikaBasicAsync):
             self._channel.basic_qos(prefetch_count=self._prefetch)
         self._channel.add_on_cancel_callback(self._pikaCancelled)
         logger.log("Started consuming from %s" % (self._queuename))
-        self._consumer_tag = self._channel.basic_consume(self.callback,
-                self._queuename, self.noack)
+        self._consumer_tag = self._channel.basic_consume(
+                queue=self._queuename,
+                on_message_callback=self.callback,
+                auto_ack=self.noack)
 
 
     def configure(self, keys, callback, prefetch, noack=False):
@@ -326,7 +339,7 @@ def startPubThread(conf, key, exchange, queuename, src):
         return None
 
     exporter = PikaPublisher(exchange, queuename, key, 'localhost', port,
-            False, username, password, src, False)
+            username, password, src, False)
     if exporter is None:
         logger.log("Failed to create live exporter for %s -- no live export will occur" % (queuename))
 
@@ -354,7 +367,7 @@ def initExportConsumer(conf, queuename, exchange):
     if username is None:
         return None
 
-    consumer = PikaConsumer(exchange, queuename, 'localhost', port, False,
+    consumer = PikaConsumer(exchange, queuename, 'localhost', port,
             username, password, False)
     if consumer is None:
         logger.log("Failed to create live consumer for %s -- no live export will occur" % (queuename))

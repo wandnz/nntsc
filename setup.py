@@ -37,7 +37,7 @@ except ImportError:
         from distutils.core import setup
 
 requires = [
-        'rrdtool', 'psycopg2>=2.5', 'pika>=0.9.12,<0.11.0', 'daemon',
+        'rrdtool', 'psycopg2>=2.5', 'pika>=1.2.0', 'daemon',
 	'libnntsc-client', 'pylibmc', 'influxdb>=2.12.0', 'requests'
 ]
 
