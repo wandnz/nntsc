@@ -1,3 +1,10 @@
+nntsc (2.28-1) unstable; urgency=low
+
+  * Update functions to work with postgres 14.
+  * Update to work with python3-pika 1.2.0.
+
+ -- Brendon Jones <brendon.jones@gmail.com>  Thu,  9 May 2024 21:54:10 +1200
+
 nntsc (2.27-2) unstable; urgency=low
 
   * Build packages for Debian Bullseye, Bookworm and Ubuntu Jammy.
