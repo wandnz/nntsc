@@ -1,3 +1,9 @@
+nntsc (2.28-2) unstable; urgency=low
+
+  * Build packages for Ubuntu Noble.
+
+ -- Brendon Jones <brendon.jones@gmail.com>  Fri,  4 Jul 2025 21:50:29 +1200
+
 nntsc (2.28-1) unstable; urgency=low
 
   * Update functions to work with postgres 14.
