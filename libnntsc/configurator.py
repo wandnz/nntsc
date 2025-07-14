@@ -34,7 +34,7 @@ import libnntscclient.logger as logger
 
 def load_nntsc_config(filename):
     # load in config file with database settings
-    nntsc_config = configparser.SafeConfigParser()
+    nntsc_config = configparser.ConfigParser()
 
     # add some default values
     nntsc_config.add_section('multicast')
