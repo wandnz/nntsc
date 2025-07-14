@@ -20,7 +20,6 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { distro: debian, codename: buster }
           - { distro: debian, codename: bullseye }
           - { distro: debian, codename: bookworm }
           - { distro: ubuntu, codename: focal }
