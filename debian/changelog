@@ -1,3 +1,10 @@
+nntsc (2.29-1) unstable; urgency=low
+
+  * Use ConfigParser rather than the deprecated SafeConfigParser.
+  * No longer build packages for Debian Buster.
+
+ -- Brendon Jones <brendon.jones@gmail.com>  Wed, 23 Jul 2025 21:34:04 +1200
+
 nntsc (2.28-2) unstable; urgency=low
 
   * Build packages for Ubuntu Noble.
